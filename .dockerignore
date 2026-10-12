@@ -1,0 +1,10 @@
+.venv/
+.env
+uploads/*
+.pytest_cache/
+__pycache__/
+*.pyc
+tests/
+.git/
+cloudrun.env.yaml
+.gcloudignore

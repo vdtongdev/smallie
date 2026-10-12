@@ -1,0 +1,39 @@
+[project]
+name = "smallie"
+version = "0.1.0"
+description = "LangChain agents for document Q&A and natural-language database queries (EN/VI)"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "langchain>=1.4",
+    "langchain-openai>=1.7",
+    "langchain-text-splitters>=1.1",
+    "openai>=2.0",
+    "langchain-postgres>=0.0.19",
+    "langgraph>=1.2",
+    "langgraph-checkpoint-postgres>=3.1",
+    "psycopg[binary,pool]>=3.3",
+    "sqlalchemy>=2.1",
+    "pypdf>=6.0",
+    "docx2txt>=0.9",
+    "fastapi>=0.140",
+    "uvicorn>=0.54",
+    "python-multipart>=0.0.20",
+    "itsdangerous>=2.2",
+    "pydantic-settings>=2.10",
+    "yfinance>=1.7.0",
+    "tzdata>=2026.5",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4",
+    "pytest-asyncio>=1.2",
+    "httpx>=0.28",
+    "python-docx>=1.2",
+    "reportlab>=4.4",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

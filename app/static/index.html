@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>smallie</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">smallie</div>
+    <div class="actions">
+      <span id="userName" class="user-name" hidden></span>
+      <button id="readmeBtn" class="ghost" data-i18n="readme"></button>
+      <button id="adminBtn" class="ghost" data-i18n="accounts" hidden></button>
+      <button id="langBtn" class="ghost" title="Language / Ngôn ngữ"></button>
+      <button id="logoutBtn" class="ghost" data-i18n="logout" hidden></button>
+    </div>
+  </header>
+
+  <section id="loginView" class="login" hidden>
+    <form id="loginForm" class="login-card">
+      <h1>smallie</h1>
+      <label for="loginUsername" data-i18n="username"></label>
+      <input id="loginUsername" autocomplete="username" autocapitalize="none" required>
+      <label for="password" data-i18n="password"></label>
+      <input id="password" type="password" autocomplete="current-password" required>
+      <p id="loginError" class="login-error" role="alert" hidden data-i18n="wrongLogin"></p>
+      <button class="primary" type="submit" data-i18n="login"></button>
+      <button id="showSignupBtn" class="link" type="button" data-i18n="noAccount"></button>
+    </form>
+
+    <form id="signupForm" class="login-card" hidden>
+      <h1 data-i18n="createAccount"></h1>
+      <label for="signupName" data-i18n="name"></label>
+      <input id="signupName" autocomplete="name" maxlength="80" required>
+      <label for="signupUsername" data-i18n="username"></label>
+      <input id="signupUsername" autocomplete="username" autocapitalize="none" required
+             minlength="3" maxlength="32" pattern="[A-Za-z0-9_\-]{3,32}">
+      <small class="muted" data-i18n="usernameHint"></small>
+      <label for="signupPassword" data-i18n="password"></label>
+      <input id="signupPassword" type="password" autocomplete="new-password" minlength="8" maxlength="128" required>
+      <small class="muted" data-i18n="passwordHint"></small>
+      <p id="signupError" class="login-error" role="alert" hidden></p>
+      <button class="primary" type="submit" data-i18n="createAccount"></button>
+      <button id="showLoginBtn" class="link" type="button" data-i18n="haveAccount"></button>
+    </form>
+  </section>
+
+  <div id="appView" class="layout" hidden>
+    <aside class="sidebar">
+      <button id="newChatBtn" class="primary" data-i18n="newChat"></button>
+      <ul id="conversationList" class="conversation-list"></ul>
+    </aside>
+
+    <main class="main">
+      <div id="chatView" class="view">
+        <section id="docsPanel" class="docs-panel">
+          <label class="upload">
+            <input id="fileInput" type="file" accept=".pdf,.docx" multiple hidden>
+            <span data-i18n="upload"></span>
+          </label>
+          <ul id="documentList" class="document-list"></ul>
+        </section>
+
+        <section id="messages" class="messages" aria-live="polite"></section>
+
+        <form id="chatForm" class="composer">
+          <textarea id="input" rows="1" required></textarea>
+          <button id="sendBtn" class="primary" type="submit" data-i18n="send"></button>
+        </form>
+      </div>
+    </main>
+  </div>
+
+  <dialog id="readmeDialog" class="readme-dialog">
+    <form method="dialog" class="dialog-close"><button class="icon-btn" data-i18n-title="close">×</button></form>
+    <article class="readme">
+      <div data-lang="en">
+        <h1>How to use smallie</h1>
+        <p>smallie is a chat assistant with two specialists. You just ask; it picks the right one for each message
+          and shows which one answered above the reply.</p>
+        <ul>
+          <li><strong>Documents agent</strong> answers from the PDF and Word files you upload, and cites the file and page.</li>
+          <li><strong>Database agent</strong> answers from a database of 200 popular stocks
+            by writing and running read-only SQL. Expand <em>Used tool</em> above an answer to see the query it ran.</li>
+        </ul>
+        <p>Write in English or Vietnamese; answers come back in the language you used.</p>
+
+        <h2>Ask about your documents</h2>
+        <ol>
+          <li>Click <strong>Upload PDF / DOCX</strong> and choose one or more files (up to 25 MB each).</li>
+          <li>Wait until the file shows <em>ready</em>. Indexing takes a few seconds to a minute.</li>
+          <li>Ask a question. Click an example to put it in the message box:</li>
+        </ol>
+        <div class="examples">
+          <button class="example">Summarize the main points of my documents.</button>
+          <button class="example">What does the contract say about termination?</button>
+        </div>
+        <p class="muted">Only you can see your files. Remove one with the × next to its name.</p>
+
+        <h2>Ask about stocks</h2>
+        <p>The stock database covers 200 widely held stocks (Apple, Microsoft, NVIDIA, Tesla, JPMorgan, Coca-Cola…) with:</p>
+        <ul>
+          <li>company profile and key stats: sector, industry, market cap, P/E, EPS, dividend yield, beta, 52-week range, revenue, profit margin;</li>
+          <li>daily prices for about 5 years: open, high, low, close, adjusted close and volume.</li>
+        </ul>
+        <p class="market-status"></p>
+        <div class="examples">
+          <button class="example">What are the 10 largest companies by market cap?</button>
+          <button class="example">How did NVDA, AMD and INTC perform over the last 12 months?</button>
+          <button class="example">Which stocks gained the most on the latest trading day?</button>
+          <button class="example">Compare the average P/E ratio by sector.</button>
+          <button class="example">Show Apple's closing price at the end of each month this year.</button>
+        </div>
+        <p class="muted">Prices are end-of-day data from Yahoo Finance, not live quotes. They update automatically every weekday
+          evening after the US market closes. This is not financial advice.</p>
+
+        <h2>Chats and memory</h2>
+        <ul>
+          <li><strong>+ New chat</strong> starts a fresh conversation. Earlier chats are in the sidebar; one conversation can mix document and stock questions.</li>
+          <li>Follow-ups work: "and over 3 years?", "show that as a table".</li>
+          <li>smallie remembers durable facts you tell it (your name, role, preferred answer style) and can look back at
+            your earlier chats, so you don't have to repeat yourself. Deleting a chat removes it from that history.</li>
+          <li>Everyone has their own account: your chats, files and memories are visible only to you.</li>
+        </ul>
+
+        <h2>Tips</h2>
+        <ul>
+          <li>Name what you want: a company or ticker, a time range, the number of results.</li>
+          <li>If the wrong agent answers, say it outright, e.g. "according to my documents…" or "from the stock database…".</li>
+          <li>Each question takes a few AI calls. If you see a rate-limit message, wait a minute and try again.</li>
+        </ul>
+      </div>
+
+      <div data-lang="vi">
+        <h1>Hướng dẫn sử dụng smallie</h1>
+        <p>smallie là trợ lý trò chuyện với hai chuyên gia. Bạn chỉ cần hỏi; ứng dụng tự chọn chuyên gia phù hợp cho từng
+          tin nhắn và hiển thị chuyên gia đã trả lời phía trên câu trả lời.</p>
+        <ul>
+          <li><strong>Trợ lý tài liệu</strong> trả lời dựa trên các tệp PDF và Word bạn tải lên, kèm trích dẫn tên tệp và số trang.</li>
+          <li><strong>Trợ lý cơ sở dữ liệu</strong> trả lời dựa trên cơ sở dữ liệu 200 cổ phiếu phổ biến
+            bằng cách viết và chạy câu lệnh SQL chỉ đọc. Mở mục <em>Đã dùng công cụ</em> phía trên câu trả lời để xem câu lệnh đã chạy.</li>
+        </ul>
+        <p>Bạn có thể viết bằng tiếng Việt hoặc tiếng Anh; câu trả lời sẽ dùng ngôn ngữ bạn đã viết.</p>
+
+        <h2>Hỏi về tài liệu của bạn</h2>
+        <ol>
+          <li>Bấm <strong>Tải lên PDF / DOCX</strong> và chọn một hoặc nhiều tệp (tối đa 25 MB mỗi tệp).</li>
+          <li>Chờ đến khi tệp hiện <em>sẵn sàng</em>. Việc xử lý mất từ vài giây đến một phút.</li>
+          <li>Đặt câu hỏi. Bấm vào một ví dụ để đưa nó vào ô soạn tin:</li>
+        </ol>
+        <div class="examples">
+          <button class="example">Tóm tắt các ý chính trong tài liệu của tôi.</button>
+          <button class="example">Hợp đồng quy định gì về việc chấm dứt?</button>
+        </div>
+        <p class="muted">Chỉ bạn mới thấy được tệp của mình. Xoá tệp bằng dấu × bên cạnh tên tệp.</p>
+
+        <h2>Hỏi về cổ phiếu</h2>
+        <p>Cơ sở dữ liệu gồm 200 cổ phiếu được nắm giữ nhiều nhất (Apple, Microsoft, NVIDIA, Tesla, JPMorgan, Coca-Cola…) với:</p>
+        <ul>
+          <li>hồ sơ công ty và chỉ số chính: ngành, lĩnh vực, vốn hoá, P/E, EPS, tỷ suất cổ tức, beta, biên độ 52 tuần, doanh thu, biên lợi nhuận;</li>
+          <li>giá theo ngày trong khoảng 5 năm: mở cửa, cao nhất, thấp nhất, đóng cửa, giá đóng cửa điều chỉnh và khối lượng.</li>
+        </ul>
+        <p class="market-status"></p>
+        <div class="examples">
+          <button class="example">10 công ty có vốn hoá lớn nhất là những công ty nào?</button>
+          <button class="example">NVDA, AMD và INTC biến động thế nào trong 12 tháng qua?</button>
+          <button class="example">Cổ phiếu nào tăng mạnh nhất trong phiên gần nhất?</button>
+          <button class="example">So sánh P/E trung bình theo từng ngành.</button>
+          <button class="example">Giá đóng cửa cuối mỗi tháng của Apple trong năm nay.</button>
+        </div>
+        <p class="muted">Giá là dữ liệu cuối ngày từ Yahoo Finance, không phải giá trực tiếp. Dữ liệu tự động cập nhật vào mỗi tối
+          ngày làm việc, sau khi thị trường Mỹ đóng cửa. Đây không phải lời khuyên đầu tư.</p>
+
+        <h2>Cuộc trò chuyện và ghi nhớ</h2>
+        <ul>
+          <li><strong>+ Cuộc trò chuyện mới</strong> bắt đầu một cuộc trò chuyện mới. Các cuộc trước nằm ở thanh bên; một cuộc trò chuyện có thể hỏi cả về tài liệu lẫn cổ phiếu.</li>
+          <li>Có thể hỏi tiếp: "còn 3 năm thì sao?", "hiển thị dạng bảng".</li>
+          <li>smallie ghi nhớ những thông tin lâu dài bạn chia sẻ (tên, vai trò, cách trả lời bạn thích) và có thể xem lại
+            các cuộc trò chuyện trước, nên bạn không cần nhắc lại. Xoá một cuộc trò chuyện sẽ xoá nó khỏi lịch sử đó.</li>
+          <li>Mỗi người có tài khoản riêng: cuộc trò chuyện, tệp và ghi nhớ của bạn chỉ mình bạn thấy được.</li>
+        </ul>
+
+        <h2>Mẹo</h2>
+        <ul>
+          <li>Nói rõ điều bạn cần: tên công ty hoặc mã cổ phiếu, khoảng thời gian, số lượng kết quả.</li>
+          <li>Nếu chọn nhầm trợ lý, hãy nói rõ, ví dụ "theo tài liệu của tôi…" hoặc "từ cơ sở dữ liệu cổ phiếu…".</li>
+          <li>Mỗi câu hỏi cần vài lượt gọi AI. Nếu gặp thông báo giới hạn tần suất, hãy chờ một phút rồi thử lại.</li>
+        </ul>
+      </div>
+    </article>
+  </dialog>
+
+  <dialog id="adminDialog">
+    <h2 data-i18n="accountsTitle"></h2>
+    <p id="accountCount" class="muted"></p>
+    <ul id="accountList" class="dialog-list account-list"></ul>
+    <form method="dialog"><button class="primary" data-i18n="close"></button></form>
+  </dialog>
+
+  <script src="i18n.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

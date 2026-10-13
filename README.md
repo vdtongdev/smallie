@@ -1,5 +1,4 @@
-# smallie
-https://smallie-976519788978.asia-southeast1.run.app/
+# [smallie](https://smallie-976519788978.asia-southeast1.run.app/)
 
 Two LangChain agents behind a FastAPI app with a small web UI. You type into one chat, and a router picks the right agent for each message:
 

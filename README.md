@@ -1,13 +1,13 @@
 # [smallie](https://smallie-976519788978.asia-southeast1.run.app/)
 
-Two LangChain agents behind a FastAPI app with a small web UI. You type into one chat, and a router picks the right agent for each message:
+LangChain agents behind a FastAPI app with a small web UI. You type into one chat, and a router picks the right agent for each message. There are two agents today, and the code is laid out so more can be added (see "Adding an agent" below):
 
 - **Documents**: upload PDF/DOCX files and ask questions about them. Answers cite the file and page.
 - **Database**: ask questions in plain language about a stock database (200 popular stocks loaded from Yahoo Finance with `yfinance`). The agent writes and runs read-only SQL.
 
 The **Readme** button in the header explains how to use the app, with example questions.
 
-Both agents understand and reply in **English and Vietnamese**. They remember each conversation and keep **long-term memories about the user across all chats**. They can also look back at your earlier chats. Memories are managed by the agents; the UI has no memory list (`GET/DELETE /api/memories` still exist).
+All agents understand and reply in **English and Vietnamese**. They remember each conversation and keep **long-term memories about the user across all chats**. They can also look back at your earlier chats. Memories are managed by the agents; the UI has no memory list (`GET/DELETE /api/memories` still exist).
 
 ## Prerequisites (install once)
 
@@ -28,7 +28,7 @@ Both agents understand and reply in **English and Vietnamese**. They remember ea
   ```
   WSL stops Postgres when the distro shuts down. Before working on the app, start it from Windows with:
   `wsl -d Ubuntu -u root service postgresql start`
-- **Docker.** Run `docker compose up -d`.
+- **Docker.** Run `docker compose up -d`. This is the alternative to WSL; the current local setup uses WSL, and Docker isn't needed for anything else locally (the Cloud Run image is built by Cloud Build).
 
 **2. App.** Run these on Windows:
 ```powershell
@@ -105,16 +105,22 @@ app/
   orchestration/  router graph: START -> router -> one agent (as a subgraph) -> END
   api/            FastAPI app and shared routes: chat (SSE streaming), conversations, memories, agents, admin
   static/         plain HTML/JS UI with an EN/VI toggle
-db/init/          extension, read-only role, market schema (run on first `docker compose up`)
+db/init/          extension, read-only role, market schema (loaded by db/setup_wsl.sh or on first `docker compose up`)
 Dockerfile        container image for Cloud Run (.gcloudignore / .dockerignore keep secrets out)
 scripts/          load_stocks.py (fill/refresh stock data), reindex.py (after changing the embedding model)
 ```
 
 **Routing**
-- Every message goes to `POST /api/chat/auto`. The router node first checks whether you have uploaded documents. If you have none, the message goes straight to the database agent. Otherwise one short model call sees your file names, the last few turns and your message, and answers `docs` or `sql`. Follow-ups stay with the previous agent unless the topic changes.
-- Both agents are subgraphs on the same conversation thread, so one chat can switch between them and each sees the whole history. The UI shows which agent answered each turn.
-- `POST /api/chat/docs` and `/api/chat/sql` skip the router and force one agent (API only).
-- Adding an agent means one new package under `app/agents/` and one line in `app/agents/registry.py`; see "Adding an agent or workflow" in CLAUDE.md.
+- Every message goes to `POST /api/chat/auto`. The router (`app/orchestration/router.py`) works from the agent list in `app/agents/registry.py`, and only offers the agents that have something for you. With no uploaded documents, only the database agent is left, so the message goes straight there.
+- If the message clearly points to one agent (e.g. "stock", a known ticker, one of your file names), it goes there without a model call. Otherwise one short model call sees each agent's description, your file names, the last few turns and your message, and answers with an agent name (`docs` or `sql`). Follow-ups stay with the previous agent unless the topic changes.
+- Agents are subgraphs on the same conversation thread, so one chat can switch between them and each sees the whole history. The UI shows which agent answered each turn; badge labels (EN/VI) come from `GET /api/agents`.
+- `POST /api/chat/<agent>` (`/api/chat/docs`, `/api/chat/sql`) skips the router and forces that agent (API only). An unknown agent name returns 404.
+
+**Adding an agent**
+- An agent is a package under `app/agents/<name>/`: `tools.py`, `prompts.py`, and `agent.py`, which builds the agent and defines its `SPEC` (route name, router description, UI labels, hint words). Add the `SPEC` to `AGENTS` in `app/agents/registry.py`. The router, chat API and UI pick it up with no other changes.
+- A multi-step workflow (e.g. a researcher feeding a report writer) is added the same way; its `build` returns a small graph instead of a single agent.
+- If the agent needs its own data (tables, ingestion, API routes, background jobs), add a feature under `app/features/<name>/` and register it in `app/features/registry.py`.
+- The full checklist is in CLAUDE.md ("Adding an agent or workflow").
 
 **Memory**
 - *Within a chat:* every message is checkpointed in Postgres (`thread_id` = conversation id), so chats survive restarts.
@@ -177,7 +183,7 @@ The app runs as a container on **Cloud Run** (free tier, scales to zero). All da
 gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=smallie" --limit 50 --freshness 1h
 ```
 
-**Limits:** the first request after ~15 min idle cold-starts the container (10–20 s). The OpenRouter free quota is shared by everyone using the deployment. The image is stored in Artifact Registry (0.5 GB free; delete old images if you redeploy often).
+**Limits:** the first request after ~15 min idle cold-starts the container (10–20 s). The OpenRouter free quota is shared by everyone using the deployment. The image is stored in Artifact Registry as `asia-southeast1-docker.pkg.dev/smallie-review/cloud-run-source-deploy/smallie` (0.5 GB free; delete old images if you redeploy often). Neon only hosts the database; a deploy never touches it unless the schema changes.
 
 ## Using your own database
 

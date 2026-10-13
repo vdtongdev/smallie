@@ -14,7 +14,7 @@ Layout of `app/`: `core/` (config, llm, db, memory, auth, accounts, conversation
 
 ## Commands
 
-Development is on Windows with `uv`. Postgres (pgvector) runs on **port 5433**, either in WSL (`db/setup_wsl.sh`; start it with `wsl -d Ubuntu -u root service postgresql start`) or via `docker compose up -d`.
+Development is on Windows with `uv`. Postgres (pgvector) runs on **port 5433** directly in WSL (`db/setup_wsl.sh`; start it with `wsl -d Ubuntu -u root service postgresql start`; it stops when WSL idles, so start it again before running DB tests). Local development doesn't use Docker; `docker compose up -d` is only an alternative setup, and no local `docker build` is needed before deploying.
 
 ```powershell
 uv sync                                            # install deps into .venv
@@ -74,7 +74,7 @@ A multi-step workflow (e.g. researcher → report writer) is one entry: `build` 
 - Every DB connection must survive a Postgres restart (WSL stops Postgres when the distro shuts down): SQLAlchemy engines (including PGVector's, via `engine_args`) use `pool_pre_ping=True`, and the LangGraph pool uses `check=AsyncConnectionPool.check_connection` plus TCP keepalives. Don't go back to `from_conn_string`, which holds one connection that never reconnects.
 - Deployment: Google Cloud Run (project `smallie-review`, region `asia-southeast1`, https://smallie-976519788978.asia-southeast1.run.app) + Neon Postgres 18 (Singapore). Steps are in README "Deploying".
   - `Dockerfile`: python:3.12-slim + uv, non-root `user` (the app dir is created and chowned before `USER`, otherwise `uv sync` can't create `.venv`), listens on `$PORT`, no `--loop` flag (Linux).
-  - Built by Cloud Build via `--source .`; `.gcloudignore`/`.dockerignore` keep `.env`, `.venv`, `uploads`, tests and `cloudrun.env.yaml` out. The default compute service account needs `roles/run.builder`.
+  - Built by Cloud Build via `--source .` (the image lands in Artifact Registry `asia-southeast1-docker.pkg.dev/smallie-review/cloud-run-source-deploy/smallie`; Neon holds only the database); `.gcloudignore`/`.dockerignore` keep `.env`, `.venv`, `uploads`, tests and `cloudrun.env.yaml` out. The default compute service account needs `roles/run.builder`.
   - Config comes from `cloudrun.env.yaml` (gitignored, holds secrets: `.env` values + Neon URLs + `SESSION_HTTPS_ONLY=true`), not `.env`.
   - `--no-cpu-throttling` is required: document ingestion, `save_turn` and the market scheduler run after the response is sent. `--max-instances 1` caps cost. The container disk is ephemeral, which is fine because uploads are only read during ingestion.
   - Neon: use the direct (non `-pooler`) URL, because of the advisory locks. `agent_readonly` was created by hand with a strong password (Neon rejects `'readonly'`); the DB is `smalliedb`. The first stock load was run from the PC (`DATABASE_URL=<neon> load_stocks --full`).

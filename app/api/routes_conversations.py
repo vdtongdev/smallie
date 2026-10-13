@@ -45,5 +45,5 @@ def _serialize(message) -> dict | None:
             "tool_calls": [{"name": c["name"], "args": c["args"]} for c in message.tool_calls],
         }
     if isinstance(message, ToolMessage):
-        return {"role": "tool", "name": message.name, "content": str(message.content)[:4000]}
+        return {"role": "tool", "name": message.name, "content": (message.text or str(message.content))[:4000]}
     return None

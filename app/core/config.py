@@ -35,6 +35,15 @@ class Settings(BaseSettings):
     # Daily stock update, weekdays at this New York time (HH:MM). Empty = no background update.
     market_update_time: str = "17:30"
 
+    # Research agent. Web search through Tavily's remote MCP server; empty = no web search.
+    tavily_api_key: str = ""
+    # Extra remote MCP servers as JSON, in MultiServerMCPClient format:
+    # {"name": {"transport": "streamable_http", "url": "...", "headers": {...}}}
+    mcp_servers: str = ""
+    # Another Postgres the researcher may read through the external_db MCP server; empty = none.
+    external_database_url: str = ""
+    research_max_model_calls: int = 8
+
     @property
     def sqlalchemy_url(self) -> str:
         """Same database, but with the psycopg3 driver prefix SQLAlchemy needs."""

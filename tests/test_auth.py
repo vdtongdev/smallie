@@ -86,8 +86,10 @@ def test_signup_logs_in(client):
 def test_agents_endpoint_and_unknown_agent(client):
     signup(client)
     agents = client.get("/api/agents").json()
-    assert [a["route"] for a in agents] == ["docs", "sql"]
+    assert [a["route"] for a in agents] == ["docs", "sql", "research"]
     assert agents[0]["labels"]["vi"] == "Trợ lý tài liệu"
+    assert agents[2]["steps"]["write"]["en"] == "Writer agent"
+    assert agents[0]["steps"] == {}
     assert client.post("/api/chat/nope", json={"message": "hi"}).status_code == 404
 
 

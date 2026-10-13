@@ -2,7 +2,7 @@ import asyncio
 import re
 
 from langchain.tools import tool
-from sqlalchemy import inspect, text
+from sqlalchemy import Engine, inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.config import get_settings
@@ -47,13 +47,17 @@ def _describe_table(conn, inspector, schema: str, table: str, sample_rows: int) 
     return block
 
 
-def execute_readonly(sql: str, max_rows: int) -> str:
-    """Run one SELECT and render the rows as a pipe table (capped at max_rows)."""
+def execute_readonly(sql: str, max_rows: int, engine: Engine | None = None) -> str:
+    """Run one SELECT and render the rows as a pipe table (capped at max_rows).
+
+    `engine` defaults to the SQL agent's read-only engine; other read-only engines
+    (e.g. the research agent's external database) share the same checks.
+    """
     sql = sql.strip().rstrip(";")
     if not _READ_ONLY_START.match(sql) or ";" in sql:
         return "Error: only a single SELECT / WITH ... SELECT statement is allowed."
     try:
-        with get_readonly_engine().connect() as conn:
+        with (engine or get_readonly_engine()).connect() as conn:
             result = conn.execute(text(sql))
             columns = list(result.keys())
             rows = result.fetchmany(max_rows + 1)

@@ -14,9 +14,9 @@ import argparse
 import logging
 import sys
 
-from app.market.loader import load_market
-from app.market.scheduler import update_lock
-from app.market.tickers import TICKERS
+from app.features.market.loader import load_market
+from app.features.market.scheduler import update_lock
+from app.features.market.tickers import TICKERS
 
 
 def main() -> None:

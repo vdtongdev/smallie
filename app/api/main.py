@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import secrets
 from contextlib import AsyncExitStack, asynccontextmanager
@@ -10,10 +9,10 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app import auth
 from app.accounts import ensure_admin
-from app.api import routes_admin, routes_agents, routes_chat, routes_conversations, routes_documents, routes_market, routes_memories
+from app.api import routes_admin, routes_agents, routes_chat, routes_conversations, routes_memories
 from app.config import get_settings
 from app.db import init_db
-from app.market.scheduler import parse_time, run_daily
+from app.features.registry import FEATURES
 from app.memory import open_persistence
 from app.orchestration.graph import build_assistant
 
@@ -35,9 +34,9 @@ async def lifespan(app: FastAPI):
         app.state.store = store
         app.state.checkpointer = checkpointer
         app.state.assistant = build_assistant(checkpointer, store)
-        if settings.market_update_time:
-            job = asyncio.create_task(run_daily(parse_time(settings.market_update_time)), name="market-update")
-            stack.callback(job.cancel)
+        for feature in FEATURES:
+            if feature.start:
+                feature.start(stack)
         yield
 
 
@@ -65,7 +64,8 @@ app.include_router(routes_admin.router, prefix="/api")
 app.include_router(routes_agents.router, prefix="/api")
 app.include_router(routes_chat.router, prefix="/api")
 app.include_router(routes_conversations.router, prefix="/api")
-app.include_router(routes_documents.router, prefix="/api")
-app.include_router(routes_market.router, prefix="/api")
 app.include_router(routes_memories.router, prefix="/api")
+for feature in FEATURES:
+    for feature_router in feature.routers:
+        app.include_router(feature_router, prefix="/api")
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

@@ -13,7 +13,7 @@ from sqlalchemy import select
 
 from app.config import get_settings
 from app.db import documents, get_engine, init_db
-from app.documents.ingest import delete_document_chunks, ingest_document
+from app.features.documents.ingest import delete_document_chunks, ingest_document
 from app.memory import MAX_INDEXED_DIMS, open_persistence
 
 

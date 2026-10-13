@@ -18,7 +18,7 @@ from app.config import get_settings
 
 log = logging.getLogger(__name__)
 
-SCHEMA_FILE = Path(__file__).resolve().parents[2] / "db" / "init" / "04_market_schema.sql"
+SCHEMA_FILE = Path(__file__).resolve().parents[3] / "db" / "init" / "04_market_schema.sql"
 DOWNLOAD_BATCH = 50
 # Re-fetch a few days on incremental updates: Yahoo revises the most recent bars.
 OVERLAP_DAYS = 7

@@ -18,8 +18,8 @@ from zoneinfo import ZoneInfo
 import psycopg
 
 from app.config import get_settings
-from app.market.loader import load_market
-from app.market.tickers import TICKERS
+from app.features.market.loader import load_market
+from app.features.market.tickers import TICKERS
 
 log = logging.getLogger(__name__)
 

@@ -5,10 +5,10 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from app import accounts, auth
-from app.conversations import list_conversations
+from app.core import accounts, auth
+from app.core.conversations import list_conversations
 from app.features.registry import FEATURES
-from app.memory import forget_user
+from app.core.memory import forget_user
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(auth.get_admin_user)])
 

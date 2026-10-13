@@ -7,7 +7,7 @@ from app.agents.base import AgentSpec
 from app.agents.registry import AGENTS, MESSAGE_ROUTES
 from app.agents.docs import agent as docs_agent
 from app.agents.sql import agent as sql_agent
-from app.memory import AgentContext
+from app.core.memory import AgentContext
 from app.orchestration import router as router_module
 from app.orchestration.router import available_agents, obvious_route, parse_route, previous_route, transcript
 

@@ -5,8 +5,8 @@ from langchain.tools import tool
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.config import get_settings
-from app.db import get_readonly_engine
+from app.core.config import get_settings
+from app.core.db import get_readonly_engine
 
 # Schemas the agent may read.
 SCHEMAS = ("market",)

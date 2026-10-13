@@ -1,4 +1,4 @@
-from app.prompts import LANGUAGE_RULE, MEMORY_RULE
+from app.core.prompts import LANGUAGE_RULE, MEMORY_RULE
 
 ROUTE_DESCRIPTION = (
     "answers from the user's uploaded files (PDF/DOCX): what a document says, summaries, facts, "

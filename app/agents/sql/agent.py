@@ -8,8 +8,8 @@ from app.agents.base import AgentSpec, RouteInfo
 from app.agents.factory import build_agent
 from app.agents.sql.prompts import ROUTE_DESCRIPTION, SQL_SYSTEM
 from app.agents.sql.tools import describe_schema, run_sql
-from app.db import get_readonly_engine
-from app.prompts import LANGUAGE_RULE, MEMORY_RULE
+from app.core.db import get_readonly_engine
+from app.core.prompts import LANGUAGE_RULE, MEMORY_RULE
 
 log = logging.getLogger(__name__)
 

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 
 from app.agents.registry import AGENTS
-from app.auth import get_current_user
+from app.core.auth import get_current_user
 
 router = APIRouter(tags=["agents"])
 

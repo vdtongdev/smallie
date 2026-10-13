@@ -19,10 +19,10 @@ from langgraph.runtime import Runtime
 
 from app.agents import registry
 from app.agents.base import AgentSpec, RouteInfo, message_routes
-from app.config import get_settings
-from app.llm import get_chat_model
-from app.memory import AgentContext
-from app.prompts import ROUTER_SYSTEM
+from app.core.config import get_settings
+from app.core.llm import get_chat_model
+from app.core.memory import AgentContext
+from app.core.prompts import ROUTER_SYSTEM
 
 log = logging.getLogger(__name__)
 

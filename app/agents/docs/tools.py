@@ -3,7 +3,7 @@ import asyncio
 from langchain.tools import ToolRuntime, tool
 
 from app.features.documents.ingest import get_vector_store
-from app.memory import AgentContext
+from app.core.memory import AgentContext
 
 TOP_K = 6
 

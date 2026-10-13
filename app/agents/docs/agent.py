@@ -7,7 +7,7 @@ from app.agents.base import AgentSpec, RouteInfo
 from app.agents.docs.prompts import DOCS_SYSTEM, ROUTE_DESCRIPTION
 from app.agents.docs.tools import search_documents
 from app.agents.factory import build_agent
-from app.db import documents, get_engine
+from app.core.db import documents, get_engine
 
 MAX_LISTED_DOCUMENTS = 30  # file names shown to the router
 MIN_STEM_CHARS = 4  # shorter file names match too many messages

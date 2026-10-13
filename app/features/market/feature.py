@@ -1,7 +1,7 @@
 import asyncio
 from contextlib import AsyncExitStack
 
-from app.config import get_settings
+from app.core.config import get_settings
 from app.features.base import Feature
 from app.features.market import routes
 from app.features.market.scheduler import parse_time, run_daily

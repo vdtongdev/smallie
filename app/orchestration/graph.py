@@ -9,7 +9,7 @@ and each still sees the full history. Agents are listed in app/agents/registry.p
 from langgraph.graph import END, START, StateGraph
 
 from app.agents.registry import AGENTS
-from app.memory import AgentContext
+from app.core.memory import AgentContext
 from app.orchestration.router import AssistantState, build_router
 
 

@@ -4,9 +4,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from app.agents.registry import MESSAGE_ROUTES
-from app.auth import get_current_user
-from app.conversations import delete_conversation, get_conversation, list_conversations
-from app.memory import forget_conversation
+from app.core.auth import get_current_user
+from app.core.conversations import delete_conversation, get_conversation, list_conversations
+from app.core.memory import forget_conversation
 
 router = APIRouter(tags=["conversations"])
 

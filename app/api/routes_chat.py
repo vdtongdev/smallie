@@ -9,12 +9,12 @@ from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
-from app.accounts import get_profile
+from app.core.accounts import get_profile
 from app.agents.registry import ROUTES
-from app.auth import get_current_user
-from app.config import get_settings
-from app.conversations import create_conversation, get_conversation, list_conversations, touch_conversation
-from app.memory import AgentContext, load_recent_chats, recall, save_turn, turns
+from app.core.auth import get_current_user
+from app.core.config import get_settings
+from app.core.conversations import create_conversation, get_conversation, list_conversations, touch_conversation
+from app.core.memory import AgentContext, load_recent_chats, recall, save_turn, turns
 
 router = APIRouter(tags=["chat"])
 log = logging.getLogger(__name__)

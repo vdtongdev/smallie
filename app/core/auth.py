@@ -1,7 +1,7 @@
 """Who is the current user?
 
 This is the ONLY place that knows how identity works. Everyone has an account
-(name, username, password; rows in app/accounts.py) and logs in with it; the signed
+(name, username, password; rows in app/core/accounts.py) and logs in with it; the signed
 session cookie then holds their user_id. Agents, memory and storage are partitioned
 by that user_id.
 
@@ -15,8 +15,8 @@ import time
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 
-from app import accounts
-from app.config import get_settings
+from app.core import accounts
+from app.core.config import get_settings
 
 SESSION_KEY = "user_id"
 FAILED_LOGIN_DELAY_S = 1.0

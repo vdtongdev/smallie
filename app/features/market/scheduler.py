@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 
 import psycopg
 
-from app.config import get_settings
+from app.core.config import get_settings
 from app.features.market.loader import load_market
 from app.features.market.tickers import TICKERS
 

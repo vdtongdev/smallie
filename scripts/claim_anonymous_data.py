@@ -12,10 +12,10 @@ from contextlib import AsyncExitStack
 
 import psycopg
 
-from app.accounts import ADMIN_USER_ID, ensure_admin
-from app.config import get_settings
-from app.db import init_db
-from app.memory import open_persistence
+from app.core.accounts import ADMIN_USER_ID, ensure_admin
+from app.core.config import get_settings
+from app.core.db import init_db
+from app.core.memory import open_persistence
 
 
 def move_rows(conn: psycopg.Connection, anon_id: str) -> tuple[int, int]:

@@ -11,9 +11,9 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pypdf import PdfReader
 from sqlalchemy import update
 
-from app.config import get_settings
-from app.db import documents, get_engine
-from app.llm import get_embeddings
+from app.core.config import get_settings
+from app.core.db import documents, get_engine
+from app.core.llm import get_embeddings
 
 log = logging.getLogger(__name__)
 

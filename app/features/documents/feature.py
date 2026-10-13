@@ -3,8 +3,8 @@ import shutil
 
 from sqlalchemy import select
 
-from app.config import get_settings
-from app.db import documents, get_engine
+from app.core.config import get_settings
+from app.core.db import documents, get_engine
 from app.features.base import Feature
 from app.features.documents import routes
 from app.features.documents.ingest import delete_document_chunks

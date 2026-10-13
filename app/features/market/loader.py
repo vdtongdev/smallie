@@ -14,7 +14,7 @@ import pandas as pd
 import psycopg
 import yfinance as yf
 
-from app.config import get_settings
+from app.core.config import get_settings
 
 log = logging.getLogger(__name__)
 

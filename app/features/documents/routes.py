@@ -5,9 +5,9 @@ from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile
 from sqlalchemy import delete, select
 
-from app.auth import get_current_user
-from app.config import get_settings
-from app.db import documents, get_engine
+from app.core.auth import get_current_user
+from app.core.config import get_settings
+from app.core.db import documents, get_engine
 from app.features.documents.ingest import SUPPORTED_SUFFIXES, delete_document_chunks, ingest_document
 
 router = APIRouter(tags=["documents"])

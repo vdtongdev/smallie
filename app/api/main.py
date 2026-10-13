@@ -7,13 +7,13 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-from app import auth
-from app.accounts import ensure_admin
+from app.core import auth
+from app.core.accounts import ensure_admin
 from app.api import routes_admin, routes_agents, routes_chat, routes_conversations, routes_memories
-from app.config import get_settings
-from app.db import init_db
+from app.core.config import get_settings
+from app.core.db import init_db
 from app.features.registry import FEATURES
-from app.memory import open_persistence
+from app.core.memory import open_persistence
 from app.orchestration.graph import build_assistant
 
 logging.basicConfig(level=logging.INFO)

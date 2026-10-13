@@ -23,8 +23,8 @@ from langgraph.store.postgres.aio import AsyncPostgresStore
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
-from app.config import get_settings
-from app.llm import get_embeddings
+from app.core.config import get_settings
+from app.core.llm import get_embeddings
 
 
 @dataclass

@@ -6,10 +6,10 @@ from langchain_core.tools import BaseTool
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.store.base import BaseStore
 
-from app.config import get_settings
-from app.llm import get_chat_model
-from app.memory import MEMORY_TOOLS, AgentContext
-from app.prompts import MEMORIES_SECTION, RECENT_CHATS_SECTION, USER_SECTION
+from app.core.config import get_settings
+from app.core.llm import get_chat_model
+from app.core.memory import MEMORY_TOOLS, AgentContext
+from app.core.prompts import MEMORIES_SECTION, RECENT_CHATS_SECTION, USER_SECTION
 
 
 def build_agent(

@@ -93,15 +93,18 @@ These are set in `.env`; all calls go through OpenRouter.
 
 ```
 app/
-  api/            FastAPI routes: chat (SSE streaming), conversations, documents, memories, market status
-  assistant.py    router graph: START -> router -> docs | sql agent (as subgraphs) -> END
-  documents/      ingest.py (PDF/DOCX -> chunks -> pgvector), agent.py (search_documents tool)
-  sql/            agent.py (schema in prompt + read-only run_sql tool)
-  market/         tickers.py (the 200 stocks), loader.py (yfinance -> market schema)
-  agent_factory.py  create_agent + memory tools + memory-aware dynamic prompt + model fallback
-  memory.py       LangGraph Postgres checkpointer (per chat) and store (per user, semantic search)
-  auth.py         get_current_user(): the one place identity is decided (signed session cookie)
-  accounts.py     sign-up, login, admin account; scrypt password hashes
+  core/           shared infrastructure: config, OpenRouter models (llm.py), app tables (db.py),
+                  memory (checkpointer + store), auth/accounts, conversations, shared prompt rules
+  agents/         one package per agent (agent.py with its SPEC, tools.py, prompts.py)
+    registry.py   the list of agents the router can pick
+    factory.py    create_agent + memory tools + memory-aware dynamic prompt + call limit
+    docs/         search_documents tool over pgvector
+    sql/          schema in prompt + read-only run_sql tool
+  features/       data the agents use, with its API and background jobs
+    documents/    upload routes, ingest.py (PDF/DOCX -> chunks -> pgvector)
+    market/       tickers.py (the 200 stocks), loader.py (yfinance -> market schema), daily scheduler
+  orchestration/  router graph: START -> router -> one agent (as a subgraph) -> END
+  api/            FastAPI app and shared routes: chat (SSE streaming), conversations, memories, agents, admin
   static/         plain HTML/JS UI with an EN/VI toggle
 db/init/          extension, read-only role, market schema (run on first `docker compose up`)
 Dockerfile        container image for Cloud Run (.gcloudignore / .dockerignore keep secrets out)
@@ -112,6 +115,7 @@ scripts/          load_stocks.py (fill/refresh stock data), reindex.py (after ch
 - Every message goes to `POST /api/chat/auto`. The router node first checks whether you have uploaded documents. If you have none, the message goes straight to the database agent. Otherwise one short model call sees your file names, the last few turns and your message, and answers `docs` or `sql`. Follow-ups stay with the previous agent unless the topic changes.
 - Both agents are subgraphs on the same conversation thread, so one chat can switch between them and each sees the whole history. The UI shows which agent answered each turn.
 - `POST /api/chat/docs` and `/api/chat/sql` skip the router and force one agent (API only).
+- Adding an agent means one new package under `app/agents/` and one line in `app/agents/registry.py`; see "Adding an agent or workflow" in CLAUDE.md.
 
 **Memory**
 - *Within a chat:* every message is checkpointed in Postgres (`thread_id` = conversation id), so chats survive restarts.

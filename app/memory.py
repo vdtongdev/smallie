@@ -35,7 +35,7 @@ class AgentContext:
     user: str = ""  # "Name (username: x)" of the account; never the password
     memories: str = ""
     recent_chats: str = ""  # latest turns of the user's other chats
-    agent: str = "auto"  # "auto" lets the router pick; "docs" / "sql" force that agent
+    agent: str = "auto"  # "auto" lets the router pick; a registered route (app/agents/registry.py) forces that agent
 
 
 def memory_namespace(user_id: str) -> tuple[str, ...]:

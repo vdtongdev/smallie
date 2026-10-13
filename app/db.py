@@ -36,7 +36,7 @@ conversations = Table(
     metadata,
     Column("id", String(36), primary_key=True),
     Column("user_id", String(64), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False),
-    Column("kind", String(16), nullable=False),  # agent mode it was started with: "auto" | "docs" | "sql"
+    Column("kind", String(16), nullable=False),  # mode it was started with: "auto" or an agent route
     Column("title", Text, nullable=False),
     Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
     Column("updated_at", DateTime(timezone=True), server_default=func.now(), nullable=False),

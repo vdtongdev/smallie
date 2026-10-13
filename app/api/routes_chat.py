@@ -1,7 +1,6 @@
 import asyncio
 import json
 import logging
-from typing import Literal
 
 import openai
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -11,6 +10,7 @@ from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
 from app.accounts import get_profile
+from app.agents.registry import ROUTES
 from app.auth import get_current_user
 from app.config import get_settings
 from app.conversations import create_conversation, get_conversation, list_conversations, touch_conversation
@@ -33,11 +33,13 @@ def _sse(event: dict) -> str:
 
 @router.post("/chat/{kind}")
 async def chat(
-    kind: Literal["auto", "docs", "sql"],
+    kind: str,
     body: ChatRequest,
     request: Request,
     user_id: str = Depends(get_current_user),
 ):
+    if kind != "auto" and kind not in ROUTES:
+        raise HTTPException(404, "Unknown agent")
     if body.conversation_id:
         conversation = await asyncio.to_thread(get_conversation, user_id, body.conversation_id)
         if not conversation:

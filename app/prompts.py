@@ -52,12 +52,10 @@ The database has one schema, `market`: about 200 popular stocks from Yahoo Finan
 DATABASE SCHEMA:
 {schema}"""
 
-ROUTER_SYSTEM = """You decide which assistant should answer the user's latest message. Reply with exactly one word: docs or sql.
+# {choices}: "docs or sql"; {agents}: one "- route: description" line per agent, then their notes.
+ROUTER_SYSTEM = """You decide which assistant should answer the user's latest message. Reply with exactly one word: {choices}.
 
-- docs: answers from the user's uploaded files (PDF/DOCX): what a document says, summaries, facts, policies, contracts or anything else that would be written in their files.
-- sql: answers from the database: stock market data for about 200 popular stocks (prices, returns, market cap, sectors, P/E, dividends, comparisons, rankings).
-
-The user's uploaded documents: {documents}
+{agents}
 
 Follow-ups ("and last year?", "show it as a table", greetings, thanks, questions about the user or about earlier chats) go to the assistant of the previous turn ({previous}) unless the topic clearly changed. The user may write in English or Vietnamese."""
 

@@ -83,6 +83,14 @@ def test_signup_logs_in(client):
     assert "password" not in str(me)
 
 
+def test_agents_endpoint_and_unknown_agent(client):
+    signup(client)
+    agents = client.get("/api/agents").json()
+    assert [a["route"] for a in agents] == ["docs", "sql"]
+    assert agents[0]["labels"]["vi"] == "Trợ lý tài liệu"
+    assert client.post("/api/chat/nope", json={"message": "hi"}).status_code == 404
+
+
 @pytest.mark.parametrize("body", [
     {"name": "A", "username": "ab", "password": "password1"},  # username too short
     {"name": "A", "username": "lan nguyen", "password": "password1"},  # space

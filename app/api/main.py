@@ -10,12 +10,12 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app import auth
 from app.accounts import ensure_admin
-from app.api import routes_admin, routes_chat, routes_conversations, routes_documents, routes_market, routes_memories
-from app.assistant import build_assistant
+from app.api import routes_admin, routes_agents, routes_chat, routes_conversations, routes_documents, routes_market, routes_memories
 from app.config import get_settings
 from app.db import init_db
 from app.market.scheduler import parse_time, run_daily
 from app.memory import open_persistence
+from app.orchestration.graph import build_assistant
 
 logging.basicConfig(level=logging.INFO)
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
@@ -62,6 +62,7 @@ app.add_middleware(
 )
 app.include_router(auth.router, prefix="/api")
 app.include_router(routes_admin.router, prefix="/api")
+app.include_router(routes_agents.router, prefix="/api")
 app.include_router(routes_chat.router, prefix="/api")
 app.include_router(routes_conversations.router, prefix="/api")
 app.include_router(routes_documents.router, prefix="/api")

@@ -1,10 +1,9 @@
 import asyncio
-from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from app.assistant import AGENT_ROUTES
+from app.agents.registry import MESSAGE_ROUTES
 from app.auth import get_current_user
 from app.conversations import delete_conversation, get_conversation, list_conversations
 from app.memory import forget_conversation
@@ -13,7 +12,7 @@ router = APIRouter(tags=["conversations"])
 
 
 @router.get("/conversations")
-def conversations(kind: Literal["auto", "docs", "sql"] | None = None, user_id: str = Depends(get_current_user)):
+def conversations(kind: str | None = None, user_id: str = Depends(get_current_user)):
     return list_conversations(user_id, kind)
 
 
@@ -41,7 +40,7 @@ def _serialize(message) -> dict | None:
     if isinstance(message, AIMessage):
         return {
             "role": "assistant",
-            "agent": AGENT_ROUTES.get(message.name or ""),
+            "agent": MESSAGE_ROUTES.get(message.name or ""),
             "content": message.text,
             "tool_calls": [{"name": c["name"], "args": c["args"]} for c in message.tool_calls],
         }

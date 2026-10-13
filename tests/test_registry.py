@@ -1,0 +1,19 @@
+from app.agents.registry import AGENTS, MESSAGE_ROUTES, ROUTES, get
+
+
+def test_routes_and_message_names_are_unique():
+    assert len(set(ROUTES)) == len(ROUTES)
+    assert "auto" not in ROUTES  # reserved for "let the router pick"
+    names = [name for spec in AGENTS for name in spec.message_names]
+    assert len(set(names)) == len(names) == len(MESSAGE_ROUTES)
+
+
+def test_every_agent_has_a_description_and_labels():
+    for spec in AGENTS:
+        assert spec.description
+        assert set(spec.labels) == {"en", "vi"}
+
+
+def test_get():
+    assert get("sql").route == "sql"
+    assert get("nope") is None

@@ -23,7 +23,7 @@ def build_agent(
     """An agent with the given tools plus long-term memory tools and a memory-aware prompt.
 
     Leave checkpointer/store unset when the agent runs as a subgraph of the assistant
-    (app/assistant.py); it then uses the parent graph's.
+    (app/orchestration/graph.py); it then uses the parent graph's.
     """
 
     @dynamic_prompt

@@ -2,10 +2,8 @@ import asyncio
 
 from langchain.tools import ToolRuntime, tool
 
-from app.agent_factory import build_agent
-from app.documents.ingest import get_vector_store
-from app.memory import AgentContext
-from app.prompts import DOCS_SYSTEM
+from app.features.documents.ingest import get_vector_store
+from app.core.memory import AgentContext
 
 TOP_K = 6
 
@@ -33,7 +31,3 @@ async def search_documents(query: str, runtime: ToolRuntime[AgentContext]) -> st
         query: A focused search phrase. Works in English or Vietnamese.
     """
     return await asyncio.to_thread(search_user_chunks, runtime.context.user_id, query)
-
-
-def build_docs_agent():
-    return build_agent(name="docs_agent", system_prompt=DOCS_SYSTEM, tools=[search_documents])

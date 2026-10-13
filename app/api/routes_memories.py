@@ -2,8 +2,8 @@
 
 from fastapi import APIRouter, Depends, Request
 
-from app.auth import get_current_user
-from app.memory import memory_namespace
+from app.core.auth import get_current_user
+from app.core.memory import memory_namespace
 
 router = APIRouter(tags=["memories"])
 

@@ -5,7 +5,7 @@ from docx import Document as DocxDocument
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
-from app.documents.ingest import chunk_ids, load_and_split
+from app.features.documents.ingest import chunk_ids, load_and_split
 
 VI_TEXT = "Chính sách đổi trả: khách hàng được đổi sản phẩm trong vòng 30 ngày kể từ ngày mua."
 

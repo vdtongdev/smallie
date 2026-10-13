@@ -1,4 +1,4 @@
-// "auto": the server picks the documents or database agent for each message.
+// "auto": the server picks one of its agents (GET /api/agents) for each message.
 const KIND = "auto";
 
 const state = {
@@ -7,10 +7,12 @@ const state = {
   conversationId: null,
   busy: false,
   docsPoll: null,
+  agents: {}, // route -> {en, vi} badge labels, from /api/agents
 };
 
 const $ = (id) => document.getElementById(id);
 const t = (key) => I18N[state.lang][key] ?? key;
+const agentLabel = (route) => state.agents[route]?.[state.lang] ?? route;
 
 function localGet(key) {
   try { return localStorage.getItem(key); } catch { return null; }
@@ -44,7 +46,17 @@ function applyLanguage() {
   $("langBtn").textContent = state.lang === "en" ? "Tiếng Việt" : "English";
   $("input").placeholder = t("placeholder");
   document.querySelectorAll("[data-lang]").forEach((el) => (el.hidden = el.dataset.lang !== state.lang));
-  document.querySelectorAll(".agent-badge").forEach((el) => (el.textContent = t(`agent_${el.dataset.agent}`)));
+  labelAgentBadges();
+}
+
+function labelAgentBadges() {
+  document.querySelectorAll(".agent-badge").forEach((el) => (el.textContent = agentLabel(el.dataset.agent)));
+}
+
+async function loadAgents() {
+  const agents = await api("/agents").catch(() => []);
+  state.agents = Object.fromEntries(agents.map((a) => [a.route, a.labels]));
+  labelAgentBadges();
 }
 
 $("langBtn").onclick = () => {
@@ -207,7 +219,7 @@ function addAgentBadge(name, before = null) {
   const div = document.createElement("div");
   div.className = "agent-badge";
   div.dataset.agent = name;
-  div.textContent = t(`agent_${name}`);
+  div.textContent = agentLabel(name);
   if (before) before.before(div);
   else $("messages").append(div);
 }
@@ -472,6 +484,7 @@ function showApp() {
   if (saved) openConversation(saved);
   else newChat();
   loadDocuments();
+  loadAgents();
 }
 
 function postJson(path, body) {

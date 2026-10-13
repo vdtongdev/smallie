@@ -6,10 +6,10 @@ from langchain_core.tools import BaseTool
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.store.base import BaseStore
 
-from app.config import get_settings
-from app.llm import get_chat_model
-from app.memory import MEMORY_TOOLS, AgentContext
-from app.prompts import MEMORIES_SECTION, RECENT_CHATS_SECTION, USER_SECTION
+from app.core.config import get_settings
+from app.core.llm import get_chat_model
+from app.core.memory import MEMORY_TOOLS, AgentContext
+from app.core.prompts import MEMORIES_SECTION, RECENT_CHATS_SECTION, USER_SECTION
 
 
 def build_agent(
@@ -23,7 +23,7 @@ def build_agent(
     """An agent with the given tools plus long-term memory tools and a memory-aware prompt.
 
     Leave checkpointer/store unset when the agent runs as a subgraph of the assistant
-    (app/assistant.py); it then uses the parent graph's.
+    (app/orchestration/graph.py); it then uses the parent graph's.
     """
 
     @dynamic_prompt

@@ -3,9 +3,9 @@ from langchain_core.documents import Document
 from langchain_core.embeddings import DeterministicFakeEmbedding
 from langgraph.store.memory import InMemoryStore
 
-from app.config import get_settings
-from app.documents import agent as docs_agent
-from app.memory import memory_namespace, recall
+from app.core.config import get_settings
+from app.agents.docs import tools as docs_tools
+from app.core.memory import memory_namespace, recall
 from tests.conftest import requires_db
 
 
@@ -25,12 +25,12 @@ def test_document_search_only_returns_the_users_own_chunks(monkeypatch):
             Document("Bob secret plan", metadata={"user_id": "bob", "filename": "b.pdf", "page": 1}),
         ]
     )
-    monkeypatch.setattr(docs_agent, "get_vector_store", lambda: store)
+    monkeypatch.setattr(docs_tools, "get_vector_store", lambda: store)
     try:
-        result = docs_agent.search_user_chunks("alice", "secret plan")
+        result = docs_tools.search_user_chunks("alice", "secret plan")
         assert "a.pdf" in result and "Alice" in result
         assert "b.pdf" not in result and "Bob" not in result
-        assert "No matching" in docs_agent.search_user_chunks("carol", "secret plan")
+        assert "No matching" in docs_tools.search_user_chunks("carol", "secret plan")
     finally:
         store.delete_collection()
 
@@ -59,7 +59,7 @@ async def test_recall_formats_bullets(memory_store):
 async def test_search_chat_history_is_scoped_and_forgets_deleted_chats(memory_store):
     from types import SimpleNamespace
 
-    from app.memory import AgentContext, forget_conversation, save_turn, search_chat_history
+    from app.core.memory import AgentContext, forget_conversation, save_turn, search_chat_history
 
     chat_a = {"id": "a", "title": "Apple price"}
     chat_b = {"id": "b", "title": "Shop revenue"}
@@ -88,7 +88,7 @@ async def test_recent_chats_show_latest_turns_of_other_chats():
     from langgraph.checkpoint.memory import InMemorySaver
     from langgraph.graph import START, MessagesState, StateGraph
 
-    from app.memory import load_recent_chats
+    from app.core.memory import load_recent_chats
 
     def reply(state: MessagesState) -> dict:
         tool_step = AIMessage(content="", tool_calls=[{"name": "run_sql", "args": {}, "id": "1"}])

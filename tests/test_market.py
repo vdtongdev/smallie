@@ -2,8 +2,8 @@ from datetime import date
 
 import pandas as pd
 
-from app.market.loader import frame_to_rows, info_to_row
-from app.market.tickers import TICKERS
+from app.features.market.loader import frame_to_rows, info_to_row
+from app.features.market.tickers import TICKERS
 
 
 def test_ticker_list_has_200_unique_symbols():

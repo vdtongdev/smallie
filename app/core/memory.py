@@ -23,8 +23,8 @@ from langgraph.store.postgres.aio import AsyncPostgresStore
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
-from app.config import get_settings
-from app.llm import get_embeddings
+from app.core.config import get_settings
+from app.core.llm import get_embeddings
 
 
 @dataclass
@@ -35,7 +35,7 @@ class AgentContext:
     user: str = ""  # "Name (username: x)" of the account; never the password
     memories: str = ""
     recent_chats: str = ""  # latest turns of the user's other chats
-    agent: str = "auto"  # "auto" lets the router pick; "docs" / "sql" force that agent
+    agent: str = "auto"  # "auto" lets the router pick; a registered route (app/agents/registry.py) forces that agent
 
 
 def memory_namespace(user_id: str) -> tuple[str, ...]:

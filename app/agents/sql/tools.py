@@ -1,29 +1,16 @@
 import asyncio
 import re
-from functools import lru_cache
 
 from langchain.tools import tool
-from sqlalchemy import Engine, create_engine, inspect, text
+from sqlalchemy import inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.agent_factory import build_agent
-from app.config import get_settings
-from app.prompts import LANGUAGE_RULE, MEMORY_RULE, SQL_SYSTEM
+from app.core.config import get_settings
+from app.core.db import get_readonly_engine
 
 # Schemas the agent may read.
 SCHEMAS = ("market",)
 _READ_ONLY_START = re.compile(r"^\s*(select|with)\b", re.IGNORECASE)
-
-
-@lru_cache
-def get_readonly_engine() -> Engine:
-    # The agent_readonly role is already read-only with a 10s timeout; these
-    # connection options repeat that in case the URL points at another role.
-    return create_engine(
-        get_settings().readonly_sqlalchemy_url,
-        pool_pre_ping=True,
-        connect_args={"options": "-c default_transaction_read_only=on -c statement_timeout=10000"},
-    )
 
 
 def describe_schema(sample_rows: int = 2) -> str:
@@ -92,10 +79,3 @@ async def run_sql(query: str) -> str:
         query: A single SELECT (or WITH ... SELECT) statement.
     """
     return await asyncio.to_thread(execute_readonly, query, get_settings().sql_max_rows)
-
-
-def build_sql_agent():
-    system_prompt = SQL_SYSTEM.format(
-        language_rule=LANGUAGE_RULE, memory_rule=MEMORY_RULE, schema=describe_schema()
-    )
-    return build_agent(name="sql_agent", system_prompt=system_prompt, tools=[run_sql])

@@ -4,7 +4,7 @@ import uuid
 
 from sqlalchemy import delete, func, select, update
 
-from app.db import conversations, get_engine
+from app.core.db import conversations, get_engine
 
 
 def create_conversation(user_id: str, kind: str, first_message: str) -> dict:

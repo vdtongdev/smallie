@@ -2,8 +2,8 @@ from datetime import date, datetime, time
 
 import pytest
 
-from app.market import scheduler
-from app.market.scheduler import MARKET_TZ, latest_session, next_run, parse_time, update_lock
+from app.features.market import scheduler
+from app.features.market.scheduler import MARKET_TZ, latest_session, next_run, parse_time, update_lock
 from tests.conftest import requires_db
 
 AT = time(17, 30)

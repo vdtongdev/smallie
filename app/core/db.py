@@ -17,7 +17,7 @@ from sqlalchemy import (
     text,
 )
 
-from app.config import get_settings
+from app.core.config import get_settings
 
 metadata = MetaData()
 
@@ -36,7 +36,7 @@ conversations = Table(
     metadata,
     Column("id", String(36), primary_key=True),
     Column("user_id", String(64), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False),
-    Column("kind", String(16), nullable=False),  # agent mode it was started with: "auto" | "docs" | "sql"
+    Column("kind", String(16), nullable=False),  # mode it was started with: "auto" or an agent route
     Column("title", Text, nullable=False),
     Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
     Column("updated_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
@@ -59,6 +59,17 @@ documents = Table(
 @lru_cache
 def get_engine() -> Engine:
     return create_engine(get_settings().sqlalchemy_url, pool_pre_ping=True)
+
+
+@lru_cache
+def get_readonly_engine() -> Engine:
+    # The agent_readonly role is already read-only with a 10s timeout; these
+    # connection options repeat that in case the URL points at another role.
+    return create_engine(
+        get_settings().readonly_sqlalchemy_url,
+        pool_pre_ping=True,
+        connect_args={"options": "-c default_transaction_read_only=on -c statement_timeout=10000"},
+    )
 
 
 def init_db() -> None:

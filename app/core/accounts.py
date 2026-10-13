@@ -2,7 +2,7 @@
 
 The admin account keeps the id "team" (the old shared user, so it inherits that data),
 has the username "admin" and logs in with APP_PASSWORD; no hash is stored for it.
-Passwords are hashed with scrypt and never leave this module and app/auth.py.
+Passwords are hashed with scrypt and never leave this module and app/core/auth.py.
 """
 
 import hashlib
@@ -13,8 +13,8 @@ from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 
-from app.config import get_settings
-from app.db import get_engine, users
+from app.core.config import get_settings
+from app.core.db import get_engine, users
 
 ADMIN_USER_ID = "team"
 ADMIN_USERNAME = "admin"

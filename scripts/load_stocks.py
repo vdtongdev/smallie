@@ -14,9 +14,9 @@ import argparse
 import logging
 import sys
 
-from app.market.loader import load_market
-from app.market.scheduler import update_lock
-from app.market.tickers import TICKERS
+from app.features.market.loader import load_market
+from app.features.market.scheduler import update_lock
+from app.features.market.tickers import TICKERS
 
 
 def main() -> None:
@@ -37,7 +37,7 @@ def main() -> None:
         print(f"Profiles: {result['profiles']}/{len(TICKERS)}")
     print(f"Price rows upserted: {result['price_rows']} (since {result['since']})")
     if result["missing"]:
-        print(f"No price data for: {', '.join(result['missing'])} (delisted or renamed? edit app/market/tickers.py)")
+        print(f"No price data for: {', '.join(result['missing'])} (delisted or renamed? edit app/features/market/tickers.py)")
 
 
 if __name__ == "__main__":

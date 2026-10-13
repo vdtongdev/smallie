@@ -3,16 +3,16 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 
-from app import accounts, auth
+from app.core import accounts, auth
 from app.api.main import app
-from app.config import get_settings
+from app.core.config import get_settings
 from tests.conftest import requires_db
 
 ADMIN_PASSWORD = "s3cret-admin"
 
 
 class FakeAccounts:
-    """In-memory stand-in for the account rows in app/accounts.py."""
+    """In-memory stand-in for the account rows in app/core/accounts.py."""
 
     def __init__(self):
         self.rows: dict[str, dict] = {}
@@ -81,6 +81,14 @@ def test_signup_logs_in(client):
     assert me["username"] == "lan"
     assert me["is_admin"] is False
     assert "password" not in str(me)
+
+
+def test_agents_endpoint_and_unknown_agent(client):
+    signup(client)
+    agents = client.get("/api/agents").json()
+    assert [a["route"] for a in agents] == ["docs", "sql"]
+    assert agents[0]["labels"]["vi"] == "Trợ lý tài liệu"
+    assert client.post("/api/chat/nope", json={"message": "hi"}).status_code == 404
 
 
 @pytest.mark.parametrize("body", [
@@ -156,7 +164,7 @@ def test_deleted_account_is_logged_out(client):
 
 @requires_db
 def test_account_rows_roundtrip():
-    from app.db import init_db
+    from app.core.db import init_db
 
     init_db()
     username = f"test-{uuid.uuid4().hex[:12]}"

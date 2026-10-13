@@ -1,6 +1,6 @@
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
-from app.config import OPENROUTER_BASE_URL, get_settings
+from app.core.config import OPENROUTER_BASE_URL, get_settings
 
 # OpenRouter uses these optional headers to show the app name in its dashboard.
 _HEADERS = {"HTTP-Referer": "http://localhost:8000", "X-Title": "smallie"}

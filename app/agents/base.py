@@ -6,6 +6,7 @@ workflow graph (e.g. researcher -> writer); the router treats both the same.
 
 import re
 from collections.abc import Awaitable, Callable, Sequence
+from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 
 from langchain_core.runnables import Runnable
@@ -29,6 +30,14 @@ class AgentSpec:
     hints: re.Pattern | None = None  # words that only fit this entry; anything ambiguous goes to the model
     # Returns None when the agent has nothing to offer this user (e.g. no documents).
     route_info: Callable[[str], Awaitable[RouteInfo | None]] | None = field(default=None)
+    # Async setup awaited in the app lifespan before `build` (e.g. loading MCP tools); register
+    # cleanup on the stack.
+    prepare: Callable[[AsyncExitStack], Awaitable[None]] | None = None
+    # Workflow steps (node names inside `build`'s graph) whose tokens are not streamed to the
+    # UI, e.g. a researcher whose notes only feed the writer. Their tool calls still show.
+    silent_steps: tuple[str, ...] = ()
+    # Workflow steps shown in the UI when they start: node name -> {"en": ..., "vi": ...}.
+    steps: dict[str, dict[str, str]] = field(default_factory=dict)
 
     async def info(self, user_id: str) -> RouteInfo | None:
         return await self.route_info(user_id) if self.route_info else RouteInfo()

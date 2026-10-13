@@ -1,9 +1,10 @@
 # [smallie](https://smallie-976519788978.asia-southeast1.run.app/)
 
-LangChain agents behind a FastAPI app with a small web UI. You type into one chat, and a router picks the right agent for each message. There are two agents today, and the code is laid out so more can be added (see "Adding an agent" below):
+LangChain agents behind a FastAPI app with a small web UI. You type into one chat, and a router picks the right agent for each message. There are three agents today, and the code is laid out so more can be added (see "Adding an agent" below):
 
 - **Documents**: upload PDF/DOCX files and ask questions about them. Answers cite the file and page.
 - **Database**: ask questions in plain language about a stock database (200 popular stocks loaded from Yahoo Finance with `yfinance`). The agent writes and runs read-only SQL.
+- **Research**: a two-step workflow. A researcher gathers facts from the web (Tavily), Wikipedia, arXiv, an optional external Postgres, the stock database and your files. A writer then turns those findings into a summary or a structured report with sources. External tools come in through MCP (`langchain-mcp-adapters`), and both steps load "skills" (instruction files) on demand.
 
 The **Readme** button in the header explains how to use the app, with example questions.
 
@@ -83,9 +84,10 @@ For access from anywhere without your PC, see [Deploying](#deploying-google-clou
 These are set in `.env`; all calls go through OpenRouter.
 
 - `OPENROUTER_CHAT_MODEL`: defaults to a free model with tool calling. Free models come and go, so see the list at https://openrouter.ai/models?supported_parameters=tools&max_price=0. `OPENROUTER_FALLBACK_MODEL` is used automatically when the main one fails or is rate-limited.
-- `OPENROUTER_ROUTER_MODEL`: the model that decides which agent answers each message. It makes one short call per message, and the call is skipped when you have no documents (the database agent answers then). Empty means it uses `OPENROUTER_CHAT_MODEL`.
+- `OPENROUTER_ROUTER_MODEL`: the model that decides which agent answers each message. It makes one short call per message, and the call is skipped when the message clearly points to one agent (a ticker, "stock", a file name, "research", "latest news"…). Empty means it uses `OPENROUTER_CHAT_MODEL`.
+- `TAVILY_API_KEY`: web search for the research agent (free 1,000 credits/month at https://app.tavily.com). Without it, research uses the other sources. `MCP_SERVERS` adds more remote MCP servers, and `EXTERNAL_DATABASE_URL` lets the researcher read another Postgres (see `.env.example`).
 - `OPENROUTER_EMBED_MODEL`: defaults to `baai/bge-m3`, which is multilingual and costs about $0.01 per 1M tokens. A $1 top-up covers thousands of documents. The fully free option is `liquid/lfm-2.5-embedding-350m:free`, but the provider may keep and train on your data.
-- **Free-tier limits:** about 20 requests/min, and 50 requests/day unless you have bought at least $10 of credits (then 1000/day). One question takes 2–5 model calls, plus 1 for routing.
+- **Free-tier limits:** about 20 requests/min, and 50 requests/day unless you have bought at least $10 of credits (then 1000/day). One question takes 2–5 model calls, plus 1 for routing. A research question takes more: up to `RESEARCH_MAX_MODEL_CALLS` (8) for the researcher and 1–2 for the writer.
 - **Changing the embedding model or `EMBED_DIM`:** stop the app, then run `uv run python -m scripts.reindex`.
 
 ## How it works
@@ -128,6 +130,11 @@ scripts/          load_stocks.py (fill/refresh stock data), reindex.py (after ch
 - The checkpointer and the store share one psycopg connection pool that checks each connection before use. If Postgres restarts (for example when WSL shuts down), the app reconnects on its own and doesn't need a restart.
 - The UI remembers the open chat, so reloading the page brings it back.
 
+**Research agent (`app/agents/research/`)**
+- The workflow is `gather` (researcher) → `write` (report writer). Only the writer's answer is saved to the chat and streamed. The researcher's tool calls show in the UI as progress, but its notes don't.
+- MCP (`app/core/mcp.py`): remote servers (Tavily, `MCP_SERVERS`) are loaded with `MultiServerMCPClient`, one short session per tool call. Our own servers (`app/features/research/mcp_servers/`: `knowledge` for Wikipedia and arXiv, `external_db` for `EXTERNAL_DATABASE_URL`) run in-process over MCP's memory transport. That needs no subprocess, which wouldn't start on Windows under the selector event loop. Tools are named `<server>_<tool>`. A server that fails to load is skipped with a warning.
+- Skills (`app/agents/skills.py`) are `skills/<role>/<name>/SKILL.md` files. The prompt lists their names and descriptions, and the agent calls `load_skill` to read one. The researcher's skills are `web-research`, `market-data` and `academic`. The writer's are `summary`, `structured-report`, `comparison` and `company-brief`, picked automatically from the question.
+
 **SQL safety**
 - The SQL agent connects as `agent_readonly`. That role has SELECT-only access to the `market` schema, read-only transactions, and a 10 s statement timeout. It cannot see the app's own tables.
 - Results are capped at `SQL_MAX_ROWS`.
@@ -166,7 +173,7 @@ The app runs as a container on **Cloud Run** (free tier, scales to zero). All da
    gcloud projects add-iam-policy-binding <project-id> --role="roles/run.builder" --condition=None `
      --member="serviceAccount:$num-compute@developer.gserviceaccount.com"
    ```
-4. Create `cloudrun.env.yaml` (gitignored). It's your `.env` as YAML, with the Neon URLs and `SESSION_HTTPS_ONLY: "true"`. All values must be quoted strings.
+4. Create `cloudrun.env.yaml` (gitignored). It's your `.env` as YAML, with the Neon URLs and `SESSION_HTTPS_ONLY: "true"`. All values must be quoted strings. Add `TAVILY_API_KEY` (and `MCP_SERVERS` / `EXTERNAL_DATABASE_URL` if you use them) for the research agent. `MCP_SERVERS` is JSON, so wrap it in single quotes in YAML.
 5. Deploy from the project folder (Cloud Build builds the `Dockerfile`; `.gcloudignore` keeps `.env` and `.venv` out):
    ```powershell
    gcloud run deploy smallie --source . --region asia-southeast1 --allow-unauthenticated `

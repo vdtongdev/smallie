@@ -19,6 +19,7 @@ def build_agent(
     tools: Sequence[BaseTool],
     checkpointer: BaseCheckpointSaver | None = None,
     store: BaseStore | None = None,
+    max_model_calls: int | None = None,
 ):
     """An agent with the given tools plus long-term memory tools and a memory-aware prompt.
 
@@ -39,7 +40,9 @@ def build_agent(
 
     # Stops runaway tool loops from burning the free quota; the fallback model is handled
     # by OpenRouter inside each request (app/llm.py).
-    call_limit = ModelCallLimitMiddleware(run_limit=get_settings().max_model_calls, exit_behavior="end")
+    call_limit = ModelCallLimitMiddleware(
+        run_limit=max_model_calls or get_settings().max_model_calls, exit_behavior="end"
+    )
     middleware = [prompt_with_memories, call_limit]
 
     return create_agent(

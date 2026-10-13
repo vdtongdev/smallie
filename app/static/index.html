@@ -80,12 +80,14 @@
     <article class="readme">
       <div data-lang="en">
         <h1>How to use smallie</h1>
-        <p>smallie is a chat assistant with two specialists. You just ask; it picks the right one for each message
+        <p>smallie is a chat assistant with three specialists. You just ask; it picks the right one for each message
           and shows which one answered above the reply.</p>
         <ul>
           <li><strong>Documents agent</strong> answers from the PDF and Word files you upload, and cites the file and page.</li>
           <li><strong>Database agent</strong> answers from a database of 200 popular stocks
             by writing and running read-only SQL. Expand <em>Used tool</em> above an answer to see the query it ran.</li>
+          <li><strong>Research agent</strong> looks a topic up on the web, Wikipedia and arXiv (plus the stock database and
+            your files when they help), then writes a short summary or a structured report with sources.</li>
         </ul>
         <p>Write in English or Vietnamese; answers come back in the language you used.</p>
 
@@ -118,6 +120,16 @@
         <p class="muted">Prices are end-of-day data from Yahoo Finance, not live quotes. They update automatically every weekday
           evening after the US market closes. This is not financial advice.</p>
 
+        <h2>Research a topic</h2>
+        <p>Say "research", "look up online", "latest news about…" or ask for a report. The agent searches several sources
+          (you can follow along under <em>Used tool</em>), then answers with a summary, or with a report, comparison or
+          company brief when you ask for one.</p>
+        <div class="examples">
+          <button class="example">Research the latest news about NVIDIA and compare it with its stock performance.</button>
+          <button class="example">Write a short report on retrieval-augmented generation, with recent papers.</button>
+        </div>
+        <p class="muted">Research takes more AI calls than other questions, so it is slower and uses more of the free quota.</p>
+
         <h2>Chats and memory</h2>
         <ul>
           <li><strong>+ New chat</strong> starts a fresh conversation. Earlier chats are in the sidebar; one conversation can mix document and stock questions.</li>
@@ -137,12 +149,14 @@
 
       <div data-lang="vi">
         <h1>Hướng dẫn sử dụng smallie</h1>
-        <p>smallie là trợ lý trò chuyện với hai chuyên gia. Bạn chỉ cần hỏi; ứng dụng tự chọn chuyên gia phù hợp cho từng
+        <p>smallie là trợ lý trò chuyện với ba chuyên gia. Bạn chỉ cần hỏi; ứng dụng tự chọn chuyên gia phù hợp cho từng
           tin nhắn và hiển thị chuyên gia đã trả lời phía trên câu trả lời.</p>
         <ul>
           <li><strong>Trợ lý tài liệu</strong> trả lời dựa trên các tệp PDF và Word bạn tải lên, kèm trích dẫn tên tệp và số trang.</li>
           <li><strong>Trợ lý cơ sở dữ liệu</strong> trả lời dựa trên cơ sở dữ liệu 200 cổ phiếu phổ biến
             bằng cách viết và chạy câu lệnh SQL chỉ đọc. Mở mục <em>Đã dùng công cụ</em> phía trên câu trả lời để xem câu lệnh đã chạy.</li>
+          <li><strong>Trợ lý nghiên cứu</strong> tra cứu một chủ đề trên web, Wikipedia và arXiv (cùng cơ sở dữ liệu cổ phiếu
+            và tệp của bạn khi hữu ích), rồi viết bản tóm tắt ngắn hoặc báo cáo có cấu trúc kèm nguồn.</li>
         </ul>
         <p>Bạn có thể viết bằng tiếng Việt hoặc tiếng Anh; câu trả lời sẽ dùng ngôn ngữ bạn đã viết.</p>
 
@@ -174,6 +188,16 @@
         </div>
         <p class="muted">Giá là dữ liệu cuối ngày từ Yahoo Finance, không phải giá trực tiếp. Dữ liệu tự động cập nhật vào mỗi tối
           ngày làm việc, sau khi thị trường Mỹ đóng cửa. Đây không phải lời khuyên đầu tư.</p>
+
+        <h2>Nghiên cứu một chủ đề</h2>
+        <p>Hãy nói "nghiên cứu", "tìm hiểu", "tin tức mới nhất về…" hoặc yêu cầu một báo cáo. Trợ lý tìm trong nhiều nguồn
+          (bạn có thể theo dõi trong mục <em>Đã dùng công cụ</em>), rồi trả lời bằng bản tóm tắt, hoặc bằng báo cáo, bảng so sánh
+          hay hồ sơ công ty khi bạn yêu cầu.</p>
+        <div class="examples">
+          <button class="example">Tìm hiểu tin tức mới nhất về NVIDIA và so sánh với diễn biến giá cổ phiếu.</button>
+          <button class="example">Viết báo cáo ngắn về retrieval-augmented generation, kèm các bài báo gần đây.</button>
+        </div>
+        <p class="muted">Nghiên cứu cần nhiều lượt gọi AI hơn các câu hỏi khác, nên chậm hơn và tốn nhiều hạn mức miễn phí hơn.</p>
 
         <h2>Cuộc trò chuyện và ghi nhớ</h2>
         <ul>

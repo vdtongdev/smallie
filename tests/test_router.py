@@ -6,6 +6,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from app.agents.base import AgentSpec
 from app.agents.registry import AGENTS, MESSAGE_ROUTES
 from app.agents.docs import agent as docs_agent
+from app.agents.research import agent as research_agent
 from app.agents.sql import agent as sql_agent
 from app.core.memory import AgentContext
 from app.orchestration import router as router_module
@@ -73,10 +74,10 @@ async def test_forced_agent_skips_the_model(monkeypatch):
     assert await router(state, _runtime(agent="docs")) == {"route": "docs"}
 
 
-async def test_no_documents_routes_to_sql_without_a_model_call(monkeypatch):
+async def test_only_available_agent_is_used_without_a_model_call(monkeypatch):
     monkeypatch.setattr(router_module, "get_chat_model", lambda *a, **k: UnusedModel())
     monkeypatch.setattr(docs_agent, "document_names", lambda user_id: [])
-    router = router_module.build_router()
+    router = router_module.build_router((docs_agent.SPEC, sql_agent.SPEC))  # no documents: sql is the only one
     state = {"messages": [HumanMessage("what does my contract say?")]}
     assert await router(state, _runtime()) == {"route": "sql"}
 
@@ -88,7 +89,7 @@ async def test_router_asks_the_model_when_documents_exist(monkeypatch):
     router = router_module.build_router()
     state = {"messages": [HumanMessage("how many vacation days do I get?")]}
     assert await router(state, _runtime()) == {"route": "docs"}
-    assert "Reply with exactly one word: docs or sql." in model.prompts[0]
+    assert "Reply with exactly one word: docs, sql or research." in model.prompts[0]
     assert "The user's uploaded documents: handbook.pdf" in model.prompts[0]
 
 
@@ -142,7 +143,31 @@ async def test_model_is_offered_only_available_agents(monkeypatch):
     messages = [HumanMessage("hi"), AIMessage("hello", name="web_agent"), HumanMessage("what is smallie?")]
     assert await router({"messages": messages}, _runtime()) == {"route": "web"}
     prompt = model.prompts[0]
-    assert "Reply with exactly one word: sql or web." in prompt
+    assert "Reply with exactly one word: sql, research or web." in prompt
     assert f"- web: {WEB.description}" in prompt
     assert "previous turn (web)" in prompt
     assert "- docs:" not in prompt  # no documents, so not offered
+
+
+async def test_research_hints_route_to_research(monkeypatch):
+    monkeypatch.setattr(sql_agent, "stock_tickers", lambda: frozenset({"NVDA"}))
+    monkeypatch.setattr(docs_agent, "document_names", lambda user_id: ["handbook.pdf"])
+    available = await available_agents("u1", AGENTS)
+    assert obvious_route("Research the EV battery market", available) == "research"
+    assert obvious_route("latest news about OpenRouter?", available) == "research"
+    assert obvious_route("Tìm hiểu về LangGraph giúp tôi", available) == "research"
+    assert obvious_route("any arxiv papers on RAG evaluation?", available) == "research"
+    # A ticker and a research word: both fit, so the model decides.
+    assert obvious_route("latest news about NVDA", available) is None
+
+
+async def test_research_is_offered_to_the_model_and_follow_ups_return_to_it(monkeypatch):
+    model = RecordingModel("research")
+    monkeypatch.setattr(router_module, "get_chat_model", lambda *a, **k: model)
+    monkeypatch.setattr(docs_agent, "document_names", lambda user_id: [])
+    router = router_module.build_router()
+    messages = [HumanMessage("research X"), AIMessage("## X ...", name="report_agent"), HumanMessage("make it shorter")]
+    assert previous_route(messages, MESSAGE_ROUTES) == "research"
+    assert await router({"messages": messages}, _runtime()) == {"route": "research"}
+    assert f"- research: {research_agent.SPEC.description}" in model.prompts[0]
+    assert "previous turn (research)" in model.prompts[0]

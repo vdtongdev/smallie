@@ -181,6 +181,11 @@ button.link { border: none; background: transparent; color: var(--accent); paddi
 .msg.assistant th, .msg.assistant td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; }
 .msg.assistant pre { background: var(--code-bg); padding: 8px 10px; border-radius: 8px; overflow-x: auto; }
 .msg.assistant code { font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+.msg.assistant a { color: var(--accent); overflow-wrap: anywhere; }
+.msg.assistant a.cite { font-size: 11px; text-decoration: none; padding: 0 1px; }
+.msg.assistant a.cite:hover { text-decoration: underline; }
+.msg.assistant li.ref-flash { animation: ref-flash 1.6s ease-out; border-radius: 4px; }
+@keyframes ref-flash { from { background: var(--user-bubble); } to { background: transparent; } }
 
 .tool {
   font-size: 13px;

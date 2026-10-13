@@ -7,12 +7,13 @@ const state = {
   conversationId: null,
   busy: false,
   docsPoll: null,
-  agents: {}, // route -> {en, vi} badge labels, from /api/agents
+  agents: {}, // route -> {labels: {en, vi}, steps: {step: {en, vi}}}, from /api/agents
 };
 
 const $ = (id) => document.getElementById(id);
 const t = (key) => I18N[state.lang][key] ?? key;
-const agentLabel = (route) => state.agents[route]?.[state.lang] ?? route;
+const agentLabel = (route) => state.agents[route]?.labels[state.lang] ?? route;
+const stepLabel = (route, step) => state.agents[route]?.steps?.[step]?.[state.lang] ?? step;
 
 function localGet(key) {
   try { return localStorage.getItem(key); } catch { return null; }
@@ -34,9 +35,77 @@ async function api(path, options = {}) {
   return res.status === 204 ? null : res.json();
 }
 
+// A link written as "example.com/page" (no scheme) would resolve inside the app; make it absolute.
+const BARE_DOMAIN = /^(?!.*\.(?:pdf|docx?)$)(?:www\.)?[\p{L}\d-]+(?:\.[\p{L}\d-]+)*\.[a-z]{2,}(?:[/?#]|$)/iu;
+
+// Source links open in a new tab, so clicking one doesn't leave the chat.
+DOMPurify.addHook("afterSanitizeAttributes", (node) => {
+  if (node.tagName !== "A") return;
+  const href = node.getAttribute("href") || "";
+  if (BARE_DOMAIN.test(href)) node.setAttribute("href", `https://${href}`);
+  if (/^https?:/i.test(node.getAttribute("href"))) {
+    node.setAttribute("target", "_blank");
+    node.setAttribute("rel", "noopener noreferrer");
+  }
+});
+
 function renderMarkdown(text) {
   return DOMPurify.sanitize(marked.parse(text || ""));
 }
+
+// Reference numbers ("...text.[1][2]" or "[1, 2]") point into the numbered source list at the
+// end of the same message (its last top-level <ol>); each becomes a superscript that scrolls there.
+const CITE_RE = /\[(\d{1,2}(?:\s*,\s*\d{1,2})*)\]/g;
+
+function linkCitations(el) {
+  const refs = [...el.querySelectorAll(":scope > ol")].pop();
+  if (!refs) return;
+  const count = refs.children.length;
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
+    acceptNode: (node) =>
+      refs.contains(node) || node.parentElement.closest("a, code, pre") || !/\[\d/.test(node.data)
+        ? NodeFilter.FILTER_REJECT
+        : NodeFilter.FILTER_ACCEPT,
+  });
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  for (const node of nodes) {
+    const frag = document.createDocumentFragment();
+    let last = 0;
+    for (const match of node.data.matchAll(CITE_RE)) {
+      const nums = match[1].split(",").map((n) => Number(n.trim()));
+      if (nums.some((n) => n < 1 || n > count)) continue;
+      frag.append(node.data.slice(last, match.index));
+      for (const n of nums) {
+        const sup = document.createElement("sup");
+        const a = document.createElement("a");
+        a.className = "cite";
+        a.href = "#";
+        a.dataset.ref = n;
+        a.textContent = n;
+        a.title = refs.children[n - 1].textContent.trim();
+        sup.append(a);
+        frag.append(sup);
+      }
+      last = match.index + match[0].length;
+    }
+    if (!last) continue;
+    frag.append(node.data.slice(last));
+    node.replaceWith(frag);
+  }
+}
+
+$("messages").addEventListener("click", (e) => {
+  const cite = e.target.closest("a.cite");
+  if (!cite) return;
+  e.preventDefault();
+  const item = [...cite.closest(".msg").querySelectorAll(":scope > ol")].pop()?.children[cite.dataset.ref - 1];
+  if (!item) return;
+  item.scrollIntoView({ behavior: "smooth", block: "center" });
+  item.classList.remove("ref-flash");
+  void item.offsetWidth; // restart the animation on repeated clicks
+  item.classList.add("ref-flash");
+});
 
 // ---------- i18n ----------
 function applyLanguage() {
@@ -50,12 +119,14 @@ function applyLanguage() {
 }
 
 function labelAgentBadges() {
-  document.querySelectorAll(".agent-badge").forEach((el) => (el.textContent = agentLabel(el.dataset.agent)));
+  document.querySelectorAll(".agent-badge").forEach((el) => (el.textContent = badgeLabel(el)));
 }
+
+const badgeLabel = (el) => (el.dataset.step ? stepLabel(el.dataset.agent, el.dataset.step) : agentLabel(el.dataset.agent));
 
 async function loadAgents() {
   const agents = await api("/agents").catch(() => []);
-  state.agents = Object.fromEntries(agents.map((a) => [a.route, a.labels]));
+  state.agents = Object.fromEntries(agents.map((a) => [a.route, { labels: a.labels, steps: a.steps || {} }]));
   labelAgentBadges();
 }
 
@@ -206,20 +277,26 @@ function addAssistantMessage() {
   div.className = "msg assistant";
   $("messages").append(div);
   let text = "";
+  const render = () => { div.innerHTML = renderMarkdown(text); linkCitations(div); scrollToBottom(); };
   return {
-    append(chunk) { text += chunk; div.innerHTML = renderMarkdown(text); scrollToBottom(); },
-    update(full) { text = full; div.innerHTML = renderMarkdown(text); scrollToBottom(); },
+    append(chunk) { text += chunk; render(); },
+    update(full) { text = full; render(); },
     isEmpty: () => !text,
     remove: () => div.remove(),
     el: div,
   };
 }
 
-function addAgentBadge(name, before = null) {
+// `step`: a workflow handed over to another of its agents (e.g. research -> writer agent).
+function addAgentBadge(name, before = null, step = null) {
   const div = document.createElement("div");
   div.className = "agent-badge";
   div.dataset.agent = name;
-  div.textContent = agentLabel(name);
+  if (step) div.dataset.step = step;
+  div.textContent = badgeLabel(div);
+  // A workflow's first agent usually has the same label as the turn's badge; don't repeat it.
+  const last = [...$("messages").querySelectorAll(".agent-badge")].pop();
+  if (step && last?.textContent === div.textContent) return;
   if (before) before.before(div);
   else $("messages").append(div);
 }
@@ -228,7 +305,7 @@ function addToolCall(name, args) {
   const details = document.createElement("details");
   details.className = "tool";
   const summary = document.createElement("summary");
-  const shown = args.query ?? args.fact ?? JSON.stringify(args);
+  const shown = args.query ?? args.sql ?? args.title ?? args.urls ?? args.name ?? args.fact ?? JSON.stringify(args);
   summary.textContent = `${t("usedTool")}: ${name} — ${String(shown).slice(0, 120)}`;
   const pre = document.createElement("pre");
   pre.textContent = typeof args.query === "string" ? args.query : JSON.stringify(args, null, 2);
@@ -293,6 +370,9 @@ async function sendMessage(text) {
             break;
           case "agent":
             addAgentBadge(event.name, current.el);
+            break;
+          case "step":
+            addAgentBadge(event.agent, current.el, event.name);
             break;
           case "done":
             finished = true;

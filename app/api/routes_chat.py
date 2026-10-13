@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+from collections.abc import AsyncIterator
 
 import openai
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -10,7 +11,7 @@ from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
 from app.core.accounts import get_profile
-from app.agents.registry import ROUTES
+from app.agents.registry import ROUTES, SILENT_STEPS, STEPS
 from app.core.auth import get_current_user
 from app.core.config import get_settings
 from app.core.conversations import create_conversation, get_conversation, list_conversations, touch_conversation
@@ -70,9 +71,8 @@ async def chat(
                 stream_mode=["messages", "updates"],
                 subgraphs=True,
             )
-            async for namespace, mode, chunk in stream:
-                for event in _to_events(mode, chunk, namespace):
-                    yield _sse(event)
+            async for event in _events_from(stream):
+                yield _sse(event)
             finished = True
         except openai.RateLimitError:
             yield _sse({"type": "error", "code": "rate_limit",
@@ -123,12 +123,35 @@ async def _recent_chats(request: Request, user_id: str, current_id: str) -> str:
         return ""
 
 
+async def _events_from(stream) -> AsyncIterator[dict]:
+    """SSE events for a `subgraphs=True` stream, plus a `step` event whenever a workflow
+    moves to another of its steps (e.g. researcher -> report writer)."""
+    current = None
+    async for namespace, mode, chunk in stream:
+        step = _step(namespace)
+        if step and step != current:
+            current = step
+            yield {"type": "step", "agent": step[0], "name": step[1]}
+        for event in _to_events(mode, chunk, namespace):
+            yield event
+
+
+def _step(namespace: tuple[str, ...]) -> tuple[str, str] | None:
+    """(route, step) for chunks from inside a workflow step listed in its spec's `steps`."""
+    if len(namespace) < 2:
+        return None
+    route, step = (segment.split(":", 1)[0] for segment in namespace[:2])
+    return (route, step) if step in STEPS.get(route, ()) else None
+
+
 def _to_events(mode: str, chunk, namespace: tuple[str, ...] = ()) -> list[dict]:
     """SSE events for one stream chunk. `namespace` is () for the assistant graph itself and
     non-empty for chunks from inside an agent subgraph."""
     if mode == "messages":
         message, metadata = chunk
         if isinstance(message, AIMessageChunk) and metadata.get("langgraph_node") == "model" and message.text:
+            if any(segment.split(":", 1)[0] in SILENT_STEPS for segment in namespace):
+                return []  # e.g. a researcher's notes; only the workflow's writer streams
             return [{"type": "token", "text": message.text}]
         return []
 
@@ -148,5 +171,5 @@ def _to_events(mode: str, chunk, namespace: tuple[str, ...] = ()) -> list[dict]:
                 events += [{"type": "tool_call", "name": c["name"], "args": c["args"]} for c in message.tool_calls]
             elif isinstance(message, ToolMessage):
                 events.append({"type": "tool_result", "name": message.name,
-                               "content": str(message.content)[:TOOL_RESULT_PREVIEW]})
+                               "content": (message.text or str(message.content))[:TOOL_RESULT_PREVIEW]})
     return events

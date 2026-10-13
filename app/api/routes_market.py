@@ -5,7 +5,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.auth import get_current_user
-from app.sql.agent import get_readonly_engine
+from app.db import get_readonly_engine
 
 router = APIRouter(tags=["market"])
 

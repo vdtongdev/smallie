@@ -1,6 +1,6 @@
 import pytest
 
-from app.sql.agent import describe_schema, execute_readonly
+from app.agents.sql.tools import describe_schema, execute_readonly
 from tests.conftest import requires_db
 
 

@@ -4,7 +4,7 @@ from langchain_core.embeddings import DeterministicFakeEmbedding
 from langgraph.store.memory import InMemoryStore
 
 from app.config import get_settings
-from app.documents import agent as docs_agent
+from app.agents.docs import tools as docs_tools
 from app.memory import memory_namespace, recall
 from tests.conftest import requires_db
 
@@ -25,12 +25,12 @@ def test_document_search_only_returns_the_users_own_chunks(monkeypatch):
             Document("Bob secret plan", metadata={"user_id": "bob", "filename": "b.pdf", "page": 1}),
         ]
     )
-    monkeypatch.setattr(docs_agent, "get_vector_store", lambda: store)
+    monkeypatch.setattr(docs_tools, "get_vector_store", lambda: store)
     try:
-        result = docs_agent.search_user_chunks("alice", "secret plan")
+        result = docs_tools.search_user_chunks("alice", "secret plan")
         assert "a.pdf" in result and "Alice" in result
         assert "b.pdf" not in result and "Bob" not in result
-        assert "No matching" in docs_agent.search_user_chunks("carol", "secret plan")
+        assert "No matching" in docs_tools.search_user_chunks("carol", "secret plan")
     finally:
         store.delete_collection()
 

@@ -61,6 +61,17 @@ def get_engine() -> Engine:
     return create_engine(get_settings().sqlalchemy_url, pool_pre_ping=True)
 
 
+@lru_cache
+def get_readonly_engine() -> Engine:
+    # The agent_readonly role is already read-only with a 10s timeout; these
+    # connection options repeat that in case the URL points at another role.
+    return create_engine(
+        get_settings().readonly_sqlalchemy_url,
+        pool_pre_ping=True,
+        connect_args={"options": "-c default_transaction_read_only=on -c statement_timeout=10000"},
+    )
+
+
 def init_db() -> None:
     with get_engine().begin() as conn:
         metadata.create_all(conn)

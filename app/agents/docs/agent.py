@@ -1,50 +1,18 @@
 import asyncio
 import re
 
-from langchain.tools import ToolRuntime, tool
 from sqlalchemy import select
 
-from app.agent_factory import build_agent
 from app.agents.base import AgentSpec, RouteInfo
+from app.agents.docs.prompts import DOCS_SYSTEM, ROUTE_DESCRIPTION
+from app.agents.docs.tools import search_documents
+from app.agents.factory import build_agent
 from app.db import documents, get_engine
-from app.documents.ingest import get_vector_store
-from app.memory import AgentContext
-from app.prompts import DOCS_SYSTEM
 
-TOP_K = 6
 MAX_LISTED_DOCUMENTS = 30  # file names shown to the router
 MIN_STEM_CHARS = 4  # shorter file names match too many messages
 
-ROUTE_DESCRIPTION = (
-    "answers from the user's uploaded files (PDF/DOCX): what a document says, summaries, facts, "
-    "policies, contracts or anything else that would be written in their files."
-)
 HINTS = re.compile(r"\b(documents?|files?|pdfs?|docx|uploads?|uploaded|tài liệu|tệp)\b", re.IGNORECASE)
-
-
-def search_user_chunks(user_id: str, query: str, k: int = TOP_K) -> str:
-    """Similarity search restricted to the user's own documents."""
-    hits = get_vector_store().similarity_search(query, k=k, filter={"user_id": {"$eq": user_id}})
-    if not hits:
-        return "No matching passages in the user's documents."
-    parts = []
-    for doc in hits:
-        meta = doc.metadata
-        source = meta.get("filename", "unknown")
-        if meta.get("page"):
-            source += f", p. {meta['page']}"
-        parts.append(f"[{source}]\n{doc.page_content}")
-    return "\n\n---\n\n".join(parts)
-
-
-@tool
-async def search_documents(query: str, runtime: ToolRuntime[AgentContext]) -> str:
-    """Search the user's uploaded PDF/DOCX documents for passages relevant to the query.
-
-    Args:
-        query: A focused search phrase. Works in English or Vietnamese.
-    """
-    return await asyncio.to_thread(search_user_chunks, runtime.context.user_id, query)
 
 
 def document_names(user_id: str) -> list[str]:

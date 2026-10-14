@@ -50,7 +50,39 @@ DOMPurify.addHook("afterSanitizeAttributes", (node) => {
 });
 
 function renderMarkdown(text) {
-  return DOMPurify.sanitize(marked.parse(text || ""));
+  return DOMPurify.sanitize(marked.parse(plainMath(text || "")));
+}
+
+// Models sometimes write LaTeX ("$\rightarrow$", "$5\%$"), which marked shows raw. Known commands
+// become Unicode; a $...$ span loses its $ only when nothing TeX is left, so "$5 to $10" is untouched.
+const TEX_SYMBOLS = {
+  rightarrow: "→", to: "→", longrightarrow: "⟶", leftarrow: "←", gets: "←", leftrightarrow: "↔",
+  Rightarrow: "⇒", implies: "⇒", Leftarrow: "⇐", Leftrightarrow: "⇔", iff: "⇔",
+  uparrow: "↑", downarrow: "↓", nearrow: "↗", searrow: "↘",
+  times: "×", div: "÷", pm: "±", cdot: "·", approx: "≈", sim: "~", neq: "≠", ne: "≠",
+  le: "≤", leq: "≤", ge: "≥", geq: "≥", ll: "≪", gg: "≫", infty: "∞", circ: "°", degree: "°",
+  ldots: "…", dots: "…", cdots: "⋯", checkmark: "✓",
+  alpha: "α", beta: "β", gamma: "γ", delta: "δ", Delta: "Δ", epsilon: "ε", theta: "θ",
+  lambda: "λ", mu: "μ", pi: "π", rho: "ρ", sigma: "σ", Sigma: "Σ", sum: "Σ", tau: "τ", omega: "ω",
+};
+const TEX_CMD_RE = /\\([A-Za-z]+)(?![A-Za-z])/g;
+
+function texToText(s) {
+  return s
+    .replace(/\\(?:text|mathrm|textbf|mathbf)\{([^{}]*)\}/g, "$1")
+    .replace(/\\([%$&#_])/g, "$1")
+    .replace(/\\[,;: ]/g, " ")
+    .replace(TEX_CMD_RE, (m, name) => TEX_SYMBOLS[name] ?? m);
+}
+
+function plainMath(text) {
+  return text
+    .replace(/\$(\S(?:[^$\n]*\S)?)\$/g, (m, inner) => {
+      if (!inner.includes("\\")) return m;
+      const out = texToText(inner);
+      return /\\[A-Za-z]/.test(out) ? m : out.replace(/[{}]/g, "");
+    })
+    .replace(TEX_CMD_RE, (m, name) => TEX_SYMBOLS[name] ?? m);
 }
 
 // Reference numbers ("...text.[1][2]" or "[1, 2]") point into the numbered source list at the

@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     openrouter_chat_model: str = "google/gemma-4-31b-it:free"
     openrouter_fallback_model: str = ""  # comma-separated, tried in order
     openrouter_quantizations: str = ""  # comma-separated provider precisions, e.g. "bf16,fp8"; empty = any
-    openrouter_router_model: str = ""  # picks docs vs. SQL agent per message; empty = chat model
+    openrouter_orchestrator_model: str = ""  # the front-door agent; empty = chat model
     openrouter_embed_model: str = "baai/bge-m3"
     embed_dim: int = 1024
 
@@ -44,6 +44,8 @@ class Settings(BaseSettings):
     # Another Postgres the researcher may read through the external_db MCP server; empty = none.
     external_database_url: str = ""
     research_max_model_calls: int = 8
+    # Model calls of the orchestrator per message: decide, then write up results (specialists' own calls not included).
+    orchestrator_max_model_calls: int = 4
 
     @property
     def sqlalchemy_url(self) -> str:

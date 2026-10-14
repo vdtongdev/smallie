@@ -1,12 +1,8 @@
 """The research workflow inside the real assistant graph, with a scripted model instead of OpenRouter."""
 
 import json
-import re
-from collections.abc import Iterator
 
-from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
-from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.store.memory import InMemoryStore
 
@@ -15,51 +11,18 @@ from app.agents.research import agent as research_agent
 from app.agents.sql import agent as sql_agent
 from app.api.routes_chat import _events_from
 from app.core.memory import AgentContext
+from app.core.prompts import reply_language
 from app.orchestration.graph import build_assistant
+from tests.scripted import scripted as _turn
 
 NOTES = "FINDINGS:\n- LangGraph is a library for agent graphs [source: https://example.com/lg]\nGAPS: none"
-
-
-class ScriptedModel(BaseChatModel):
-    """Replies with the scripted messages in order, whatever the agent; streams word by word."""
-
-    replies: Iterator[AIMessage]
-    prompts: list = []
-
-    @property
-    def _llm_type(self) -> str:
-        return "scripted"
-
-    def bind_tools(self, tools, **kwargs):
-        return self
-
-    def _generate(self, messages, stop=None, run_manager=None, **kwargs) -> ChatResult:
-        self.prompts.append(messages)
-        return ChatResult(generations=[ChatGeneration(message=next(self.replies))])
-
-    def _stream(self, messages, stop=None, run_manager=None, **kwargs):
-        self.prompts.append(messages)
-        reply = next(self.replies)
-        if reply.tool_calls:
-            chunks = [{"name": c["name"], "args": json.dumps(c["args"]), "id": c["id"], "index": i}
-                      for i, c in enumerate(reply.tool_calls)]
-            yield ChatGenerationChunk(message=AIMessageChunk(content="", tool_call_chunks=chunks))
-            return
-        for piece in filter(None, re.split(r"(\s+)", reply.content)):
-            chunk = ChatGenerationChunk(message=AIMessageChunk(content=piece))
-            if run_manager:
-                run_manager.on_llm_new_token(piece, chunk=chunk)
-            yield chunk
-
-
-def _turn(*replies: AIMessage) -> ScriptedModel:
-    return ScriptedModel(replies=iter(replies), prompts=[])
 
 
 def _assistant(monkeypatch, model):
     monkeypatch.setattr(factory, "get_chat_model", lambda *a, **k: model)
     monkeypatch.setattr(sql_agent, "describe_schema", lambda: "")
     monkeypatch.setattr(research_agent, "describe_schema", lambda: "")
+    monkeypatch.setattr("app.agents.docs.agent.document_names", lambda user_id: [])
     return build_assistant(InMemorySaver(), InMemoryStore())
 
 
@@ -73,37 +36,36 @@ async def _run(assistant, message: str, thread: str = "t1") -> list[dict]:
     return [event async for event in _events_from(stream)]
 
 
-async def test_findings_flow_to_the_writer_and_only_the_answer_is_kept(monkeypatch):
+async def test_findings_flow_to_the_orchestrator_and_only_the_answer_is_kept(monkeypatch):
     model = _turn(
         AIMessage("", tool_calls=[{"name": "load_skill", "args": {"name": "academic"}, "id": "c1"}]),
         AIMessage(NOTES),  # researcher's notes: must not stream
-        AIMessage("LangGraph builds agent graphs [example](https://example.com/lg)."),  # writer
+        AIMessage("LangGraph builds agent graphs [example](https://example.com/lg)."),  # orchestrator
     )
     assistant = _assistant(monkeypatch, model)
     events = await _run(assistant, "Tìm hiểu về LangGraph")
 
-    assert {"type": "agent", "name": "research"} in events
-    # Each workflow agent is announced once, before its own tool calls and tokens.
-    kinds = [e["type"] if e["type"] != "step" else e["name"] for e in events]
-    assert [e for e in events if e["type"] == "step"] == [
-        {"type": "step", "agent": "research", "name": "gather"},
-        {"type": "step", "agent": "research", "name": "write"},
-    ]
-    assert kinds.index("gather") < kinds.index("tool_call") < kinds.index("write") < kinds.index("token")
+    assert events[0] == {"type": "agent", "name": "research"}
+    kinds = [e["type"] for e in events]
+    assert kinds.index("tool_call") < kinds.index("token")
     assert {"type": "tool_call", "name": "load_skill", "args": {"name": "academic"}} in events
     assert any(e["type"] == "tool_result" and e["name"] == "load_skill" for e in events)
     streamed = "".join(e["text"] for e in events if e["type"] == "token")
     assert "LangGraph builds agent graphs" in streamed
     assert "FINDINGS" not in streamed
 
-    # The writer saw the notes as its last message.
-    writer_prompt = model.prompts[-1]
-    assert "RESEARCH FINDINGS" in writer_prompt[-1].content and NOTES in writer_prompt[-1].content
+    # The orchestrator saw the notes as its last message and got the writing rules, in Vietnamese,
+    # without the research tool: the research is done.
+    prompt = model.prompts[-1]
+    offered = [t["function"]["name"] for t in model.tools[-1]]
+    assert "ask_research" not in offered and "ask_sql" in offered
+    assert "RESEARCH FINDINGS" in prompt[-1].content and NOTES in prompt[-1].content
+    assert "CITATIONS" in prompt[0].content and "Write the whole answer in Vietnamese" in prompt[0].content
 
-    # The thread keeps only the question and the writer's answer.
+    # The thread keeps only the question and the orchestrator's answer.
     messages = (await assistant.aget_state({"configurable": {"thread_id": "t1"}})).values["messages"]
     assert [type(m) for m in messages] == [HumanMessage, AIMessage]
-    assert messages[-1].name == "report_agent"
+    assert messages[-1].name == "orchestrator"
     assert not any(isinstance(m, ToolMessage) for m in messages)
 
 
@@ -114,6 +76,8 @@ async def test_researcher_does_not_carry_old_tool_output_into_the_next_turn(monk
     await _run(assistant, "and B?")
     second_research_prompt = model.prompts[2]  # [system prompt, *conversation]
     assert [m.content for m in second_research_prompt[1:]] == ["research A", "First answer.", "and B?"]
+    # The first turn's findings were used up: the second write-up only sees the new ones.
+    assert sum("RESEARCH FINDINGS" in m.content for m in model.prompts[3]) == 1
 
 
 def test_cut_short_research_hands_over_raw_tool_results():
@@ -231,5 +195,17 @@ async def test_cited_wikipedia_articles_are_fetched_once(monkeypatch):
 
 
 def test_reply_language_follows_the_latest_question():
-    assert research_agent.reply_language([HumanMessage("hello"), HumanMessage("nguyễn nhật ánh là ai")]) == "Vietnamese"
-    assert "latest message" in research_agent.reply_language([HumanMessage("who is he?")])
+    assert reply_language([HumanMessage("hello"), HumanMessage("nguyễn nhật ánh là ai")]) == "Vietnamese"
+    assert "latest message" in reply_language([HumanMessage("who is he?")])
+
+
+def test_web_search_alongside_wikipedia_only_when_web_search_loaded(monkeypatch):
+    prompts = []
+    monkeypatch.setattr(research_agent, "describe_schema", lambda: "")
+    monkeypatch.setattr(research_agent, "build_agent", lambda **kw: prompts.append(kw["system_prompt"]))
+    monkeypatch.setattr(research_agent, "_mcp_servers", ["tavily", "knowledge"])
+    research_agent.build_research_workflow()
+    monkeypatch.setattr(research_agent, "_mcp_servers", ["knowledge"])
+    research_agent.build_research_workflow()
+    assert "Whenever you search Wikipedia, also run a web search" in prompts[0]
+    assert "Whenever you search Wikipedia" not in prompts[1]

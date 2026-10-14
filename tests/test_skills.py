@@ -1,5 +1,10 @@
-from app.agents.research.agent import REPORTER_SKILLS, RESEARCHER_SKILLS
+from pathlib import Path
+
+import app.orchestration
+from app.agents.research.agent import RESEARCHER_SKILLS
 from app.agents.skills import load_skills, make_load_skill_tool, parse_skill, skills_inline, skills_section
+
+REPORTER_SKILLS = load_skills(Path(app.orchestration.__file__).parent / "formats")
 
 
 def test_parse_skill_reads_frontmatter_and_body():
@@ -38,7 +43,7 @@ def test_research_skills_are_complete_and_listed():
             assert f"- {skill.name}: {skill.description}" in section
 
 
-def test_reporter_formats_are_inlined_in_full():
+def test_answer_formats_are_inlined_in_full():
     formats = skills_inline(REPORTER_SKILLS)
     for skill in REPORTER_SKILLS.values():
         assert f"### {skill.name}\nUse for: {skill.description}\n{skill.body}" in formats

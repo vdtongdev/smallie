@@ -1,7 +1,7 @@
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 from langchain.agents import create_agent
-from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRequest, dynamic_prompt
+from langchain.agents.middleware import AgentMiddleware, ModelCallLimitMiddleware, ModelRequest, dynamic_prompt
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.store.base import BaseStore
@@ -20,11 +20,16 @@ def build_agent(
     checkpointer: BaseCheckpointSaver | None = None,
     store: BaseStore | None = None,
     max_model_calls: int | None = None,
+    model: str | None = None,
+    prompt_extra: Callable[[ModelRequest], str] | None = None,
+    middleware: Sequence[AgentMiddleware] = (),
 ):
     """An agent with the given tools plus long-term memory tools and a memory-aware prompt.
 
     Leave checkpointer/store unset when the agent runs as a subgraph of the assistant
-    (app/orchestration/graph.py); it then uses the parent graph's.
+    (app/orchestration/graph.py); it then uses the parent graph's. `model` overrides
+    OPENROUTER_CHAT_MODEL; `prompt_extra(request)` is appended to the prompt on every model call;
+    `middleware` runs after the built-in ones.
     """
 
     @dynamic_prompt
@@ -36,6 +41,8 @@ def build_agent(
         prompt += MEMORIES_SECTION.format(memories=context.memories or "(nothing yet)")
         if context.recent_chats:
             prompt += RECENT_CHATS_SECTION.format(recent_chats=context.recent_chats)
+        if prompt_extra:
+            prompt += prompt_extra(request)
         return prompt
 
     # Stops runaway tool loops from burning the free quota; the fallback model is handled
@@ -43,12 +50,10 @@ def build_agent(
     call_limit = ModelCallLimitMiddleware(
         run_limit=max_model_calls or get_settings().max_model_calls, exit_behavior="end"
     )
-    middleware = [prompt_with_memories, call_limit]
-
     return create_agent(
-        get_chat_model(),
+        get_chat_model(model),
         tools=[*tools, *MEMORY_TOOLS],
-        middleware=middleware,
+        middleware=[prompt_with_memories, call_limit, *middleware],
         context_schema=AgentContext,
         checkpointer=checkpointer,
         store=store,

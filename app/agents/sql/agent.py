@@ -6,7 +6,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.agents.base import AgentSpec, RouteInfo
 from app.agents.factory import build_agent
-from app.agents.sql.prompts import ROUTE_DESCRIPTION, SQL_SYSTEM
+from app.agents.sql.prompts import ROUTE_DESCRIPTION, SQL_RULES, SQL_SYSTEM, TOOL_DESCRIPTION
 from app.agents.sql.tools import describe_schema, run_sql
 from app.core.db import get_readonly_engine
 from app.core.prompts import LANGUAGE_RULE, MEMORY_RULE
@@ -45,7 +45,7 @@ async def route_info(user_id: str) -> RouteInfo:
 
 def build_sql_agent():
     system_prompt = SQL_SYSTEM.format(
-        language_rule=LANGUAGE_RULE, memory_rule=MEMORY_RULE, schema=describe_schema()
+        sql_rules=SQL_RULES, language_rule=LANGUAGE_RULE, memory_rule=MEMORY_RULE, schema=describe_schema()
     )
     return build_agent(name="sql_agent", system_prompt=system_prompt, tools=[run_sql])
 
@@ -58,4 +58,5 @@ SPEC = AgentSpec(
     message_names=("sql_agent",),
     hints=HINTS,
     route_info=route_info,
+    tool_description=TOOL_DESCRIPTION,
 )

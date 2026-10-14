@@ -1,10 +1,11 @@
-"""Research workflow: a researcher gathers findings with its tools, a writer turns them into
-the answer (summary or structured report).
+"""Research: a researcher gathers findings with its tools; the orchestrator writes the answer.
 
-    START -> gather (research_agent) -> write (report_agent) -> END
+    START -> gather (research_agent) -> END
 
-Only the writer's final message is added to the conversation; the researcher's tool calls
-show in the UI as progress, but its notes and tool output stay out of the shared history.
+`gather` leaves the linked findings in `findings`, never in the messages: routed here by the
+router, the assistant graph continues to the orchestrator, which composes the answer from them;
+called as the orchestrator's `research` tool, the findings are the tool result. The researcher's
+tool calls show in the UI as progress, but its notes and tool output stay out of the shared history.
 """
 
 import asyncio
@@ -18,7 +19,7 @@ from pathlib import Path
 from typing import Annotated, TypedDict
 from urllib.parse import unquote, urlparse
 
-from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
@@ -29,19 +30,19 @@ from app.agents.docs.tools import search_documents
 from app.agents.factory import build_agent
 from app.agents.research.prompts import (
     DOCUMENTS_LINE,
-    FINDINGS_MESSAGE,
     MARKET_LINE,
-    REPORTER_SYSTEM,
     RESEARCHER_SYSTEM,
     ROUTE_DESCRIPTION,
     SOURCE_LINES,
+    TOOL_DESCRIPTION,
+    WEB_ALONGSIDE_WIKI,
 )
-from app.agents.skills import load_skills, make_load_skill_tool, skills_inline, skills_section
+from app.agents.skills import load_skills, make_load_skill_tool, skills_section
 from app.agents.sql.tools import describe_schema, run_sql
 from app.core.config import get_settings
 from app.core.mcp import open_mcp_tools
 from app.core.memory import AgentContext
-from app.core.prompts import LANGUAGE_RULE, MEMORY_RULE
+from app.core.prompts import MEMORY_RULE
 from app.features.research.mcp_servers.knowledge import wikipedia_article
 from app.features.research.sources import local_servers, remote_servers
 
@@ -49,8 +50,7 @@ log = logging.getLogger(__name__)
 
 SKILLS_DIR = Path(__file__).resolve().parent / "skills"
 RESEARCHER_SKILLS = load_skills(SKILLS_DIR / "researcher")
-REPORTER_SKILLS = load_skills(SKILLS_DIR / "reporter")
-RAW_RESULTS = 4  # tool results handed to the writer when the researcher ran out of steps
+RAW_RESULTS = 4  # tool results handed on when the researcher ran out of steps
 RAW_RESULT_CHARS = 1500
 # Tavily tools that spend many credits per call (the free plan has 1,000/month); search and
 # extract are enough, and fewer tools are easier for small models to choose from.
@@ -65,6 +65,11 @@ HINTS = re.compile(
 # MCP tools loaded by `prepare` at startup, and the servers they came from; `build` runs after it.
 _mcp_tools: list[BaseTool] = []
 _mcp_servers: list[str] = []
+
+
+def mcp_tools() -> list[BaseTool]:
+    """The MCP tools loaded at startup, also offered to the orchestrator (e.g. a quick web search)."""
+    return list(_mcp_tools)
 
 
 async def prepare(stack: AsyncExitStack) -> None:
@@ -109,7 +114,6 @@ _QUOTE = re.compile(r"[\"“]([^\"”]{8,})[\"”]")
 _SECTION_HEADING = re.compile(r"^#{2,6} (.+) \((https?://\S+#\S+)\)\s*$", re.MULTILINE)
 _TITLE_LINE = re.compile(r"^(.+) \((https?://\S+)\)\s*$")
 MAX_ARTICLES = 3  # Wikipedia articles fetched per answer to find the sections facts are in
-_VIETNAMESE = re.compile(r"[ăâđêôơưàáạảãằắặẳẵầấậẩẫèéẹẻẽềếệểễìíịỉĩòóọỏõồốộổỗờớợởỡùúụủũừứựửữỳýỵỷỹ]", re.IGNORECASE)
 PREFIX_WORDS = 6  # when a quote isn't found whole, its first words may still be
 # Characters a text fragment must escape (its own syntax, plus what breaks a Markdown link).
 _FRAGMENT_ESCAPES = {c: f"%{ord(c):02X}" for c in " %&,-#()[]<>\"'"}
@@ -273,10 +277,8 @@ def link_sources(findings: str, pages: list[Page]) -> str:
     return _SOURCE.sub(link, findings)
 
 
-def reply_language(messages: list[AnyMessage]) -> str:
-    """The language the answer must be in, from the user's latest message."""
-    question = next((m.text for m in reversed(messages) if isinstance(m, HumanMessage)), "")
-    return "Vietnamese" if _VIETNAMESE.search(question) else "the language of the user's latest message"
+def findings_result(state: dict) -> str:
+    return state.get("findings") or "NO FINDINGS: the research step produced nothing."
 
 
 def build_research_workflow():
@@ -286,19 +288,13 @@ def build_research_workflow():
         system_prompt=RESEARCHER_SYSTEM.format(
             today=date.today().isoformat(),
             sources=sources(_mcp_servers),
+            web_rule=WEB_ALONGSIDE_WIKI if "tavily" in _mcp_servers else "",
             skills=skills_section(RESEARCHER_SKILLS),
             memory_rule=MEMORY_RULE,
             schema=describe_schema(),
         ),
         tools=[*mcp_tools, search_documents, run_sql, make_load_skill_tool(RESEARCHER_SKILLS)],
         max_model_calls=get_settings().research_max_model_calls,
-    )
-    reporter = build_agent(
-        name="report_agent",
-        system_prompt=REPORTER_SYSTEM.format(
-            formats=skills_inline(REPORTER_SKILLS), language_rule=LANGUAGE_RULE, memory_rule=MEMORY_RULE
-        ),
-        tools=[],
     )
 
     async def gather(state: ResearchState, runtime: Runtime[AgentContext]) -> dict:
@@ -308,21 +304,10 @@ def build_research_workflow():
         pages = await with_wikipedia_articles(findings, pages_from(messages))
         return {"findings": link_sources(findings, pages)}
 
-    async def write(state: ResearchState, runtime: Runtime[AgentContext]) -> dict:
-        handoff = HumanMessage(FINDINGS_MESSAGE.format(
-            findings=state["findings"], language=reply_language(state["messages"])))
-        result = await reporter.ainvoke({"messages": [*state["messages"], handoff]}, context=runtime.context)
-        answer = next((m for m in reversed(result["messages"]) if isinstance(m, AIMessage) and m.text), None)
-        if answer is None:
-            answer = AIMessage("Sorry, I couldn't write up the research this time.", name="report_agent")
-        return {"messages": [answer]}
-
     graph = StateGraph(ResearchState, context_schema=AgentContext)
     graph.add_node("gather", gather)
-    graph.add_node("write", write)
     graph.add_edge(START, "gather")
-    graph.add_edge("gather", "write")
-    graph.add_edge("write", END)
+    graph.add_edge("gather", END)
     return graph.compile(name="research")
 
 
@@ -331,12 +316,11 @@ SPEC = AgentSpec(
     description=ROUTE_DESCRIPTION,
     labels={"en": "Research agent", "vi": "Trợ lý nghiên cứu"},
     build=build_research_workflow,
-    message_names=("research_agent", "report_agent"),
+    message_names=("research_agent",),
     hints=HINTS,
     prepare=prepare,
     silent_steps=("gather",),
-    steps={
-        "gather": {"en": "Research agent", "vi": "Trợ lý nghiên cứu"},
-        "write": {"en": "Writer agent", "vi": "Trợ lý viết báo cáo"},
-    },
+    tool_description=TOOL_DESCRIPTION,
+    answers_directly=False,
+    result=findings_result,
 )

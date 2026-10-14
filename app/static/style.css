@@ -9,6 +9,15 @@
   --user-bubble: #e6f0ec;
   --danger: #b3412f;
   --code-bg: #f0efeb;
+  /* Chart series: the dataviz reference palette's 8 categorical slots, in its validated order. */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #6250d6;
+  --series-8: #e34948;
   color-scheme: light;
 }
 
@@ -24,6 +33,15 @@
     --user-bubble: #23342e;
     --danger: #e0735f;
     --code-bg: #2a2a28;
+    /* The same hues, stepped for a dark surface (not an automatic flip). */
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #008300;
+    --series-7: #9085e9;
+    --series-8: #e66767;
     color-scheme: dark;
   }
 }
@@ -195,6 +213,25 @@ button.link { border: none; background: transparent; color: var(--accent); paddi
   max-width: 820px;
 }
 .tool summary { cursor: pointer; }
+
+.chart-card {
+  margin: 0;
+  width: 100%;
+  max-width: 820px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px 8px;
+  box-sizing: border-box;
+}
+.chart-title { font-weight: 600; margin-bottom: 8px; color: var(--text); }
+.chart-frame { position: relative; width: 100%; }
+.chart-actions { display: flex; gap: 16px; align-items: flex-start; font-size: 13px; color: var(--muted); margin-top: 6px; }
+.chart-actions summary { cursor: pointer; }
+.chart-actions table { border-collapse: collapse; margin-top: 6px; display: block; max-height: 260px; overflow: auto; }
+.chart-actions th, .chart-actions td { border: 1px solid var(--border); padding: 2px 8px; text-align: left; }
+.link-btn { border: none; background: none; padding: 0; color: var(--accent); font: inherit; cursor: pointer; }
+.link-btn:hover { text-decoration: underline; }
 .tool pre { white-space: pre-wrap; background: var(--code-bg); padding: 6px 8px; border-radius: 6px; max-height: 260px; overflow: auto; }
 
 .composer { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border); background: var(--surface); }

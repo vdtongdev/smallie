@@ -36,6 +36,8 @@ class AgentContext:
     memories: str = ""
     recent_chats: str = ""  # latest turns of the user's other chats
     agent: str = "auto"  # "auto" lets the router pick; a registered route (app/agents/registry.py) forces that agent
+    notes: str = ""  # per-request notes for the orchestrator's prompt (specialists available to this user)
+    mentioned: tuple[str, ...] = ()  # routes the latest message points to (hints, matches, mentions)
 
 
 def memory_namespace(user_id: str) -> tuple[str, ...]:

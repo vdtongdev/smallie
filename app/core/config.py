@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     openrouter_api_key: str = ""
     openrouter_chat_model: str = "google/gemma-4-31b-it:free"
     openrouter_fallback_model: str = ""  # comma-separated, tried in order
+    openrouter_quantizations: str = ""  # comma-separated provider precisions, e.g. "bf16,fp8"; empty = any
     openrouter_router_model: str = ""  # picks docs vs. SQL agent per message; empty = chat model
     openrouter_embed_model: str = "baai/bge-m3"
     embed_dim: int = 1024

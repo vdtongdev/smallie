@@ -1,10 +1,11 @@
 # [smallie](https://smallie-976519788978.asia-southeast1.run.app/)
 
-LangChain agents behind a FastAPI app with a small web UI. You type into one chat, and a router picks the right agent for each message. There are three agents today, and the code is laid out so more can be added (see "Adding an agent" below):
+LangChain agents behind a FastAPI app with a small web UI. You type into one chat, and an **orchestrator** handles each message. It answers general questions itself (explanations, maths, writing, small talk, with a quick web search for fresh facts). It hands a question to the right specialist, or asks several specialists and writes the combined answer. When nothing it has can answer, it says so. There are four specialists today, and the code is laid out so more can be added (see "Adding an agent" below):
 
 - **Documents**: upload PDF/DOCX files and ask questions about them. Answers cite the file and page.
 - **Database**: ask questions in plain language about a stock database (200 popular stocks loaded from Yahoo Finance with `yfinance`). The agent writes and runs read-only SQL.
-- **Research**: a two-step workflow. A researcher gathers facts from the web (Tavily), Wikipedia, arXiv, an optional external Postgres, the stock database and your files. A writer then turns those findings into a summary or a structured report with sources. External tools come in through MCP (`langchain-mcp-adapters`), and both steps load "skills" (instruction files) on demand.
+- **Charts**: say "chart", "plot" or "vẽ biểu đồ" to get an interactive line, bar, area, pie or scatter chart of the stock data, or of numbers from another answer ("plot that"). The data goes from the database straight to the chart (Chart.js in the browser); the model only sees a short summary, so charts of hundreds of points stay fast.
+- **Research**: a researcher gathers facts from the web (Tavily), Wikipedia, arXiv, an optional external Postgres, the stock database and your files. The orchestrator then turns those findings into a summary or a structured report with sources. External tools come in through MCP (`langchain-mcp-adapters`), and the researcher loads "skills" (instruction files) on demand.
 
 The **Readme** button in the header explains how to use the app, with example questions.
 
@@ -83,11 +84,11 @@ For access from anywhere without your PC, see [Deploying](#deploying-google-clou
 
 These are set in `.env`; all calls go through OpenRouter.
 
-- `OPENROUTER_CHAT_MODEL`: defaults to a free model with tool calling. Free models come and go, so see the list at https://openrouter.ai/models?supported_parameters=tools&max_price=0. `OPENROUTER_FALLBACK_MODEL` (comma-separated, tried in order) is used automatically when the main one fails or is rate-limited; pick models that write good Vietnamese, since weaker ones slip Chinese, Korean or Thai words into Vietnamese answers.
-- `OPENROUTER_ROUTER_MODEL`: the model that decides which agent answers each message. It makes one short call per message, and the call is skipped when the message clearly points to one agent (a ticker, "stock", a file name, "research", "latest news"…). Empty means it uses `OPENROUTER_CHAT_MODEL`.
+- `OPENROUTER_CHAT_MODEL`: defaults to a free model with tool calling. Free models come and go, so see the list at https://openrouter.ai/models?supported_parameters=tools&max_price=0. `OPENROUTER_FALLBACK_MODEL` (comma-separated, tried in order) is used automatically when the main one fails or is rate-limited; pick models that write good Vietnamese, since weaker ones slip Chinese, Korean or Thai words into Vietnamese answers. With a paid model, `OPENROUTER_QUANTIZATIONS=bf16,fp8` keeps OpenRouter off the cheapest fp4 providers, which slip more.
+- `OPENROUTER_ORCHESTRATOR_MODEL`: the model of the orchestrator. It is skipped when the message clearly points to one agent (a ticker, "stock", a file name, "research", "latest news"…). Empty means it uses `OPENROUTER_CHAT_MODEL`. `ORCHESTRATOR_MAX_MODEL_CALLS` (4) caps its own calls per message.
 - `TAVILY_API_KEY`: web search for the research agent (free 1,000 credits/month at https://app.tavily.com). Without it, research uses the other sources. `MCP_SERVERS` adds more remote MCP servers, and `EXTERNAL_DATABASE_URL` lets the researcher read another Postgres (see `.env.example`).
 - `OPENROUTER_EMBED_MODEL`: defaults to `baai/bge-m3`, which is multilingual and costs about $0.01 per 1M tokens. A $1 top-up covers thousands of documents. The fully free option is `liquid/lfm-2.5-embedding-350m:free`, but the provider may keep and train on your data.
-- **Free-tier limits:** about 20 requests/min, and 50 requests/day unless you have bought at least $10 of credits (then 1000/day). One question takes 2–5 model calls, plus 1 for routing. A research question takes more: up to `RESEARCH_MAX_MODEL_CALLS` (8) for the researcher and 1–2 for the writer.
+- **Free-tier limits:** about 20 requests/min, and 50 requests/day unless you have bought at least $10 of credits (then 1000/day). A general question takes 1 model call. A database or documents question takes 2–5, plus 1 when the orchestrator has to hand it over. A question that combines agents takes 1 + each agent's calls + 1 to write the answer. A research question takes up to `RESEARCH_MAX_MODEL_CALLS` (8) for the researcher plus 1 for the write-up. `uv run python -m scripts.bench_chat` measures the calls and latency of typical questions on your models.
 - **Changing the embedding model or `EMBED_DIM`:** stop the app, then run `uv run python -m scripts.reindex`.
 
 ## How it works
@@ -104,23 +105,26 @@ app/
   features/       data the agents use, with its API and background jobs
     documents/    upload routes, ingest.py (PDF/DOCX -> chunks -> pgvector)
     market/       tickers.py (the 200 stocks), loader.py (yfinance -> market schema), daily scheduler
-  orchestration/  router graph: START -> router -> one agent (as a subgraph) -> END
+  orchestration/  START -> router -> one agent, or the orchestrator (answers, hands off, or asks agents) -> END
+    formats/      answer formats the orchestrator follows when it writes up results (summary, list, report...)
   api/            FastAPI app and shared routes: chat (SSE streaming), conversations, memories, agents, admin
   static/         plain HTML/JS UI with an EN/VI toggle
 db/init/          extension, read-only role, market schema (loaded by db/setup_wsl.sh or on first `docker compose up`)
 Dockerfile        container image for Cloud Run (.gcloudignore / .dockerignore keep secrets out)
-scripts/          load_stocks.py (fill/refresh stock data), reindex.py (after changing the embedding model)
+scripts/          load_stocks.py (fill/refresh stock data), reindex.py (after changing the embedding model),
+                  bench_chat.py (latency and model calls per scenario)
 ```
 
 **Routing**
-- Every message goes to `POST /api/chat/auto`. The router (`app/orchestration/router.py`) works from the agent list in `app/agents/registry.py`, and only offers the agents that have something for you. With no uploaded documents, only the database agent is left, so the message goes straight there.
-- If the message clearly points to one agent (e.g. "stock", a known ticker, one of your file names), it goes there without a model call. Otherwise one short model call sees each agent's description, your file names, the last few turns and your message, and answers with an agent name (`docs` or `sql`). Follow-ups stay with the previous agent unless the topic changes.
+- Every message goes to `POST /api/chat/auto`. If it clearly points to one agent (e.g. "stock", a known ticker, one of your file names, "research") and doesn't also mention another agent's data ("my resume" or a word of one of your file names next to a ticker), the router (`app/orchestration/router.py`) sends it there without a model call. Everything else goes to the orchestrator (`app/orchestration/orchestrator.py`).
+- The orchestrator knows each agent's description, which agents have something for you (no documents uploaded: no documents agent), your file names, and who answered last. It answers itself, **hands off** to one agent (which then replies directly with the whole chat), or **asks** agents with self-contained questions (several in parallel) and writes the answer from their results, with citations. Small free models rarely choose a handoff themselves, so asking a single agent in the first step is turned into a handoff, unless the message also mentions another agent's data. Stock figures and anything in your files always come from those agents, so a question like "which of the most valuable tech companies fits my resume?" asks both and gets one combined answer.
+- Only the final answer is saved to the chat; the agents it asked show in the UI as tool calls.
 - Agents are subgraphs on the same conversation thread, so one chat can switch between them and each sees the whole history. The UI shows which agent answered each turn; badge labels (EN/VI) come from `GET /api/agents`.
 - `POST /api/chat/<agent>` (`/api/chat/docs`, `/api/chat/sql`) skips the router and forces that agent (API only). An unknown agent name returns 404.
 
 **Adding an agent**
-- An agent is a package under `app/agents/<name>/`: `tools.py`, `prompts.py`, and `agent.py`, which builds the agent and defines its `SPEC` (route name, router description, UI labels, hint words). Add the `SPEC` to `AGENTS` in `app/agents/registry.py`. The router, chat API and UI pick it up with no other changes.
-- A multi-step workflow (e.g. a researcher feeding a report writer) is added the same way; its `build` returns a small graph instead of a single agent.
+- An agent is a package under `app/agents/<name>/`: `tools.py`, `prompts.py`, and `agent.py`, which builds the agent and defines its `SPEC` (route name, description, UI labels, hint words, and a `tool_description` if the orchestrator may ask it). Add the `SPEC` to `AGENTS` in `app/agents/registry.py`. The router, orchestrator, chat API and UI pick it up with no other changes.
+- A multi-step workflow is added the same way; its `build` returns a small graph instead of a single agent. An entry that only gathers material (like research) sets `answers_directly=False`, and the orchestrator writes its answer.
 - If the agent needs its own data (tables, ingestion, API routes, background jobs), add a feature under `app/features/<name>/` and register it in `app/features/registry.py`.
 - The full checklist is in CLAUDE.md ("Adding an agent or workflow").
 
@@ -131,9 +135,9 @@ scripts/          load_stocks.py (fill/refresh stock data), reindex.py (after ch
 - The UI remembers the open chat, so reloading the page brings it back.
 
 **Research agent (`app/agents/research/`)**
-- The workflow is `gather` (researcher) → `write` (report writer). Only the writer's answer is saved to the chat and streamed. The researcher's tool calls show in the UI as progress, but its notes don't.
+- The researcher (`gather`) only collects findings; whenever it searches Wikipedia it also runs a web search in the same step (when Tavily is configured); the orchestrator writes the answer, which is the only part saved to the chat and streamed. The researcher's tool calls show in the UI as progress, but its notes don't.
 - MCP (`app/core/mcp.py`): remote servers (Tavily, `MCP_SERVERS`) are loaded with `MultiServerMCPClient`, one short session per tool call. Our own servers (`app/features/research/mcp_servers/`: `knowledge` for Wikipedia and arXiv, `external_db` for `EXTERNAL_DATABASE_URL`) run in-process over MCP's memory transport. That needs no subprocess, which wouldn't start on Windows under the selector event loop. Tools are named `<server>_<tool>`. A server that fails to load is skipped with a warning.
-- Skills (`app/agents/skills.py`) are `skills/<role>/<name>/SKILL.md` files. The prompt lists their names and descriptions, and the agent calls `load_skill` to read one. The researcher's skills are `web-research`, `market-data` and `academic`. The writer's are `summary`, `structured-report`, `comparison` and `company-brief`, picked automatically from the question.
+- Skills (`app/agents/skills.py`) are `skills/<role>/<name>/SKILL.md` files. The prompt lists their names and descriptions, and the agent calls `load_skill` to read one. The researcher's skills are `web-research`, `market-data` and `academic`. The answer formats in `app/orchestration/formats/` (`summary`, `list`, `structured-report`, `comparison` and `company-brief`) are always in the orchestrator's prompt while it writes up results, and it picks one from the question.
 
 **SQL safety**
 - The SQL agent connects as `agent_readonly`. That role has SELECT-only access to the `market` schema, read-only transactions, and a 10 s statement timeout. It cannot see the app's own tables.

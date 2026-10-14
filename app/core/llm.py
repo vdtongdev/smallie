@@ -12,7 +12,12 @@ def get_chat_model(model: str | None = None, *, streaming: bool = True) -> ChatO
     # OpenRouter falls back server-side (`models`), inside the same request. A client-side
     # fallback would send extra requests, and on the free tier every request counts.
     fallbacks = [m for m in (f.strip() for f in s.openrouter_fallback_model.split(",")) if m and m != model]
-    extra_body = {"models": [model, *fallbacks]} if fallbacks else None
+    extra_body = {"models": [model, *fallbacks]} if fallbacks else {}
+    # Paid models are routed to the cheapest provider by default, often an fp4 build, and
+    # heavier quantization makes Vietnamese answers slip into other scripts more often.
+    quantizations = [q.strip() for q in s.openrouter_quantizations.split(",") if q.strip()]
+    if quantizations:
+        extra_body["provider"] = {"quantizations": quantizations}
     return ChatOpenAI(
         model=model,
         api_key=s.openrouter_api_key,
@@ -22,7 +27,7 @@ def get_chat_model(model: str | None = None, *, streaming: bool = True) -> ChatO
         # (Chinese, Korean, Thai) into Vietnamese answers.
         temperature=0,
         streaming=streaming,
-        extra_body=extra_body,
+        extra_body=extra_body or None,
         # Retries also count against the free quota and can't help once the daily cap is hit.
         max_retries=1,
     )

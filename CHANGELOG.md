@@ -5,7 +5,7 @@
 - **SQL Agent**: Natural language queries against stock market schema with read-only role
 - UI: Bilingual (EN/VI) chat interface with file upload, conversation history, Readme modal
 - Memory: Short-term (LangGraph checkpointer), long-term (pgvector semantic store), cross-chat history
-- Auth: Account system with email/password, admin panel for user management
+- Auth: Account system with username/password, admin panel for user management
 - Stock data: Daily market data refresh via yfinance (weekday schedule)
 - Deployment: Google Cloud Run with Neon Postgres
 
@@ -23,3 +23,37 @@
   - Temperature lowered from 0.2 to 0, so the model is less likely to pick unlikely wrong-language words
   - `OPENROUTER_FALLBACK_MODEL` accepts a comma-separated list tried in order; the default puts the free Gemma 4 26B (good at Vietnamese) before Nemotron
   - Note: this only lowers the chance of untranslated words; it doesn't fully fix it. The cause is the models themselves, so Nemotron (and other weak-in-Vietnamese models) can still slip in words, e.g. Russian, whenever it answers
+
+## 0.2.0 - Orchestrator
+- **Orchestrator** (`app/orchestration/orchestrator.py`): the front door for every message that doesn't clearly point to one agent
+  - Answers general questions itself (explanations, maths, writing, small talk), with a quick web search (Tavily or Wikipedia) when the facts may have changed
+  - Hands a message off to one specialist (`handoff`), which then replies directly with the whole chat; a first step that asks just one specialist is turned into a handoff, because free models rarely choose it themselves
+  - Asks several specialists in parallel (`ask_docs`, `ask_sql`, `ask_research`) and writes the combined answer with citations
+  - Says plainly what it can't do (act outside the chat, real-time data, files not uploaded, images…) instead of guessing
+  - Only its final answer is saved to the chat, so the specialists' results don't grow later prompts
+- **Router without a model call**: obvious messages (a ticker, hint words, a file name) still go straight to their agent; everything else goes to the orchestrator. `OPENROUTER_ROUTER_MODEL` is replaced by `OPENROUTER_ORCHESTRATOR_MODEL` and `ORCHESTRATOR_MAX_MODEL_CALLS`
+- **Research writer removed**: the researcher only gathers findings; the orchestrator writes them up with the writer's formats and citation rules, which are added to its prompt only while it writes up results
+- **Benchmark** (`scripts/bench_chat.py`): time to first event and first token, total time and model calls per scenario on the real models
+- **Questions for several specialists**: stock figures and anything in the user's files must come from the database and documents agents, so a mixed question (e.g. "which of the most valuable tech companies fits my resume?") asks both in parallel and gets one combined answer
+  - The router no longer sends a message to one agent when it also mentions another agent's data (a word of one of the user's file names or "resume"/"CV" next to a ticker); `RouteInfo.mentions`
+  - Asking a single agent isn't turned into a handoff then, and the orchestrator's prompt names the mentioned agents
+  - Combining rules: one answer to the actual question, conclusion first, parts connected, each fact keeps its citation; docs is asked again (naming the file) before saying a listed file has nothing
+- **Web search alongside Wikipedia**: the researcher runs a web search in the same step as every Wikipedia search (except for arXiv questions); the orchestrator's quick lookups do the same and prefer the newest results
+
+## 0.3.0 - Chart agent
+- **Chart agent** (`app/agents/chart/`): line, bar, area, pie and scatter charts of the stock database, of an earlier query result ("plot that") or of numbers from another answer, with a 1-3 sentence takeaway
+  - `chart_sql` writes the query and the chart in one call (~2 model calls, 9-16 s per chart in testing); `chart_table` reuses a result already in the chat without querying again; `chart_data` charts a few inline numbers
+  - Data never passes through the model: query results and charts travel as hidden tool artifacts, the model only sees a short summary (first/last/min/max per series)
+  - Routing: "chart", "plot", "graph", "biểu đồ", "đồ thị", "vẽ biểu đồ" go straight to it, also with a ticker ("chart AAPL"); a ticker alone still goes to the database agent
+- **Table artifacts**: `run_sql` keeps the whole result (up to 2000 rows) as a table artifact while the model still sees the first `SQL_MAX_ROWS` rows; the orchestrator keeps its turn's tables and charts on its answer, so charts survive a reload and "plot that" works after a combined answer
+- The orchestrator can chart the results of the agents it asked (e.g. database figures next to a resume)
+- UI (`app/static/charts.js`): chart cards with a validated colour palette in light and dark mode, crosshair tooltips, a data table and PNG download
+- Shared `SQL_RULES` for every agent that queries the stock database, now with a rule for PostgreSQL's `round(x::numeric, 2)`
+- **Charts reuse earlier results**: asking for the same data again in a chat (repeated, reworded or as another chart type) draws the earlier query result instead of querying again; the prompt lists which tables were already charted, and `chart_sql` reuses a table whose query is the same
+- **Shorter research notes**: the researcher cites pages by short ids (listed at the end of each tool result) instead of writing full URLs, with a length cap on its notes; code expands the ids before the deep links are built, so answers and links are unchanged
+- **Fix: English research questions answered in Vietnamese**: since the orchestrator took over the write-up, the English case was only "the language of the user's latest message" (and its last user-role message is the hidden findings), placed in a system prompt full of Vietnamese examples
+  - `reply_language` now names "English" outright, and the findings message says which language to write in again, right before the model writes
+  - The write-up examples are English (or paired English/Vietnamese) instead of Vietnamese only; `save_memory`'s example is no longer "User prefers answers in Vietnamese", which weak models could save as a real memory
+- **Fallback when a direct specialist finds nothing**: a message the router sent straight to docs, sql or chart used to end with that agent's "couldn't find it"; now, when its reply has no answer (no final text, every tool result empty or an error, or a short "not found" reply), a `fallback` node removes the attempt from the thread and the orchestrator takes over with a summary of what was tried (the UI drops the streamed reply)
+  - Never after a handoff or a forced route (`/api/chat/<route>`); the orchestrator gets no `handoff` while falling back
+  - Loop guard for every orchestrator run (`no_repeats`): an identical tool call within one message is not run again, and each specialist is asked at most twice per message, the failed direct attempt included

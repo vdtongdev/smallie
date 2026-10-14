@@ -1,12 +1,8 @@
 """The research workflow inside the real assistant graph, with a scripted model instead of OpenRouter."""
 
 import json
-import re
-from collections.abc import Iterator
 
-from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
-from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.store.memory import InMemoryStore
 
@@ -15,51 +11,18 @@ from app.agents.research import agent as research_agent
 from app.agents.sql import agent as sql_agent
 from app.api.routes_chat import _events_from
 from app.core.memory import AgentContext
+from app.core.prompts import reply_language
 from app.orchestration.graph import build_assistant
+from tests.scripted import scripted as _turn
 
 NOTES = "FINDINGS:\n- LangGraph is a library for agent graphs [source: https://example.com/lg]\nGAPS: none"
-
-
-class ScriptedModel(BaseChatModel):
-    """Replies with the scripted messages in order, whatever the agent; streams word by word."""
-
-    replies: Iterator[AIMessage]
-    prompts: list = []
-
-    @property
-    def _llm_type(self) -> str:
-        return "scripted"
-
-    def bind_tools(self, tools, **kwargs):
-        return self
-
-    def _generate(self, messages, stop=None, run_manager=None, **kwargs) -> ChatResult:
-        self.prompts.append(messages)
-        return ChatResult(generations=[ChatGeneration(message=next(self.replies))])
-
-    def _stream(self, messages, stop=None, run_manager=None, **kwargs):
-        self.prompts.append(messages)
-        reply = next(self.replies)
-        if reply.tool_calls:
-            chunks = [{"name": c["name"], "args": json.dumps(c["args"]), "id": c["id"], "index": i}
-                      for i, c in enumerate(reply.tool_calls)]
-            yield ChatGenerationChunk(message=AIMessageChunk(content="", tool_call_chunks=chunks))
-            return
-        for piece in filter(None, re.split(r"(\s+)", reply.content)):
-            chunk = ChatGenerationChunk(message=AIMessageChunk(content=piece))
-            if run_manager:
-                run_manager.on_llm_new_token(piece, chunk=chunk)
-            yield chunk
-
-
-def _turn(*replies: AIMessage) -> ScriptedModel:
-    return ScriptedModel(replies=iter(replies), prompts=[])
 
 
 def _assistant(monkeypatch, model):
     monkeypatch.setattr(factory, "get_chat_model", lambda *a, **k: model)
     monkeypatch.setattr(sql_agent, "describe_schema", lambda: "")
     monkeypatch.setattr(research_agent, "describe_schema", lambda: "")
+    monkeypatch.setattr("app.agents.docs.agent.document_names", lambda user_id: [])
     return build_assistant(InMemorySaver(), InMemoryStore())
 
 
@@ -73,37 +36,37 @@ async def _run(assistant, message: str, thread: str = "t1") -> list[dict]:
     return [event async for event in _events_from(stream)]
 
 
-async def test_findings_flow_to_the_writer_and_only_the_answer_is_kept(monkeypatch):
+async def test_findings_flow_to_the_orchestrator_and_only_the_answer_is_kept(monkeypatch):
     model = _turn(
         AIMessage("", tool_calls=[{"name": "load_skill", "args": {"name": "academic"}, "id": "c1"}]),
         AIMessage(NOTES),  # researcher's notes: must not stream
-        AIMessage("LangGraph builds agent graphs [example](https://example.com/lg)."),  # writer
+        AIMessage("LangGraph builds agent graphs [example](https://example.com/lg)."),  # orchestrator
     )
     assistant = _assistant(monkeypatch, model)
     events = await _run(assistant, "Tìm hiểu về LangGraph")
 
-    assert {"type": "agent", "name": "research"} in events
-    # Each workflow agent is announced once, before its own tool calls and tokens.
-    kinds = [e["type"] if e["type"] != "step" else e["name"] for e in events]
-    assert [e for e in events if e["type"] == "step"] == [
-        {"type": "step", "agent": "research", "name": "gather"},
-        {"type": "step", "agent": "research", "name": "write"},
-    ]
-    assert kinds.index("gather") < kinds.index("tool_call") < kinds.index("write") < kinds.index("token")
+    assert events[0] == {"type": "agent", "name": "research"}
+    kinds = [e["type"] for e in events]
+    assert kinds.index("tool_call") < kinds.index("token")
     assert {"type": "tool_call", "name": "load_skill", "args": {"name": "academic"}} in events
     assert any(e["type"] == "tool_result" and e["name"] == "load_skill" for e in events)
     streamed = "".join(e["text"] for e in events if e["type"] == "token")
     assert "LangGraph builds agent graphs" in streamed
     assert "FINDINGS" not in streamed
 
-    # The writer saw the notes as its last message.
-    writer_prompt = model.prompts[-1]
-    assert "RESEARCH FINDINGS" in writer_prompt[-1].content and NOTES in writer_prompt[-1].content
+    # The orchestrator saw the notes as its last message and got the writing rules, in Vietnamese,
+    # without the research tool: the research is done.
+    prompt = model.prompts[-1]
+    offered = [t["function"]["name"] for t in model.tools[-1]]
+    assert "ask_research" not in offered and "ask_sql" in offered
+    assert "RESEARCH FINDINGS" in prompt[-1].content and NOTES in prompt[-1].content
+    assert "Write it in Vietnamese" in prompt[-1].content
+    assert "CITATIONS" in prompt[0].content and "Write the whole answer in Vietnamese" in prompt[0].content
 
-    # The thread keeps only the question and the writer's answer.
+    # The thread keeps only the question and the orchestrator's answer.
     messages = (await assistant.aget_state({"configurable": {"thread_id": "t1"}})).values["messages"]
     assert [type(m) for m in messages] == [HumanMessage, AIMessage]
-    assert messages[-1].name == "report_agent"
+    assert messages[-1].name == "orchestrator"
     assert not any(isinstance(m, ToolMessage) for m in messages)
 
 
@@ -112,8 +75,14 @@ async def test_researcher_does_not_carry_old_tool_output_into_the_next_turn(monk
     assistant = _assistant(monkeypatch, model)
     await _run(assistant, "research A")
     await _run(assistant, "and B?")
+    # An English question names English outright, next to the findings and in the writing rules.
+    first_write_up = model.prompts[1]
+    assert "Write it in English" in first_write_up[-1].content
+    assert "Write the whole answer in English" in first_write_up[0].content
     second_research_prompt = model.prompts[2]  # [system prompt, *conversation]
     assert [m.content for m in second_research_prompt[1:]] == ["research A", "First answer.", "and B?"]
+    # The first turn's findings were used up: the second write-up only sees the new ones.
+    assert sum("RESEARCH FINDINGS" in m.content for m in model.prompts[3]) == 1
 
 
 def test_cut_short_research_hands_over_raw_tool_results():
@@ -231,5 +200,74 @@ async def test_cited_wikipedia_articles_are_fetched_once(monkeypatch):
 
 
 def test_reply_language_follows_the_latest_question():
-    assert research_agent.reply_language([HumanMessage("hello"), HumanMessage("nguyễn nhật ánh là ai")]) == "Vietnamese"
-    assert "latest message" in research_agent.reply_language([HumanMessage("who is he?")])
+    assert reply_language([HumanMessage("hello"), HumanMessage("nguyễn nhật ánh là ai")]) == "Vietnamese"
+    assert reply_language([HumanMessage("nguyễn nhật ánh là ai"), HumanMessage("do research on him")]) == "English"
+
+
+def test_web_search_alongside_wikipedia_only_when_web_search_loaded(monkeypatch):
+    prompts = []
+    monkeypatch.setattr(research_agent, "describe_schema", lambda: "")
+    monkeypatch.setattr(research_agent, "build_agent", lambda **kw: prompts.append(kw["system_prompt"]))
+    monkeypatch.setattr(research_agent, "_mcp_servers", ["tavily", "knowledge"])
+    research_agent.build_research_workflow()
+    monkeypatch.setattr(research_agent, "_mcp_servers", ["knowledge"])
+    research_agent.build_research_workflow()
+    assert "Whenever you search Wikipedia, also run a web search" in prompts[0]
+    assert "Whenever you search Wikipedia" not in prompts[1]
+
+
+WIKI_SECTION = (
+    "Python (programming language), section History (https://en.wikipedia.org/wiki/Python_(programming_language)#History)\n\n"
+    "Python was conceived in the late 1980s by Guido van Rossum.\n\n"
+    "Articles linked from this section:\n"
+    "- Guido van Rossum (https://en.wikipedia.org/wiki/Guido_van_Rossum)"
+)
+TAVILY_JSON = json.dumps({"results": [{"url": "https://example.com/news", "title": "Battery news",
+                                        "content": "Solid-state cells entered pilot production in 2026."}]})
+
+
+async def test_tool_results_list_source_ids_that_the_notes_cite_and_code_expands():
+    results = [_tool("tavily_tavily_search", TAVILY_JSON), _tool("knowledge_wikipedia_page", WIKI_SECTION)]
+    index = research_agent.source_index(results)
+    by_url = {url: (sid, title) for sid, (url, title) in index.items()}
+    history = "https://en.wikipedia.org/wiki/Python_(programming_language)#History"
+    assert set(by_url) == {"https://example.com/news", history, "https://en.wikipedia.org/wiki/Guido_van_Rossum"}
+    assert by_url[history][1] == "Python (programming language), section History"  # ")" of the title kept
+    assert by_url["https://example.com/news"] == (research_agent.source_id("https://example.com/news"), "Battery news")
+
+    # The researcher sees the ids at the end of each result; page parsing ignores them.
+    async def handler(request):
+        return results[0]
+
+    with_ids = await research_agent.cite_by_id.awrap_tool_call(None, handler)
+    assert with_ids.text.endswith(f"{by_url['https://example.com/news'][0]} = Battery news (https://example.com/news)")
+    assert research_agent.pages_from([with_ids]) == research_agent.pages_from([results[0]])
+
+    news, guido = by_url["https://example.com/news"][0], by_url["https://en.wikipedia.org/wiki/Guido_van_Rossum"][0]
+    notes = (f'- Pilot production in 2026 [source: {news} | "entered pilot production in 2026"]\n'
+             f'- Created by van Rossum [source: {guido}]\n'
+             f'- Unknown id [source: Sffff | "conceived in the late 1980s"]\n'
+             "- From a file [source: report.pdf, p. 2]")
+    expanded = research_agent.expand_source_ids(notes, index).splitlines()
+    assert expanded[0].endswith('[source: Battery news | https://example.com/news | "entered pilot production in 2026"]')
+    assert expanded[1].endswith("[source: Guido van Rossum | https://en.wikipedia.org/wiki/Guido_van_Rossum]")
+    assert expanded[2].endswith('[source: "conceived in the late 1980s"]')  # link_sources finds it by the quote
+    assert expanded[3] == notes.splitlines()[3]
+    linked = research_agent.link_sources("\n".join(expanded), research_agent.pages_from(results)).splitlines()
+    assert "passage: https://example.com/news#:~:text=" in linked[0]
+    assert f"| {history} |" in linked[2] or history in linked[2]
+
+
+def test_ids_are_expanded_however_the_model_wrote_them_and_unknown_ones_never_reach_the_writer():
+    a, b = "https://a.com/x", "https://b.com/y"
+    ia, ib = research_agent.source_id(a), research_agent.source_id(b)
+    index = {ia: (a, "Page [A]"), ib: (b, "Page B")}
+    expand = lambda notes: research_agent.expand_source_ids(notes, index)  # noqa: E731
+    assert expand(f'- f [source: {ia} | "five words of the quote"]') == f'- f [source: Page  A | {a} | "five words of the quote"]'
+    assert expand(f"- f [{ia}]") == f"- f [source: Page  A | {a}]"
+    assert expand(f'- f ({ia} | "q")') == f'- f [source: Page  A | {a} | "q"]'
+    assert expand(f"- f [source {ia}, {ib}]") == f"- f [source: Page  A | {a} | {b}]"
+    assert expand(f"- f {ia.upper()}") == f"- f [source: Page  A | {a}]"
+    assert expand('- f [source: Sffff | "q"]') == '- f [source: "q"]'
+    assert expand("- f [Sffff] Sffff") == "- f  "
+    assert expand("- SDEFA rose [source: report.pdf, p. 2]") == "- SDEFA rose [source: report.pdf, p. 2]"

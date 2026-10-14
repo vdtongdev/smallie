@@ -36,6 +36,9 @@ class AgentContext:
     memories: str = ""
     recent_chats: str = ""  # latest turns of the user's other chats
     agent: str = "auto"  # "auto" lets the router pick; a registered route (app/agents/registry.py) forces that agent
+    notes: str = ""  # per-request notes for the orchestrator's prompt (specialists available to this user)
+    mentioned: tuple[str, ...] = ()  # routes the latest message points to (hints, matches, mentions)
+    failed: str = ""  # route that already gave up on the latest message (the orchestrator's fallback)
 
 
 def memory_namespace(user_id: str) -> tuple[str, ...]:
@@ -177,7 +180,7 @@ async def save_memory(fact: str, runtime: ToolRuntime[AgentContext]) -> str:
 
     Args:
         fact: One short, self-contained sentence, e.g. "User's name is Alex" or
-            "User prefers answers in Vietnamese".
+            "User works as a data analyst".
     """
     await runtime.store.aput(memory_namespace(runtime.context.user_id), str(uuid.uuid4()), {"text": fact})
     return f"Saved: {fact}"

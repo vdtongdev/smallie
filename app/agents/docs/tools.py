@@ -6,13 +6,14 @@ from app.features.documents.ingest import get_vector_store
 from app.core.memory import AgentContext
 
 TOP_K = 6
+NO_PASSAGES = "No matching passages in the user's documents."
 
 
 def search_user_chunks(user_id: str, query: str, k: int = TOP_K) -> str:
     """Similarity search restricted to the user's own documents."""
     hits = get_vector_store().similarity_search(query, k=k, filter={"user_id": {"$eq": user_id}})
     if not hits:
-        return "No matching passages in the user's documents."
+        return NO_PASSAGES
     parts = []
     for doc in hits:
         meta = doc.metadata

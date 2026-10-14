@@ -44,6 +44,8 @@ const I18N = {
     confirmDeleteAccount: "Delete {user} with all their chats, files and memories? This cannot be undone.",
     adminBadge: "admin",
     streamCut: "The connection to the server was lost before the answer finished. Please try again.",
+    downloadPng: "Download PNG",
+    showData: "Show data",
     loadFailed: "Could not load this chat",
   },
   vi: {
@@ -91,6 +93,8 @@ const I18N = {
     confirmDeleteAccount: "Xoá {user} cùng toàn bộ cuộc trò chuyện, tệp và ghi nhớ? Không thể hoàn tác.",
     adminBadge: "quản trị",
     streamCut: "Mất kết nối tới máy chủ trước khi câu trả lời hoàn tất. Vui lòng thử lại.",
+    downloadPng: "Tải ảnh PNG",
+    showData: "Xem dữ liệu",
     loadFailed: "Không tải được cuộc trò chuyện này",
   },
 };

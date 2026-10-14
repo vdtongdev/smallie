@@ -3,7 +3,8 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Request
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from app.agents.registry import MESSAGE_ROUTES
+from app.agents.artifacts import artifacts_from
+from app.orchestration.orchestrator import MESSAGE_ROUTES
 from app.core.auth import get_current_user
 from app.core.conversations import delete_conversation, get_conversation, list_conversations
 from app.core.memory import forget_conversation
@@ -43,7 +44,9 @@ def _serialize(message) -> dict | None:
             "agent": MESSAGE_ROUTES.get(message.name or ""),
             "content": message.text,
             "tool_calls": [{"name": c["name"], "args": c["args"]} for c in message.tool_calls],
+            "charts": artifacts_from([message], "charts"),  # the orchestrator's charts of that turn
         }
     if isinstance(message, ToolMessage):
-        return {"role": "tool", "name": message.name, "content": (message.text or str(message.content))[:4000]}
+        return {"role": "tool", "name": message.name, "content": (message.text or str(message.content))[:4000],
+                "charts": artifacts_from([message], "charts")}
     return None

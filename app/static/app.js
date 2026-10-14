@@ -240,8 +240,9 @@ async function openConversation(id) {
     else if (m.role === "assistant") {
       if (m.agent && m.agent !== agent) addAgentBadge((agent = m.agent));
       for (const call of m.tool_calls || []) addToolCall(call.name, call.args);
+      addCharts(m.charts); // an orchestrator answer's charts, shown above it as when it streamed
       if (m.content) addAssistantMessage().update(m.content);
-    } else if (m.role === "tool") addToolResult(m.name, m.content);
+    } else if (m.role === "tool") addToolResult(m.name, m.content, m.charts);
   }
   loadConversations();
 }
@@ -287,7 +288,7 @@ function addAssistantMessage() {
   };
 }
 
-// `step`: a workflow handed over to another of its agents (e.g. research -> writer agent).
+// `step`: a workflow handed over to another of its agents. Returns the badge (if one was added).
 function addAgentBadge(name, before = null, step = null) {
   const div = document.createElement("div");
   div.className = "agent-badge";
@@ -296,9 +297,10 @@ function addAgentBadge(name, before = null, step = null) {
   div.textContent = badgeLabel(div);
   // A workflow's first agent usually has the same label as the turn's badge; don't repeat it.
   const last = [...$("messages").querySelectorAll(".agent-badge")].pop();
-  if (step && last?.textContent === div.textContent) return;
+  if (step && last?.textContent === div.textContent) return null;
   if (before) before.before(div);
   else $("messages").append(div);
+  return div;
 }
 
 function addToolCall(name, args) {
@@ -314,7 +316,17 @@ function addToolCall(name, args) {
   scrollToBottom();
 }
 
-function addToolResult(name, content) {
+// Charts a tool drew (live, or replayed from history), as cards in the message flow.
+function addCharts(charts) {
+  for (const spec of charts || []) {
+    const card = chartCard(spec);
+    if (card) $("messages").append(card);
+  }
+  scrollToBottom();
+}
+
+function addToolResult(name, content, charts = []) {
+  if (charts.length) return addCharts(charts); // the chart is the result; its summary is for the model
   const details = document.createElement("details");
   details.className = "tool";
   const summary = document.createElement("summary");
@@ -334,6 +346,16 @@ function addError(message) {
   scrollToBottom();
 }
 
+// Removes the assistant's text replies since the latest user message.
+function dropReplies() {
+  let el = [...$("messages").querySelectorAll(".msg.user")].pop()?.nextElementSibling;
+  while (el) {
+    const next = el.nextElementSibling;
+    if (el.matches(".msg.assistant")) el.remove();
+    el = next;
+  }
+}
+
 // ---------- chat ----------
 async function sendMessage(text) {
   setBusy(true);
@@ -342,6 +364,8 @@ async function sendMessage(text) {
   current.update(`_${t("thinking")}_`);
   let started = false;
   let finished = false;
+  let badge = null; // this turn's agent badge
+  let waiting = false; // showing "thinking" after a fallback
 
   try {
     const res = await fetch(`/api/chat/${KIND}`, {
@@ -369,26 +393,36 @@ async function sendMessage(text) {
             setConversation(event.id);
             break;
           case "agent":
-            addAgentBadge(event.name, current.el);
+            // The orchestrator handed off before showing anything: relabel its badge, as a reload would show it.
+            if (badge && !started) { badge.dataset.agent = event.name; badge.textContent = badgeLabel(badge); }
+            else badge = addAgentBadge(event.name, current.el);
             break;
           case "step":
             addAgentBadge(event.agent, current.el, event.name);
+            break;
+          case "fallback":
+            // The agent found no answer: drop its reply (its tool calls stay) while the assistant takes over.
+            dropReplies();
+            current = addAssistantMessage();
+            current.update(`_${t("thinking")}_`);
+            started = waiting = true; // the next `agent` event adds the assistant's own badge
             break;
           case "done":
             finished = true;
             break;
           case "token":
-            if (!started) { current.update(""); started = true; }
+            if (!started || waiting) { current.update(""); started = true; waiting = false; }
             current.append(event.text);
             break;
           case "tool_call":
-            if (!started) current.remove();
+            if (!started || waiting) current.remove();
+            waiting = false;
             addToolCall(event.name, event.args);
             current = addAssistantMessage();
             started = true;
             break;
           case "tool_result":
-            addToolResult(event.name, event.content);
+            addToolResult(event.name, event.content, event.charts);
             current = addAssistantMessage();
             break;
           case "error":
@@ -401,7 +435,7 @@ async function sendMessage(text) {
   } catch (err) {
     addError(err.message);
   } finally {
-    if (!started) current.remove();
+    if (!started || waiting) current.remove();
     document.querySelectorAll(".msg.assistant:empty").forEach((el) => el.remove());
     setBusy(false);
     loadConversations();

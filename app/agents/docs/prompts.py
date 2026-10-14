@@ -5,6 +5,10 @@ ROUTE_DESCRIPTION = (
     "policies, contracts or anything else that would be written in their files."
 )
 
+TOOL_DESCRIPTION = (
+    "Searches the user's uploaded files (PDF/DOCX) and answers the question from them, citing [filename, p. N]."
+)
+
 DOCS_SYSTEM = f"""You are a helpful assistant that answers questions using the user's uploaded documents (PDF/DOCX).
 
 - Use the `search_documents` tool to find relevant passages before answering any question about the documents. You may search several times with different wording, including in the other language (English/Vietnamese).

@@ -1,3 +1,7 @@
+import re
+
+from langchain_core.messages import AnyMessage, HumanMessage
+
 LANGUAGE_RULE = (
     "LANGUAGE: Always reply in the language of the user's latest message. "
     "If they write Vietnamese, answer in natural Vietnamese with correct diacritics; "
@@ -20,13 +24,6 @@ MEMORY_RULE = (
     "data with your tools before reusing it."
 )
 
-# {choices}: "docs or sql"; {agents}: one "- route: description" line per agent, then their notes.
-ROUTER_SYSTEM = """You decide which assistant should answer the user's latest message. Reply with exactly one word: {choices}.
-
-{agents}
-
-Follow-ups ("and last year?", "show it as a table", greetings, thanks, questions about the user or about earlier chats) go to the assistant of the previous turn ({previous}) unless the topic clearly changed. The user may write in English or Vietnamese."""
-
 USER_SECTION = """
 
 YOU ARE TALKING TO: {user}"""
@@ -40,3 +37,13 @@ RECENT_CHATS_SECTION = """
 
 RECENT ACTIVITY IN THE USER'S OTHER CHATS (most recently used chat first):
 {recent_chats}"""
+
+_VIETNAMESE = re.compile(r"[ăâđêôơưàáạảãằắặẳẵầấậẩẫèéẹẻẽềếệểễìíịỉĩòóọỏõồốộổỗờớợởỡùúụủũừứựửữỳýỵỷỹ]", re.IGNORECASE)
+
+
+def reply_language(messages: list[AnyMessage]) -> str:
+    """The language the answer must be in, from the user's latest message. Named outright (the
+    app speaks English and Vietnamese only): "the user's language" left weak models to guess, and
+    Vietnamese sources or chats around the question made them answer English questions in Vietnamese."""
+    question = next((m.text for m in reversed(messages) if isinstance(m, HumanMessage)), "")
+    return "Vietnamese" if _VIETNAMESE.search(question) else "English"

@@ -80,14 +80,18 @@
     <article class="readme">
       <div data-lang="en">
         <h1>How to use smallie</h1>
-        <p>smallie is a chat assistant with three specialists. You just ask; it picks the right one for each message
-          and shows which one answered above the reply.</p>
+        <p>smallie is a chat assistant with four specialists. You just ask. The <strong>Assistant</strong> answers general
+          questions itself (explanations, maths, writing, a quick web search for recent facts), passes a question to the right
+          specialist, or asks several of them and combines their answers. The badge above each reply shows who answered.
+          If none of them can do what you ask, it tells you so.</p>
         <ul>
           <li><strong>Documents agent</strong> answers from the PDF and Word files you upload, and cites the file and page.</li>
           <li><strong>Database agent</strong> answers from a database of 200 popular stocks
             by writing and running read-only SQL. Expand <em>Used tool</em> above an answer to see the query it ran.</li>
           <li><strong>Research agent</strong> looks a topic up on the web, Wikipedia and arXiv (plus the stock database and
-            your files when they help), then writes a short summary or a structured report with sources.</li>
+            your files when they help); the Assistant then writes a short summary or a structured report with sources.</li>
+          <li><strong>Chart agent</strong> draws line, bar, area, pie and scatter charts of the stock data, or of numbers
+            from another answer, and sums up what they show.</li>
         </ul>
         <p>Write in English or Vietnamese; answers come back in the language you used.</p>
 
@@ -130,6 +134,14 @@
         </div>
         <p class="muted">Research takes more AI calls than other questions, so it is slower and uses more of the free quota.</p>
 
+        <h2>Draw a chart</h2>
+        <p>Say "chart", "plot" or "graph". After a database answer, "plot that" draws it without querying again. Hover a
+          chart for exact values; under it, <em>Show data</em> lists the numbers and <em>Download PNG</em> saves the picture.</p>
+        <div class="examples">
+          <button class="example">Chart AAPL vs MSFT closing prices over the last year.</button>
+          <button class="example">Plot the market caps of the 10 largest tech companies.</button>
+        </div>
+
         <h2>Chats and memory</h2>
         <ul>
           <li><strong>+ New chat</strong> starts a fresh conversation. Earlier chats are in the sidebar; one conversation can mix document and stock questions.</li>
@@ -149,14 +161,18 @@
 
       <div data-lang="vi">
         <h1>Hướng dẫn sử dụng smallie</h1>
-        <p>smallie là trợ lý trò chuyện với ba chuyên gia. Bạn chỉ cần hỏi; ứng dụng tự chọn chuyên gia phù hợp cho từng
-          tin nhắn và hiển thị chuyên gia đã trả lời phía trên câu trả lời.</p>
+        <p>smallie là trợ lý trò chuyện với bốn chuyên gia. Bạn chỉ cần hỏi. <strong>Trợ lý</strong> tự trả lời các câu hỏi
+          chung (giải thích, tính toán, viết, tìm nhanh trên web khi cần thông tin mới), chuyển câu hỏi cho chuyên gia phù hợp,
+          hoặc hỏi nhiều chuyên gia rồi tổng hợp câu trả lời. Nhãn phía trên mỗi câu trả lời cho biết ai đã trả lời.
+          Nếu không ai làm được điều bạn yêu cầu, trợ lý sẽ nói rõ.</p>
         <ul>
           <li><strong>Trợ lý tài liệu</strong> trả lời dựa trên các tệp PDF và Word bạn tải lên, kèm trích dẫn tên tệp và số trang.</li>
           <li><strong>Trợ lý cơ sở dữ liệu</strong> trả lời dựa trên cơ sở dữ liệu 200 cổ phiếu phổ biến
             bằng cách viết và chạy câu lệnh SQL chỉ đọc. Mở mục <em>Đã dùng công cụ</em> phía trên câu trả lời để xem câu lệnh đã chạy.</li>
           <li><strong>Trợ lý nghiên cứu</strong> tra cứu một chủ đề trên web, Wikipedia và arXiv (cùng cơ sở dữ liệu cổ phiếu
-            và tệp của bạn khi hữu ích), rồi viết bản tóm tắt ngắn hoặc báo cáo có cấu trúc kèm nguồn.</li>
+            và tệp của bạn khi hữu ích); sau đó Trợ lý viết bản tóm tắt ngắn hoặc báo cáo có cấu trúc kèm nguồn.</li>
+          <li><strong>Trợ lý biểu đồ</strong> vẽ biểu đồ đường, cột, vùng, tròn và phân tán từ dữ liệu cổ phiếu hoặc từ số liệu
+            trong câu trả lời khác, kèm nhận xét ngắn.</li>
         </ul>
         <p>Bạn có thể viết bằng tiếng Việt hoặc tiếng Anh; câu trả lời sẽ dùng ngôn ngữ bạn đã viết.</p>
 
@@ -188,6 +204,15 @@
         </div>
         <p class="muted">Giá là dữ liệu cuối ngày từ Yahoo Finance, không phải giá trực tiếp. Dữ liệu tự động cập nhật vào mỗi tối
           ngày làm việc, sau khi thị trường Mỹ đóng cửa. Đây không phải lời khuyên đầu tư.</p>
+
+        <h2>Vẽ biểu đồ</h2>
+        <p>Hãy nói "vẽ biểu đồ", "biểu đồ" hoặc "đồ thị". Sau một câu trả lời từ cơ sở dữ liệu, "vẽ biểu đồ cho kết quả đó" sẽ vẽ
+          ngay mà không truy vấn lại. Rê chuột lên biểu đồ để xem giá trị; bên dưới, <em>Xem dữ liệu</em> liệt kê các số liệu và
+          <em>Tải ảnh PNG</em> lưu hình.</p>
+        <div class="examples">
+          <button class="example">Vẽ biểu đồ giá đóng cửa của AAPL và MSFT trong một năm qua.</button>
+          <button class="example">Vẽ biểu đồ vốn hóa của 10 công ty công nghệ lớn nhất.</button>
+        </div>
 
         <h2>Nghiên cứu một chủ đề</h2>
         <p>Hãy nói "nghiên cứu", "tìm hiểu", "tin tức mới nhất về…" hoặc yêu cầu một báo cáo. Trợ lý tìm trong nhiều nguồn
@@ -225,7 +250,9 @@
     <form method="dialog"><button class="primary" data-i18n="close"></button></form>
   </dialog>
 
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
   <script src="i18n.js"></script>
+  <script src="charts.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

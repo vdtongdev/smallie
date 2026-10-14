@@ -11,7 +11,9 @@ from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
 from app.core.accounts import get_profile
+from app.agents.artifacts import artifacts_from
 from app.agents.registry import ROUTES, SILENT_STEPS, STEPS
+from app.orchestration.orchestrator import HANDOFF
 from app.core.auth import get_current_user
 from app.core.config import get_settings
 from app.core.conversations import create_conversation, get_conversation, list_conversations, touch_conversation
@@ -125,7 +127,7 @@ async def _recent_chats(request: Request, user_id: str, current_id: str) -> str:
 
 async def _events_from(stream) -> AsyncIterator[dict]:
     """SSE events for a `subgraphs=True` stream, plus a `step` event whenever a workflow
-    moves to another of its steps (e.g. researcher -> report writer)."""
+    moves to another of its steps listed in its spec's `steps`."""
     current = None
     async for namespace, mode, chunk in stream:
         step = _step(namespace)
@@ -150,8 +152,11 @@ def _to_events(mode: str, chunk, namespace: tuple[str, ...] = ()) -> list[dict]:
     if mode == "messages":
         message, metadata = chunk
         if isinstance(message, AIMessageChunk) and metadata.get("langgraph_node") == "model" and message.text:
-            if any(segment.split(":", 1)[0] in SILENT_STEPS for segment in namespace):
-                return []  # e.g. a researcher's notes; only the workflow's writer streams
+            nodes = [segment.split(":", 1)[0] for segment in namespace]
+            # A researcher's notes, or an agent the orchestrator called as a tool: the
+            # orchestrator writes the answer from their results, so only it streams.
+            if "tools" in nodes or any(node in SILENT_STEPS for node in nodes):
+                return []
             return [{"type": "token", "text": message.text}]
         return []
 
@@ -161,15 +166,22 @@ def _to_events(mode: str, chunk, namespace: tuple[str, ...] = ()) -> list[dict]:
         if not isinstance(update, dict):
             continue
         if not namespace:
-            # Top level: only the router's choice is new. The agent nodes' updates repeat
-            # messages already streamed from inside their subgraph.
-            if node == "router" and update.get("route"):
+            # Top level: only the router's choice or the orchestrator's handoff is new. The
+            # agent nodes' messages were already streamed from inside their subgraph.
+            if update.get("failed"):
+                # The router's agent found no answer: the UI drops its reply, the orchestrator takes over.
+                events.append({"type": "fallback", "agent": update["failed"]})
+            if update.get("route"):
                 events.append({"type": "agent", "name": update["route"]})
             continue
         for message in update.get("messages", []):
             if isinstance(message, AIMessage):
-                events += [{"type": "tool_call", "name": c["name"], "args": c["args"]} for c in message.tool_calls]
-            elif isinstance(message, ToolMessage):
-                events.append({"type": "tool_result", "name": message.name,
-                               "content": (message.text or str(message.content))[:TOOL_RESULT_PREVIEW]})
+                events += [{"type": "tool_call", "name": c["name"], "args": c["args"]}
+                           for c in message.tool_calls if c["name"] != HANDOFF]  # shown as the agent badge
+            elif isinstance(message, ToolMessage) and message.name != HANDOFF:
+                event = {"type": "tool_result", "name": message.name,
+                         "content": (message.text or str(message.content))[:TOOL_RESULT_PREVIEW]}
+                if charts := artifacts_from([message], "charts"):
+                    event["charts"] = charts  # drawn by the UI; query results (tables) stay server-side
+                events.append(event)
     return events

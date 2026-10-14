@@ -83,7 +83,7 @@ For access from anywhere without your PC, see [Deploying](#deploying-google-clou
 
 These are set in `.env`; all calls go through OpenRouter.
 
-- `OPENROUTER_CHAT_MODEL`: defaults to a free model with tool calling. Free models come and go, so see the list at https://openrouter.ai/models?supported_parameters=tools&max_price=0. `OPENROUTER_FALLBACK_MODEL` is used automatically when the main one fails or is rate-limited.
+- `OPENROUTER_CHAT_MODEL`: defaults to a free model with tool calling. Free models come and go, so see the list at https://openrouter.ai/models?supported_parameters=tools&max_price=0. `OPENROUTER_FALLBACK_MODEL` (comma-separated, tried in order) is used automatically when the main one fails or is rate-limited; pick models that write good Vietnamese, since weaker ones slip Chinese, Korean or Thai words into Vietnamese answers.
 - `OPENROUTER_ROUTER_MODEL`: the model that decides which agent answers each message. It makes one short call per message, and the call is skipped when the message clearly points to one agent (a ticker, "stock", a file name, "research", "latest news"…). Empty means it uses `OPENROUTER_CHAT_MODEL`.
 - `TAVILY_API_KEY`: web search for the research agent (free 1,000 credits/month at https://app.tavily.com). Without it, research uses the other sources. `MCP_SERVERS` adds more remote MCP servers, and `EXTERNAL_DATABASE_URL` lets the researcher read another Postgres (see `.env.example`).
 - `OPENROUTER_EMBED_MODEL`: defaults to `baai/bge-m3`, which is multilingual and costs about $0.01 per 1M tokens. A $1 top-up covers thousands of documents. The fully free option is `liquid/lfm-2.5-embedding-350m:free`, but the provider may keep and train on your data.

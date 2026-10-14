@@ -255,7 +255,9 @@ async def test_a_chart_request_draws_once_and_plot_that_reuses_the_table(monkeyp
     events = await _run(assistant, "plot that as a line")
     assert [c["type"] for c in _charts(events)] == ["line"]
     assert len(queries) == 1  # the second chart reused the first result
-    assert "tabcdef: 2 rows, columns ticker, close" in model.prompts[-2][0].content  # TABLES IN THIS CHAT
+    tables_note = model.prompts[-2][0].content  # TABLES IN THIS CHAT, with how each was charted
+    assert "tabcdef: 2 rows, columns ticker, close" in tables_note
+    assert 'already charted as bar "Close"' in tables_note
     # Both charts stay in the thread with their tool results, for the history view.
     messages = await _thread(assistant)
     assert len([m for m in messages if isinstance(m, ToolMessage) and m.artifact.get("charts")]) == 2

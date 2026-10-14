@@ -7,6 +7,7 @@ copies a turn's into its final AIMessage's `additional_kwargs`, because only tha
 the thread. langchain_openai only sends known `additional_kwargs` keys, so they never reach a prompt.
 """
 
+import re
 from collections.abc import Iterable
 
 from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
@@ -38,13 +39,22 @@ def collect(messages: Iterable[AnyMessage]) -> dict[str, list[dict]]:
     return {kind: items for kind in KINDS if (items := artifacts_from(messages, kind))}
 
 
-def table_note(tables: list[dict]) -> str:
-    """The most recent tables, for a prompt: what each holds, so a chart can reuse it by id."""
+def same_query(a: str, b: str) -> bool:
+    """Whether two SQL queries are the same, ignoring case, spacing and a trailing semicolon."""
+    normal = lambda sql: re.sub(r"\s+", " ", sql.strip().rstrip(";").strip()).lower()  # noqa: E731
+    return normal(a) == normal(b)
+
+
+def table_note(tables: list[dict], charts: list[dict] = ()) -> str:
+    """The most recent tables, for a prompt: what each holds and how it was already charted, so a
+    chart of the same data reuses it by id instead of querying again."""
     lines = []
     for table in tables[-NOTE_TABLES:]:
         sample = "; ".join(str(row) for row in table["rows"][:NOTE_ROWS])
+        drawn = [f'{c["type"]} "{c["title"]}"' for c in charts if c.get("table_id") == table["id"]]
         lines.append(
             f"- {table['id']}: {len(table['rows'])} rows, columns {', '.join(table['columns'])}; "
             f"query: {table['query'][:NOTE_QUERY_CHARS]}; first rows: {sample}"
+            + (f"; already charted as {', '.join(drawn)}" if drawn else "")
         )
     return "\n".join(lines)

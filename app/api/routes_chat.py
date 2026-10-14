@@ -168,6 +168,9 @@ def _to_events(mode: str, chunk, namespace: tuple[str, ...] = ()) -> list[dict]:
         if not namespace:
             # Top level: only the router's choice or the orchestrator's handoff is new. The
             # agent nodes' messages were already streamed from inside their subgraph.
+            if update.get("failed"):
+                # The router's agent found no answer: the UI drops its reply, the orchestrator takes over.
+                events.append({"type": "fallback", "agent": update["failed"]})
             if update.get("route"):
                 events.append({"type": "agent", "name": update["route"]})
             continue

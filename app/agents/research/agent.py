@@ -9,6 +9,7 @@ tool calls show in the UI as progress, but its notes and tool output stay out of
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -19,13 +20,14 @@ from pathlib import Path
 from typing import Annotated, TypedDict
 from urllib.parse import unquote, urlparse
 
+from langchain.agents.middleware import wrap_tool_call
 from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.runtime import Runtime
 
-from app.agents.base import AgentSpec
+from app.agents.base import LIMIT_MESSAGE, AgentSpec
 from app.agents.docs.tools import search_documents
 from app.agents.factory import build_agent
 from app.agents.research.prompts import (
@@ -91,7 +93,6 @@ def sources(servers: list[str]) -> str:
     return "\n".join([*lines, DOCUMENTS_LINE, MARKET_LINE])
 
 
-LIMIT_MESSAGE = "Model call limits exceeded"  # ModelCallLimitMiddleware's closing message
 
 
 def findings_from(messages: list[AnyMessage]) -> str:
@@ -138,7 +139,7 @@ def pages_from(messages: list[AnyMessage]) -> list[Page]:
     for m in messages:
         if not isinstance(m, ToolMessage):
             continue
-        text = m.text or str(m.content)
+        text = page_text(m)
         try:
             data = json.loads(text)
         except ValueError:
@@ -151,6 +152,109 @@ def pages_from(messages: list[AnyMessage]) -> list[Page]:
         head = _TITLE_LINE.match(text.split("\n", 1)[0]) if (m.name or "").endswith("wikipedia_page") else None
         pages.append(Page(head[2], text, head[1]) if head else Page(None, text))
     return pages
+
+
+# Source ids: the researcher cites a page by a short id instead of writing its URL (URLs are the
+# longest part of its notes, and writing is its slowest step). `cite_by_id` lists the ids of every
+# URL in a tool result at its end; `expand_source_ids` turns them back into "title | URL" before
+# `link_sources`. An id is a hash of the URL, so a page always gets the same one.
+SOURCE_IDS = "\n\n[source ids]"  # starts the list; `page_text` cuts it off again
+_SOURCE_ID = re.compile(r"\bS[0-9a-f]{4}\b", re.IGNORECASE)
+# Any bracket around an id, however the model wrote it: [S3fa2], (S3fa2 | "quote"), [source S3fa2].
+_BRACKETED_ID = re.compile(r"[\[(]([^\[\]()]*\bS[0-9a-f]{4}\b[^\[\]()]*)[\])]", re.IGNORECASE)
+_URL_IN_TEXT = re.compile(r"https?://\S+")
+
+
+def source_id(url: str) -> str:
+    return "S" + hashlib.sha1(url.encode()).hexdigest()[:4]
+
+
+def _clean_url(url: str) -> str:
+    """A URL found in text, without trailing punctuation or the ")" around it, but keeping the
+    parentheses of titles like Python_(programming_language)."""
+    url = url.rstrip(".,;:'\"")
+    while url.endswith(")") and url.count("(") < url.count(")"):
+        url = url[:-1].rstrip(".,;:'\"")
+    return url
+
+
+def page_text(message: ToolMessage) -> str:
+    """A tool result's text, without its source-id list."""
+    return (message.text or str(message.content)).split(SOURCE_IDS, 1)[0]
+
+
+def source_index(messages: list[AnyMessage]) -> dict[str, tuple[str, str]]:
+    """id -> (URL, title) for every URL in the researcher's tool results: Tavily's JSON entries,
+    and in text results every URL with the text before it on its line as the title ("Title (URL)",
+    "## Section (URL)", "- Linked article (URL)")."""
+    index: dict[str, tuple[str, str]] = {}
+    for m in messages:
+        if not isinstance(m, ToolMessage):
+            continue
+        text = page_text(m)
+        try:
+            data = json.loads(text)
+        except ValueError:
+            data = None
+        if isinstance(data, dict) and isinstance(data.get("results"), list):
+            entries = [(r["url"], r.get("title") or "") for r in data["results"] if isinstance(r, dict) and r.get("url")]
+        else:
+            entries = []
+            for line in text.splitlines():
+                for match in _URL_IN_TEXT.finditer(line):
+                    title = line[:match.start()].strip().lstrip("#-* ").rstrip("( ").strip()
+                    entries.append((_clean_url(match[0]), title[:100]))
+        for url, title in entries:
+            index.setdefault(source_id(url), (url, title))
+    return index
+
+
+def source_legend(index: dict[str, tuple[str, str]]) -> str:
+    lines = [f"{sid} = {title or url} ({url})" for sid, (url, title) in index.items()]
+    return SOURCE_IDS + " cite these pages by id in your notes:\n" + "\n".join(lines)
+
+
+@wrap_tool_call
+async def cite_by_id(request, handler):
+    """Lists the ids of the URLs in each tool result at its end, for the researcher to cite."""
+    result = await handler(request)
+    if isinstance(result, ToolMessage) and (index := source_index([result])):
+        legend = source_legend(index)
+        content = (result.content + legend if isinstance(result.content, str)
+                   else [*result.content, {"type": "text", "text": legend}])
+        result = result.model_copy(update={"content": content})
+    return result
+
+
+def _normal_id(sid: str) -> str:
+    return "S" + sid[1:].lower()
+
+
+def _as_label(title: str) -> str:
+    return re.sub(r"[\[\]|]", " ", title).strip()
+
+
+def expand_source_ids(findings: str, index: dict[str, tuple[str, str]]) -> str:
+    """[source: S3fa2 | "quote"] -> [source: <title> | <URL> | "quote"], also when the model wrote
+    the id another way ([S3fa2], (S3fa2), a bare S3fa2). Unknown ids are dropped (`link_sources`
+    still finds the page by its quote), so no id ever reaches the writer, who would invent a URL."""
+    def as_source(body: str) -> str:
+        body = re.sub(r"^\s*source\s*:?\s*", "", body, flags=re.IGNORECASE)
+        ids = [_normal_id(sid) for sid in _SOURCE_ID.findall(body)]
+        known = [index[sid] for sid in ids if sid in index]
+        rest = _SOURCE_ID.sub("", body).strip(" |,")
+        parts = ([f"{_as_label(known[0][1])} | {known[0][0]}"] if known else []) + [url for url, _ in known[1:]]
+        return "[source: " + " | ".join(p for p in [*parts, rest] if p.strip(" |")) + "]"
+
+    findings = _SOURCE.sub(lambda m: as_source(m[1]) if _SOURCE_ID.search(m[1]) else m[0], findings)
+    # Ids outside a [source: ...]: in another bracket, or bare.
+    findings = _BRACKETED_ID.sub(lambda m: as_source(m[1]) if not m[0].startswith("[source:") else m[0], findings)
+    def bare(m: re.Match) -> str:
+        if _normal_id(m[0]) in index:
+            return as_source(m[0])
+        return "" if re.fullmatch(r"S[0-9a-f]{4}", m[0]) else m[0]  # an unknown id; keep words like SDEFA
+    findings = _SOURCE_ID.sub(bare, findings)
+    return findings.replace("[source: ]", "")
 
 
 def _is_wikipedia(url: str) -> bool:
@@ -294,13 +398,14 @@ def build_research_workflow():
             schema=describe_schema(),
         ),
         tools=[*mcp_tools, search_documents, run_sql, make_load_skill_tool(RESEARCHER_SKILLS)],
+        middleware=[cite_by_id],
         max_model_calls=get_settings().research_max_model_calls,
     )
 
     async def gather(state: ResearchState, runtime: Runtime[AgentContext]) -> dict:
         result = await researcher.ainvoke({"messages": state["messages"]}, context=runtime.context)
         messages = result["messages"]
-        findings = findings_from(messages)
+        findings = expand_source_ids(findings_from(messages), source_index(messages))
         pages = await with_wikipedia_articles(findings, pages_from(messages))
         return {"findings": link_sources(findings, pages)}
 

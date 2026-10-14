@@ -10,13 +10,39 @@ from collections.abc import Awaitable, Callable, Sequence
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import Runnable
+
+from app.core.memory import MEMORY_TOOLS
+
+LIMIT_MESSAGE = "Model call limits exceeded"  # ModelCallLimitMiddleware's closing message
+MEMORY_TOOL_NAMES = frozenset(t.name for t in MEMORY_TOOLS)
+GAVE_UP_CHARS = 600  # longer replies count as answers (often partial ones), whatever they say
+# A reply that only says the search came up empty (not a negative answer such as "pays no dividend").
+NOT_FOUND = re.compile(
+    r"\b(couldn't|could not|can't|cannot|can not|wasn't able to|was unable to|unable to|did not|didn't) "
+    r"(find|locate|retrieve)\b"
+    r"|\bno (relevant |matching |specific )?(information|info|passages|mention)\b"
+    r"|\b(isn't|is not|wasn't|was not|aren't|are not) mentioned\b"
+    r"|\b(doesn't|does not|don't|do not) (seem to )?mention\b"
+    r"|không (thể )?(tìm thấy|tìm được)|chưa tìm thấy|không có thông tin|không (được )?(đề cập|nhắc đến)",
+    re.IGNORECASE,
+)
 
 
 def last_answer(state: dict) -> str:
     """The text of the last AIMessage in an agent's final state."""
     return next((m.text for m in reversed(state.get("messages", [])) if isinstance(m, AIMessage) and m.text), "")
+
+
+def turn_messages(messages: Sequence[AnyMessage]) -> list[AnyMessage]:
+    """The messages after the latest user message: one entry's reply to it."""
+    start = next((i for i in range(len(messages) - 1, -1, -1) if isinstance(messages[i], HumanMessage)), -1)
+    return list(messages[start + 1:])
+
+
+def is_error(text: str) -> bool:
+    return text.startswith("Error")
 
 
 @dataclass(frozen=True)
@@ -57,6 +83,8 @@ class AgentSpec:
     result: Callable[[dict], str] = last_answer
     # Routes this entry wins over when both are obvious, e.g. chart over sql for "chart AAPL".
     overrides: tuple[str, ...] = ()
+    # A tool result of this entry that holds nothing to answer from (an error, no rows, no passages).
+    no_result: Callable[[str], bool] = is_error
 
     async def info(self, user_id: str) -> RouteInfo | None:
         return await self.route_info(user_id) if self.route_info else RouteInfo()
@@ -66,6 +94,18 @@ class AgentSpec:
 
     def is_mentioned(self, message: str, info: RouteInfo) -> bool:
         return self.is_obvious(message, info) or info.mentions(message)
+
+    def gave_up(self, messages: Sequence[AnyMessage]) -> bool:
+        """True when this entry's reply (`turn_messages`) has no answer: no final text (e.g. it
+        ran out of model calls), every tool result held nothing, or a short reply that only says
+        nothing was found."""
+        last = messages[-1] if messages else None
+        if not isinstance(last, AIMessage) or last.tool_calls or not last.text or last.text.startswith(LIMIT_MESSAGE):
+            return True
+        results = [m for m in messages if isinstance(m, ToolMessage) and m.name not in MEMORY_TOOL_NAMES]
+        if results and all(m.status == "error" or self.no_result(m.text) for m in results):
+            return True
+        return len(last.text) <= GAVE_UP_CHARS and bool(NOT_FOUND.search(last.text))
 
 
 def message_routes(specs: Sequence[AgentSpec]) -> dict[str, str]:

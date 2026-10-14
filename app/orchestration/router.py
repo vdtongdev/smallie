@@ -24,6 +24,11 @@ ORCHESTRATOR = "orchestrator"  # graph node, route, SSE `agent` name and AIMessa
 class AssistantState(AgentState):
     route: NotRequired[str]
     findings: NotRequired[str]  # research findings waiting for the orchestrator to write them up
+    # The router picked `route` itself (not forced, not a handoff): if it finds no answer, the
+    # orchestrator takes over (app/orchestration/fallback.py).
+    direct: NotRequired[bool]
+    failed: NotRequired[str]  # the route that gave up, for the orchestrator
+    attempt: NotRequired[str]  # what it tried, for the orchestrator
 
 
 def previous_route(messages: list[BaseMessage], routes: dict[str, str]) -> str | None:
@@ -59,10 +64,10 @@ def build_router(specs: Sequence[AgentSpec] = registry.AGENTS):
     async def router(state: AssistantState, runtime: Runtime[AgentContext]) -> dict:
         context = runtime.context
         if any(spec.route == context.agent for spec in specs):
-            return {"route": context.agent}
+            return {"route": context.agent, "direct": False}  # the user picked it: no fallback
         available = await available_agents(context.user_id, specs)
         latest = state["messages"][-1].text
         route = await asyncio.to_thread(obvious_route, latest, available)
-        return {"route": route or ORCHESTRATOR}
+        return {"route": route or ORCHESTRATOR, "direct": bool(route)}
 
     return router

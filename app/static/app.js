@@ -346,6 +346,16 @@ function addError(message) {
   scrollToBottom();
 }
 
+// Removes the assistant's text replies since the latest user message.
+function dropReplies() {
+  let el = [...$("messages").querySelectorAll(".msg.user")].pop()?.nextElementSibling;
+  while (el) {
+    const next = el.nextElementSibling;
+    if (el.matches(".msg.assistant")) el.remove();
+    el = next;
+  }
+}
+
 // ---------- chat ----------
 async function sendMessage(text) {
   setBusy(true);
@@ -355,6 +365,7 @@ async function sendMessage(text) {
   let started = false;
   let finished = false;
   let badge = null; // this turn's agent badge
+  let waiting = false; // showing "thinking" after a fallback
 
   try {
     const res = await fetch(`/api/chat/${KIND}`, {
@@ -389,15 +400,23 @@ async function sendMessage(text) {
           case "step":
             addAgentBadge(event.agent, current.el, event.name);
             break;
+          case "fallback":
+            // The agent found no answer: drop its reply (its tool calls stay) while the assistant takes over.
+            dropReplies();
+            current = addAssistantMessage();
+            current.update(`_${t("thinking")}_`);
+            started = waiting = true; // the next `agent` event adds the assistant's own badge
+            break;
           case "done":
             finished = true;
             break;
           case "token":
-            if (!started) { current.update(""); started = true; }
+            if (!started || waiting) { current.update(""); started = true; waiting = false; }
             current.append(event.text);
             break;
           case "tool_call":
-            if (!started) current.remove();
+            if (!started || waiting) current.remove();
+            waiting = false;
             addToolCall(event.name, event.args);
             current = addAssistantMessage();
             started = true;
@@ -416,7 +435,7 @@ async function sendMessage(text) {
   } catch (err) {
     addError(err.message);
   } finally {
-    if (!started) current.remove();
+    if (!started || waiting) current.remove();
     document.querySelectorAll(".msg.assistant:empty").forEach((el) => el.remove());
     setBusy(false);
     loadConversations();

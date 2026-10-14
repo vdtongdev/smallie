@@ -49,6 +49,11 @@ SCENARIOS = {
     # A list of messages runs on one thread; only the last one is measured.
     "chart_followup": (["What were NVDA's closing prices each day last week?", "plot that"],
                        "reuses the previous answer's table"),
+    "chart_repeat": (["Chart AAPL vs MSFT closing prices over the last year",
+                      "Chart AAPL vs MSFT closing prices over the last year"], "the same request again: reuse the table"),
+    "chart_reworded": (["Chart AAPL vs MSFT closing prices over the last year",
+                        "Show Apple's and Microsoft's closes for the past year as an area chart"],
+                       "the same data asked differently: reuse the table"),
     "chart_compound": ("Compare the skills in my resume with the five largest tech companies, with a chart of their market caps",
                        "files + database + a chart"),
 }
@@ -60,6 +65,7 @@ class Call:
     agent: str
     seconds: float = 0.0
     first_token: float | None = None
+    out_chars: int = 0  # text the call generated (tool-call arguments not counted)
     error: str = ""
 
 
@@ -111,6 +117,8 @@ class Timing(AsyncCallbackHandler):
         start, call = self.calls.get(run_id, (None, None))
         if call and call.first_token is None and token:
             call.first_token = round(time.perf_counter() - start, 2)
+        if call:
+            call.out_chars += len(token or "")
 
     async def on_llm_end(self, response, *, run_id, **kwargs):
         start, call = self.calls[run_id]
@@ -176,7 +184,8 @@ def fmt(value: float | None) -> str:
 def report(results: list[Result]) -> None:
     print(f"\n{'scenario':<16} {'route':<26} {'calls':>5} {'1st evt':>7} {'1st tok':>7} {'total':>6}  per-call s (agent)")
     for r in results:
-        calls = " ".join(f"{c.seconds:.1f}{'!' if c.error else ''}({c.agent[:4]})" for c in r.calls)
+        calls = " ".join(f"{c.seconds:.1f}{'!' if c.error else ''}({c.agent[:4]}{f' {c.out_chars}ch' if c.out_chars else ''})"
+                         for c in r.calls)
         route = "->".join(r.route) or "?"
         print(f"{r.scenario:<16} {route[:26]:<26} {len(r.calls):>5} {fmt(r.first_event):>7} "
               f"{fmt(r.first_token):>7} {r.total:>6.1f}  {calls}{'  ERROR ' + r.error if r.error else ''}")

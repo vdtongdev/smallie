@@ -34,6 +34,7 @@ class ChartSpec(BaseModel):
     labels: list[str | float]
     series: list[Series] = Field(min_length=1, max_length=MAX_SERIES)
     downsampled_from: int | None = None  # number of points before downsampling, if any
+    table_id: str | None = None  # the query result it was drawn from, if any
 
     @model_validator(mode="after")
     def _check(self) -> "ChartSpec":

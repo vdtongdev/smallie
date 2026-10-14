@@ -20,9 +20,11 @@ HINTS = re.compile(
 
 
 def tables_section(request: ModelRequest) -> str:
-    """The query results already in the chat, so "plot that" reuses them instead of querying again."""
+    """The query results already in the chat and how they were charted, so "plot that" or a
+    repeated request reuses them instead of querying again."""
     tables = artifacts_from(request.messages, "tables")
-    return TABLES_SECTION.format(tables=table_note(tables)) if tables else ""
+    charts = artifacts_from(request.messages, "charts")
+    return TABLES_SECTION.format(tables=table_note(tables, charts)) if tables else ""
 
 
 def build_chart_agent():

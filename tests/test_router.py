@@ -30,7 +30,7 @@ def _runtime(**context):
 async def test_forced_agent_is_used(monkeypatch):
     router = router_module.build_router()
     state = {"messages": [HumanMessage("anything")]}
-    assert await router(state, _runtime(agent="docs")) == {"route": "docs"}
+    assert await router(state, _runtime(agent="docs")) == {"route": "docs", "direct": False}  # forced: no fallback
 
 
 async def test_obvious_route_uses_keywords_tickers_and_file_names(monkeypatch):
@@ -52,7 +52,7 @@ async def test_obvious_message_goes_straight_to_its_agent(monkeypatch):
     monkeypatch.setattr(sql_agent, "stock_tickers", lambda: frozenset({"AAPL"}))
     router = router_module.build_router()
     state = {"messages": [HumanMessage("AAPL dividend yield?")]}
-    assert await router(state, _runtime()) == {"route": "sql"}
+    assert await router(state, _runtime()) == {"route": "sql", "direct": True}
 
 
 # A third agent plugs in through its spec alone.
@@ -69,8 +69,8 @@ WEB = AgentSpec(
 async def test_new_agent_routes_by_its_hints_or_when_forced(monkeypatch):
     monkeypatch.setattr(docs_agent, "document_names", lambda user_id: ["handbook.pdf"])
     router = router_module.build_router((*AGENTS, WEB))
-    assert await router({"messages": [HumanMessage("any news today?")]}, _runtime()) == {"route": "web"}
-    assert await router({"messages": [HumanMessage("hi")]}, _runtime(agent="web")) == {"route": "web"}
+    assert await router({"messages": [HumanMessage("any news today?")]}, _runtime()) == {"route": "web", "direct": True}
+    assert await router({"messages": [HumanMessage("hi")]}, _runtime(agent="web")) == {"route": "web", "direct": False}
 
 
 async def test_research_hints_route_to_research(monkeypatch):
@@ -90,7 +90,7 @@ async def test_everything_else_goes_to_the_orchestrator(monkeypatch):
     monkeypatch.setattr(sql_agent, "stock_tickers", lambda: frozenset({"AAPL"}))
     router = router_module.build_router()
     for message in ("write a poem about autumn", "how many vacation days do I get?", "and last year?"):
-        assert await router({"messages": [HumanMessage(message)]}, _runtime()) == {"route": ORCHESTRATOR}
+        assert await router({"messages": [HumanMessage(message)]}, _runtime()) == {"route": ORCHESTRATOR, "direct": False}
 
 
 def test_orchestrator_and_old_writer_answers_have_a_route():

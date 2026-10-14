@@ -5,7 +5,7 @@ from sqlalchemy import select
 
 from app.agents.base import AgentSpec, RouteInfo
 from app.agents.docs.prompts import DOCS_SYSTEM, ROUTE_DESCRIPTION, TOOL_DESCRIPTION
-from app.agents.docs.tools import search_documents
+from app.agents.docs.tools import NO_PASSAGES, search_documents
 from app.agents.factory import build_agent
 from app.core.db import documents, get_engine
 
@@ -65,4 +65,5 @@ SPEC = AgentSpec(
     hints=HINTS,
     route_info=route_info,
     tool_description=TOOL_DESCRIPTION,
+    no_result=lambda text: text == NO_PASSAGES,
 )

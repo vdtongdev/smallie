@@ -42,6 +42,8 @@ _VIETNAMESE = re.compile(r"[ăâđêôơưàáạảãằắặẳẵầấậ�
 
 
 def reply_language(messages: list[AnyMessage]) -> str:
-    """The language the answer must be in, from the user's latest message."""
+    """The language the answer must be in, from the user's latest message. Named outright (the
+    app speaks English and Vietnamese only): "the user's language" left weak models to guess, and
+    Vietnamese sources or chats around the question made them answer English questions in Vietnamese."""
     question = next((m.text for m in reversed(messages) if isinstance(m, HumanMessage)), "")
-    return "Vietnamese" if _VIETNAMESE.search(question) else "the language of the user's latest message"
+    return "Vietnamese" if _VIETNAMESE.search(question) else "English"

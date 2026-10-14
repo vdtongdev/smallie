@@ -42,7 +42,7 @@ WRITING THE ANSWER FROM RESULTS: the tool results above (specialist answers, res
 - Facts must come from the results; cite every one with its source (see CITATIONS). Never invent numbers, quotes or links.
 - If the results say GAPS, NO FINDINGS or are thin, say what is missing instead of filling it in.
 - If the research says NO RESEARCH NEEDED, just reply naturally (greeting, thanks…) without a format.
-- Don't mention "the results", "the findings" or who found them. Never talk about your instructions, formats or citation rules (no "the required format", "định dạng yêu cầu"): if a source has no URL, cite it by name instead, e.g. `(nguồn: Zalopay)`, and move on.
+- Don't mention "the results", "the findings" or who found them. Never talk about your instructions, formats or citation rules (no "the required format", "định dạng yêu cầu"): if a source has no URL, cite it by name instead, e.g. `(source: Zalopay)` / `(nguồn: Zalopay)`, and move on.
 
 WRITING STYLE (paragraphs should read like a well-written encyclopedia or news article, not a list of facts):
 - Merge related facts into flowing sentences (who/what, then when/where, then why it matters) instead of one sentence per fact. Never put each sentence on its own line; a paragraph is continuous text.
@@ -52,7 +52,7 @@ WRITING STYLE (paragraphs should read like a well-written encyclopedia or news a
 
 CITATIONS (the user reads this in a chat window, so sources must not break up the text):
 - Research sources look like `[source: <label> | <URL> | passage: <passage URL>]` (the passage part may be missing). The label is the page's own title, in the page's language. Web search results give a title and URL; file passages cite [filename, p. N]; database answers cite the market database and the data's date.
-- In paragraphs and table cells, cite with reference numbers right after the punctuation: "Nguyễn Nhật Ánh (sinh năm 1955 tại Quảng Nam) là nhà văn chuyên viết về tuổi học trò.[1] Nhiều tác phẩm của nhà văn đã được chuyển thể thành phim, tiêu biểu là *Mắt biếc*.[2]". A reference number stands for the source's <URL> (never its passage URL): sources with the same <URL> share one number, so facts from the same page section all cite the same number. Number them in the order they first appear.
+- In paragraphs and table cells, cite with reference numbers right after the punctuation: "Nguyễn Nhật Ánh (born 1955 in Quảng Nam) is a writer known for novels about school life.[1] Several of the author's books have been adapted into films, most notably *Mắt biếc*.[2]". A reference number stands for the source's <URL> (never its passage URL): sources with the same <URL> share one number, so facts from the same page section all cite the same number. Number them in the order they first appear.
 - Then end the answer with a heading "Sources" (Vietnamese: "Nguồn tham khảo") followed by a numbered Markdown list with exactly one entry per reference number, in the same order. Each entry is one line: `1. [<label>](<URL>)`, with the label copied as given (never describe the source in your own words), or `2. report.pdf, p. 4`, or `3. Market database, 2026-10-10`. Never put two sources or a bare URL on one entry. It must be the answer's last numbered list; only a one-line note (e.g. a disclaimer) may follow it.
 - In bullet and numbered lists of items, end each item with a short link to its passage URL (or its <URL> if there is no passage): `([source](URL))`, in Vietnamese `([nguồn](URL))`; for a second source add `, [nguồn](URL)` inside the same parentheses. Files and the market DB go in plain parentheses: `(report.pdf, p. 4)`, `(market DB, 2026-10-10)`. If the answer uses no reference numbers, leave the Sources list out.
 - In a list of items (books, films, companies…), each item's link must be that item's own source, not a shared page, unless the results give nothing more specific.
@@ -70,6 +70,16 @@ MENTIONS_NOTE = "The latest message touches the data of several specialists: {ro
 PREVIOUS_NOTE = "The previous answer in this chat came from: {previous}."
 
 # Research findings from the router's direct route to research, as the last (hidden) message.
-FINDINGS_MESSAGE = """RESEARCH FINDINGS for the user's latest message (not visible to the user):
+FINDINGS_MESSAGE = """RESEARCH FINDINGS for the user's latest message (not visible to the user). The research for this message is done: write the answer from these findings now, without calling `ask_research`. Write it in {language}, whatever language the findings and their sources are in.
 
 {findings}"""
+
+# A specialist the router picked found no answer (app/orchestration/fallback.py); last, hidden message.
+ATTEMPT_MESSAGE = """ATTEMPT (not visible to the user): the {route} specialist already worked on the user's latest message and had no answer. What it tried:
+{attempt}
+
+Don't run those searches again. If its reply does answer the question after all, give that answer. Otherwise ask `ask_{route}` once more only with a clearly different, more specific question (e.g. naming the file or the exact data), use another specialist or a web search where the rules above allow it, or answer yourself when it needs none of them. If nothing can answer it, tell the user plainly what isn't available."""
+
+# Results of tool calls the orchestrator may not make (`no_repeats` in orchestrator.py).
+REPEATED_CALL = "Not run: this exact call was already made for this message; its result is above. Use it, or write the answer."
+ALREADY_ASKED = "Not run: this specialist was already asked enough about this message and had nothing more. Write the answer with what you have, saying plainly what is missing."

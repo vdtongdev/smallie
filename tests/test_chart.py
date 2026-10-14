@@ -101,21 +101,47 @@ async def test_chart_table_finds_earlier_results_by_id(monkeypatch):
     assert content == "Error: no table 't9' in this chat. Available: t1, t2." and artifact == {}
 
 
+def _empty_chat():
+    return SimpleNamespace(state={"messages": []})
+
+
 async def test_chart_sql_errors_come_back_as_text(monkeypatch):
     monkeypatch.setattr(tools, "query_readonly", lambda sql: "Error: relation \"x\" does not exist")
-    message = await chart_sql.ainvoke(_call(chart_sql, {"query": "SELECT * FROM x", "type": "bar", "title": "t",
-                                                        "x_column": "a"}))
-    assert message.content.startswith("Error: relation") and not message.artifact
+    content, artifact = await chart_sql.coroutine(query="SELECT * FROM x", type="bar", title="t", x_column="a",
+                                                  runtime=_empty_chat())
+    assert content.startswith("Error: relation") and not artifact
+
+
+async def test_the_same_query_reuses_the_earlier_table_without_querying(monkeypatch):
+    monkeypatch.setattr(tools, "query_readonly", lambda sql: (_ for _ in ()).throw(AssertionError("queried again")))
+    earlier = {**PRICES, "query": "SELECT trade_date, ticker, close\nFROM market.daily_prices;"}
+    runtime = SimpleNamespace(state={"messages": [ToolMessage("rows", tool_call_id="0", artifact={"tables": [earlier]})]})
+    content, artifact = await chart_sql.coroutine(
+        query="select trade_date,  ticker, close from market.daily_prices", type="line", title="Close",
+        x_column="trade_date", y_columns=["close"], series_column="ticker", runtime=runtime)
+    assert content.startswith("(Reused table t1 from earlier in this chat")
+    assert artifact["charts"][0]["table_id"] == "t1" and "tables" not in artifact
+
+
+def test_listed_tables_say_how_they_were_already_charted():
+    from app.agents.artifacts import table_note
+
+    spec = rows_to_spec(PRICES, "line", "AAPL vs MSFT", "trade_date", ["close"], "ticker")
+    assert spec.table_id == "t1"
+    note = table_note([PRICES, WIDE], [spec.model_dump()])
+    first, second = note.splitlines()
+    assert first.endswith('; already charted as line "AAPL vs MSFT"')
+    assert "already charted" not in second
 
 
 @requires_db
 async def test_chart_sql_charts_a_real_query_and_keeps_its_table():
-    message = await chart_sql.ainvoke(_call(chart_sql, {
-        "query": "SELECT n AS day, n * 2 AS value FROM generate_series(1, 5) AS n",
-        "type": "line", "title": "Doubling", "x_column": "day"}))
-    chart, table = message.artifact["charts"][0], message.artifact["tables"][0]
+    content, artifact = await chart_sql.coroutine(
+        query="SELECT n AS day, n * 2 AS value FROM generate_series(1, 5) AS n",
+        type="line", title="Doubling", x_column="day", runtime=_empty_chat())
+    chart, table = artifact["charts"][0], artifact["tables"][0]
     assert chart["labels"] == [1, 2, 3, 4, 5] and chart["series"][0]["values"] == [2, 4, 6, 8, 10]
-    assert table["columns"] == ["day", "value"]
-    refused = await chart_sql.ainvoke(_call(chart_sql, {"query": "DELETE FROM market.stocks", "type": "bar",
-                                                        "title": "t", "x_column": "a"}))
-    assert refused.content.startswith("Error: only a single SELECT")
+    assert table["columns"] == ["day", "value"] and chart["table_id"] == table["id"]
+    refused, _ = await chart_sql.coroutine(query="DELETE FROM market.stocks", type="bar", title="t",
+                                           x_column="a", runtime=_empty_chat())
+    assert refused.startswith("Error: only a single SELECT")

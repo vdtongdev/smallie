@@ -60,6 +60,7 @@ async def test_findings_flow_to_the_orchestrator_and_only_the_answer_is_kept(mon
     offered = [t["function"]["name"] for t in model.tools[-1]]
     assert "ask_research" not in offered and "ask_sql" in offered
     assert "RESEARCH FINDINGS" in prompt[-1].content and NOTES in prompt[-1].content
+    assert "Write it in Vietnamese" in prompt[-1].content
     assert "CITATIONS" in prompt[0].content and "Write the whole answer in Vietnamese" in prompt[0].content
 
     # The thread keeps only the question and the orchestrator's answer.
@@ -74,6 +75,10 @@ async def test_researcher_does_not_carry_old_tool_output_into_the_next_turn(monk
     assistant = _assistant(monkeypatch, model)
     await _run(assistant, "research A")
     await _run(assistant, "and B?")
+    # An English question names English outright, next to the findings and in the writing rules.
+    first_write_up = model.prompts[1]
+    assert "Write it in English" in first_write_up[-1].content
+    assert "Write the whole answer in English" in first_write_up[0].content
     second_research_prompt = model.prompts[2]  # [system prompt, *conversation]
     assert [m.content for m in second_research_prompt[1:]] == ["research A", "First answer.", "and B?"]
     # The first turn's findings were used up: the second write-up only sees the new ones.
@@ -196,7 +201,7 @@ async def test_cited_wikipedia_articles_are_fetched_once(monkeypatch):
 
 def test_reply_language_follows_the_latest_question():
     assert reply_language([HumanMessage("hello"), HumanMessage("nguyễn nhật ánh là ai")]) == "Vietnamese"
-    assert "latest message" in reply_language([HumanMessage("who is he?")])
+    assert reply_language([HumanMessage("nguyễn nhật ánh là ai"), HumanMessage("do research on him")]) == "English"
 
 
 def test_web_search_alongside_wikipedia_only_when_web_search_loaded(monkeypatch):
@@ -209,3 +214,60 @@ def test_web_search_alongside_wikipedia_only_when_web_search_loaded(monkeypatch)
     research_agent.build_research_workflow()
     assert "Whenever you search Wikipedia, also run a web search" in prompts[0]
     assert "Whenever you search Wikipedia" not in prompts[1]
+
+
+WIKI_SECTION = (
+    "Python (programming language), section History (https://en.wikipedia.org/wiki/Python_(programming_language)#History)\n\n"
+    "Python was conceived in the late 1980s by Guido van Rossum.\n\n"
+    "Articles linked from this section:\n"
+    "- Guido van Rossum (https://en.wikipedia.org/wiki/Guido_van_Rossum)"
+)
+TAVILY_JSON = json.dumps({"results": [{"url": "https://example.com/news", "title": "Battery news",
+                                        "content": "Solid-state cells entered pilot production in 2026."}]})
+
+
+async def test_tool_results_list_source_ids_that_the_notes_cite_and_code_expands():
+    results = [_tool("tavily_tavily_search", TAVILY_JSON), _tool("knowledge_wikipedia_page", WIKI_SECTION)]
+    index = research_agent.source_index(results)
+    by_url = {url: (sid, title) for sid, (url, title) in index.items()}
+    history = "https://en.wikipedia.org/wiki/Python_(programming_language)#History"
+    assert set(by_url) == {"https://example.com/news", history, "https://en.wikipedia.org/wiki/Guido_van_Rossum"}
+    assert by_url[history][1] == "Python (programming language), section History"  # ")" of the title kept
+    assert by_url["https://example.com/news"] == (research_agent.source_id("https://example.com/news"), "Battery news")
+
+    # The researcher sees the ids at the end of each result; page parsing ignores them.
+    async def handler(request):
+        return results[0]
+
+    with_ids = await research_agent.cite_by_id.awrap_tool_call(None, handler)
+    assert with_ids.text.endswith(f"{by_url['https://example.com/news'][0]} = Battery news (https://example.com/news)")
+    assert research_agent.pages_from([with_ids]) == research_agent.pages_from([results[0]])
+
+    news, guido = by_url["https://example.com/news"][0], by_url["https://en.wikipedia.org/wiki/Guido_van_Rossum"][0]
+    notes = (f'- Pilot production in 2026 [source: {news} | "entered pilot production in 2026"]\n'
+             f'- Created by van Rossum [source: {guido}]\n'
+             f'- Unknown id [source: Sffff | "conceived in the late 1980s"]\n'
+             "- From a file [source: report.pdf, p. 2]")
+    expanded = research_agent.expand_source_ids(notes, index).splitlines()
+    assert expanded[0].endswith('[source: Battery news | https://example.com/news | "entered pilot production in 2026"]')
+    assert expanded[1].endswith("[source: Guido van Rossum | https://en.wikipedia.org/wiki/Guido_van_Rossum]")
+    assert expanded[2].endswith('[source: "conceived in the late 1980s"]')  # link_sources finds it by the quote
+    assert expanded[3] == notes.splitlines()[3]
+    linked = research_agent.link_sources("\n".join(expanded), research_agent.pages_from(results)).splitlines()
+    assert "passage: https://example.com/news#:~:text=" in linked[0]
+    assert f"| {history} |" in linked[2] or history in linked[2]
+
+
+def test_ids_are_expanded_however_the_model_wrote_them_and_unknown_ones_never_reach_the_writer():
+    a, b = "https://a.com/x", "https://b.com/y"
+    ia, ib = research_agent.source_id(a), research_agent.source_id(b)
+    index = {ia: (a, "Page [A]"), ib: (b, "Page B")}
+    expand = lambda notes: research_agent.expand_source_ids(notes, index)  # noqa: E731
+    assert expand(f'- f [source: {ia} | "five words of the quote"]') == f'- f [source: Page  A | {a} | "five words of the quote"]'
+    assert expand(f"- f [{ia}]") == f"- f [source: Page  A | {a}]"
+    assert expand(f'- f ({ia} | "q")') == f'- f [source: Page  A | {a} | "q"]'
+    assert expand(f"- f [source {ia}, {ib}]") == f"- f [source: Page  A | {a} | {b}]"
+    assert expand(f"- f {ia.upper()}") == f"- f [source: Page  A | {a}]"
+    assert expand('- f [source: Sffff | "q"]') == '- f [source: "q"]'
+    assert expand("- f [Sffff] Sffff") == "- f  "
+    assert expand("- SDEFA rose [source: report.pdf, p. 2]") == "- SDEFA rose [source: report.pdf, p. 2]"

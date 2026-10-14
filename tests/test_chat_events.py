@@ -111,3 +111,9 @@ def test_history_shows_charts_of_tool_results_and_orchestrator_answers():
     assert tool["charts"] == [CHART]
     answer = _serialize(AIMessage("See the chart.", name="orchestrator", additional_kwargs={"charts": [CHART], "tables": []}))
     assert answer["charts"] == [CHART] and answer["agent"] == "orchestrator" and "tables" not in answer
+
+
+def test_a_fallback_drops_the_reply_before_the_orchestrator_takes_over():
+    update = {"fallback": {"route": "orchestrator", "failed": "docs", "attempt": "...", "messages": []}}
+    assert _to_events("updates", update) == [
+        {"type": "fallback", "agent": "docs"}, {"type": "agent", "name": "orchestrator"}]

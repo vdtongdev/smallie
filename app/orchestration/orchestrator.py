@@ -11,16 +11,20 @@ exactly one directly-answering specialist is turned into a handoff (`prefer_hand
 message also points to another specialist (`AgentContext.mentioned`): then it can still ask that
 one in its next step and combine the answers.
 Research findings from the router's direct route arrive in `findings` and are written up the
-same way as the orchestrator's own `ask_research` results.
+same way as the orchestrator's own `ask_research` results. When a specialist the router picked
+found no answer, what it tried arrives in `attempt` (app/orchestration/fallback.py): the
+orchestrator then gets no `handoff`, and `no_repeats` stops it from asking a specialist more than
+`MAX_ASKS` times or running the same tool call twice in one message.
 """
 
 import dataclasses
+import json
 from collections.abc import Mapping, Sequence
 from datetime import date
 from pathlib import Path
 from typing import Literal
 
-from langchain.agents.middleware import ModelRequest, ModelResponse, wrap_model_call
+from langchain.agents.middleware import ModelRequest, ModelResponse, wrap_model_call, wrap_tool_call
 from langchain.tools import tool
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import Runnable
@@ -32,22 +36,25 @@ from pydantic import BaseModel, Field
 
 from app.agents import registry
 from app.agents.artifacts import artifacts_from, collect, table_note
-from app.agents.base import AgentSpec
+from app.agents.base import LIMIT_MESSAGE, MEMORY_TOOL_NAMES, AgentSpec
 from app.agents.chart.prompts import TABLES_SECTION
 from app.agents.chart.tools import chart_data, chart_table
 from app.agents.delegation import ask_tool_name, make_ask_tool
 from app.agents.factory import build_agent
-from app.agents.research.agent import LIMIT_MESSAGE, mcp_tools
+from app.agents.research.agent import mcp_tools
 from app.agents.skills import load_skills, skills_inline
 from app.core.config import get_settings
-from app.core.memory import MEMORY_TOOLS, AgentContext
+from app.core.memory import AgentContext
 from app.core.prompts import LANGUAGE_RULE, MEMORY_RULE, reply_language
 from app.orchestration.prompts import (
+    ALREADY_ASKED,
+    ATTEMPT_MESSAGE,
     COMPOSE_SECTION,
     FINDINGS_MESSAGE,
     MENTIONS_NOTE,
     ORCHESTRATOR_SYSTEM,
     PREVIOUS_NOTE,
+    REPEATED_CALL,
     UNAVAILABLE_NOTE,
 )
 from app.orchestration.router import ORCHESTRATOR, AssistantState, available_agents, mentioned_routes, previous_route
@@ -56,8 +63,10 @@ LABELS = {"en": "Assistant", "vi": "Trợ lý"}
 FORMATS = skills_inline(load_skills(Path(__file__).resolve().parent / "formats"))  # answer formats
 HANDOFF = "handoff"
 FINDINGS = "research_findings"  # HumanMessage.name of the hidden findings message
+ATTEMPT = "failed_attempt"  # HumanMessage.name of the hidden note on a specialist that gave up
+HIDDEN = frozenset({FINDINGS, ATTEMPT})
+MAX_ASKS = 2  # `ask_<route>` calls per specialist and message, a fallen-back direct attempt included
 WEB_SEARCH_TOOLS = ("tavily_tavily_search", "knowledge_wikipedia_search")
-MEMORY_TOOL_NAMES = frozenset(t.name for t in MEMORY_TOOLS)
 SORRY = "Sorry, I couldn't finish this answer. Please try again or rephrase the question."
 
 # AIMessage.name -> route, including the orchestrator (and the removed research writer of old chats).
@@ -111,6 +120,10 @@ def make_prefer_handoff(routes: Sequence[str], research_tools: frozenset[str]):
         if has_findings(request.messages):
             # The router already ran the research: write it up instead of researching again.
             request = request.override(tools=[t for t in request.tools if getattr(t, "name", "") not in research_tools])
+        if request.runtime.context.failed:
+            # A specialist already gave up on this message: answer it here, never hand it back.
+            return await handler(request.override(
+                tools=[t for t in request.tools if getattr(t, "name", "") != HANDOFF]))
         response = await handler(request)
         if is_composing(request.messages):
             return response  # a later step: asking one more specialist is fine
@@ -131,6 +144,41 @@ def make_prefer_handoff(routes: Sequence[str], research_tools: frozenset[str]):
     return prefer_handoff
 
 
+def _call_key(call: dict) -> tuple[str, str]:
+    """A tool call ignoring case, spacing and argument order."""
+    args = json.dumps(call["args"], sort_keys=True, ensure_ascii=False)
+    return call["name"], " ".join(args.lower().split())
+
+
+def calls_before(messages: Sequence[AnyMessage], call_id: str) -> list[dict]:
+    """This run's tool calls (after the last user or hidden message) that came before `call_id`."""
+    calls = []
+    for message in reversed(messages):
+        if isinstance(message, HumanMessage):
+            break
+        if isinstance(message, AIMessage):
+            calls[:0] = message.tool_calls
+    ids = [c["id"] for c in calls]
+    return calls[:ids.index(call_id)] if call_id in ids else calls
+
+
+@wrap_tool_call
+async def no_repeats(request, handler):
+    """Stops loops of failing calls: the same tool call twice in one message, or a specialist
+    asked more than MAX_ASKS times (the direct attempt of one that gave up counts as one)."""
+    call = request.tool_call
+    if call["name"] in MEMORY_TOOL_NAMES:
+        return await handler(request)
+    earlier = calls_before(request.state["messages"], call["id"])
+    if _call_key(call) in {_call_key(c) for c in earlier}:
+        return ToolMessage(REPEATED_CALL, tool_call_id=call["id"], name=call["name"])
+    if call["name"].startswith("ask_"):
+        asks = sum(c["name"] == call["name"] for c in earlier) + (call["name"] == f"ask_{request.runtime.context.failed}")
+        if asks >= MAX_ASKS:
+            return ToolMessage(ALREADY_ASKED, tool_call_id=call["id"], name=call["name"])
+    return await handler(request)
+
+
 def is_composing(messages: Sequence[AnyMessage]) -> bool:
     """True once the current turn has results to write up (tool results or research findings)."""
     for message in reversed(messages):
@@ -147,9 +195,10 @@ def compose_section(request: ModelRequest) -> str:
     notes = f"\n\n{request.runtime.context.notes}" if request.runtime.context.notes else ""
     if not is_composing(request.messages):
         return notes
-    question = [m for m in request.messages if not (isinstance(m, HumanMessage) and m.name == FINDINGS)]
+    question = [m for m in request.messages if not (isinstance(m, HumanMessage) and m.name in HIDDEN)]
     tables = artifacts_from(request.messages, "tables")  # e.g. from ask_sql, for chart_table
-    tables = TABLES_SECTION.format(tables=table_note(tables)) if tables else ""
+    charts = artifacts_from(request.messages, "charts")
+    tables = TABLES_SECTION.format(tables=table_note(tables, charts)) if tables else ""
     return notes + tables + COMPOSE_SECTION.format(formats=FORMATS, language=reply_language(question))
 
 
@@ -213,18 +262,23 @@ def build_orchestrator(specs: Sequence[AgentSpec], agents: Mapping[str, Runnable
         max_model_calls=settings.orchestrator_max_model_calls,
         prompt_extra=compose_section,
         middleware=[make_prefer_handoff(targets, frozenset(
-            ask_tool_name(spec) for spec in specs if spec.tool_description and not spec.answers_directly))],
+            ask_tool_name(spec) for spec in specs if spec.tool_description and not spec.answers_directly)),
+            no_repeats],
     )
 
     async def orchestrator(state: AssistantState, runtime: Runtime[AgentContext]) -> Command:
         messages = state["messages"]
-        hidden = [HumanMessage(FINDINGS_MESSAGE.format(findings=f), name=FINDINGS)] if (f := state.get("findings")) else []
+        hidden = [HumanMessage(FINDINGS_MESSAGE.format(findings=f, language=reply_language(messages)), name=FINDINGS)
+                  ] if (f := state.get("findings")) else []
+        if failed := state.get("failed", ""):
+            hidden.append(HumanMessage(ATTEMPT_MESSAGE.format(route=failed, attempt=state.get("attempt", "")),
+                                       name=ATTEMPT))
         notes, mentioned = await request_notes(runtime.context.user_id, specs, messages)
-        context = dataclasses.replace(runtime.context, notes=notes, mentioned=mentioned)
+        context = dataclasses.replace(runtime.context, notes=notes, mentioned=mentioned, failed=failed)
         result = await agent.ainvoke({"messages": [*messages, *hidden]}, context=context)
         new = result["messages"][len(messages) + len(hidden):]
         if target := handoff_target(new, targets):
-            return Command(goto=target, update={"route": target, "findings": ""})
+            return Command(goto=target, update={"route": target, "direct": False, "findings": ""})
         answer = next((m for m in reversed(new) if isinstance(m, AIMessage) and m.text and not m.tool_calls), None)
         if answer is None or answer.text.startswith(LIMIT_MESSAGE):
             answer = AIMessage(SORRY, name=ORCHESTRATOR)
@@ -232,6 +286,6 @@ def build_orchestrator(specs: Sequence[AgentSpec], agents: Mapping[str, Runnable
         # query results (for "plot that" later) on it.
         if artifacts := collect(new):
             answer = answer.model_copy(update={"additional_kwargs": {**answer.additional_kwargs, **artifacts}})
-        return Command(goto=END, update={"messages": [answer], "findings": ""})
+        return Command(goto=END, update={"messages": [answer], "findings": "", "failed": "", "attempt": ""})
 
     return orchestrator, targets

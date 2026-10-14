@@ -49,3 +49,11 @@
 - The orchestrator can chart the results of the agents it asked (e.g. database figures next to a resume)
 - UI (`app/static/charts.js`): chart cards with a validated colour palette in light and dark mode, crosshair tooltips, a data table and PNG download
 - Shared `SQL_RULES` for every agent that queries the stock database, now with a rule for PostgreSQL's `round(x::numeric, 2)`
+- **Charts reuse earlier results**: asking for the same data again in a chat (repeated, reworded or as another chart type) draws the earlier query result instead of querying again; the prompt lists which tables were already charted, and `chart_sql` reuses a table whose query is the same
+- **Shorter research notes**: the researcher cites pages by short ids (listed at the end of each tool result) instead of writing full URLs, with a length cap on its notes; code expands the ids before the deep links are built, so answers and links are unchanged
+- **Fix: English research questions answered in Vietnamese**: since the orchestrator took over the write-up, the English case was only "the language of the user's latest message" (and its last user-role message is the hidden findings), placed in a system prompt full of Vietnamese examples
+  - `reply_language` now names "English" outright, and the findings message says which language to write in again, right before the model writes
+  - The write-up examples are English (or paired English/Vietnamese) instead of Vietnamese only; `save_memory`'s example is no longer "User prefers answers in Vietnamese", which weak models could save as a real memory
+- **Fallback when a direct specialist finds nothing**: a message the router sent straight to docs, sql or chart used to end with that agent's "couldn't find it"; now, when its reply has no answer (no final text, every tool result empty or an error, or a short "not found" reply), a `fallback` node removes the attempt from the thread and the orchestrator takes over with a summary of what was tried (the UI drops the streamed reply)
+  - Never after a handoff or a forced route (`/api/chat/<route>`); the orchestrator gets no `handoff` while falling back
+  - Loop guard for every orchestrator run (`no_repeats`): an identical tool call within one message is not run again, and each specialist is asked at most twice per message, the failed direct attempt included

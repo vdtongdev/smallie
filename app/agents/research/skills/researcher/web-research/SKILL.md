@@ -8,4 +8,4 @@ description: Searching the web well, for current events, news, products, compani
 4. When a result looks important but its snippet is thin, read the page with the extract tool (`tavily_tavily_extract`) instead of guessing from the snippet. Extract at most 2–3 pages.
 5. Prefer primary or reputable sources (official sites, filings, major outlets, papers) over blogs and forums. When sources disagree, record both, each with its source.
 6. Stop once the question is covered. Don't keep searching for marginal details, because every search costs a step.
-7. Every finding gets the URL of the page it came from (not the site's home page) and a quote copied from that page's result.
+7. Every finding gets the source id of the page it came from (not the site's home page) and a quote copied from that page's result.

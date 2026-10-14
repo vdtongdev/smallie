@@ -7,4 +7,4 @@ description: Background, definitions and scientific literature, using Wikipedia 
 2. For research questions ("latest papers on…", "state of the art in…"), use `knowledge_arxiv_search` with English keywords. Note the title, first authors, date and link of the 3–5 most relevant papers, and the key claim of each from its abstract.
 3. arXiv papers are preprints: say so if the user may treat them as established results.
 4. Wikipedia is a starting point. For numbers that matter, confirm them with a primary source from web search when possible.
-5. Tag findings with the Wikipedia section URL (from the heading above the fact) or arXiv link, and a quote, as in your instructions.
+5. Tag findings with the source id of the Wikipedia section (the heading above the fact) or of the arXiv paper, and a quote, as in your instructions.

@@ -11,7 +11,7 @@ import asyncio
 
 from langchain.tools import ToolRuntime, tool
 
-from app.agents.artifacts import artifacts_from
+from app.agents.artifacts import artifacts_from, same_query
 from app.agents.chart.spec import ChartSpec, ChartType, Series, make_spec, summary
 from app.agents.sql.tools import query_readonly
 from app.core.memory import AgentContext
@@ -69,7 +69,7 @@ def rows_to_spec(table: dict, type: str, title: str, x_column: str, y_columns: l
                   for name in y_columns]
     labels = ["" if x is None else x for x in labels]
     return make_spec(type=type, title=title, labels=labels, series=series,
-                     x_label=x_label or x_column, y_label=y_label)
+                     x_label=x_label or x_column, y_label=y_label, table_id=table["id"])
 
 
 def drawn(spec: ChartSpec | str, table: dict | None = None) -> tuple[str, dict]:
@@ -80,8 +80,9 @@ def drawn(spec: ChartSpec | str, table: dict | None = None) -> tuple[str, dict]:
 
 
 @tool(response_format="content_and_artifact", parse_docstring=True)
-async def chart_sql(query: str, type: ChartType, title: str, x_column: str, y_columns: list[str] | None = None,
-                    series_column: str = "", x_label: str = "", y_label: str = "") -> tuple[str, dict]:
+async def chart_sql(query: str, type: ChartType, title: str, x_column: str, runtime: ToolRuntime[AgentContext],
+                    y_columns: list[str] | None = None, series_column: str = "", x_label: str = "",
+                    y_label: str = "") -> tuple[str, dict]:
     """Run a read-only SELECT on the stock database and draw its result as a chart for the user.
 
     Args:
@@ -94,6 +95,14 @@ async def chart_sql(query: str, type: ChartType, title: str, x_column: str, y_co
         x_label: Optional x axis label (defaults to x_column).
         y_label: Optional y axis label, with the unit (e.g. "Close (USD)").
     """
+    # The same query earlier in the chat: draw its result again instead of querying (the model
+    # was asked to reuse listed tables, but repeated questions often get the same SQL anyway).
+    earlier = next((t for t in reversed(artifacts_from(runtime.state["messages"], "tables"))
+                    if same_query(t["query"], query)), None)
+    if earlier:
+        content, artifact = drawn(rows_to_spec(earlier, type, title, x_column, y_columns, series_column, x_label, y_label))
+        reused = f"(Reused table {earlier['id']} from earlier in this chat: the same query, not run again.) "
+        return (content if content.startswith("Error") else reused + content), artifact
     table = await asyncio.to_thread(query_readonly, query)
     if isinstance(table, str):
         return table, {}

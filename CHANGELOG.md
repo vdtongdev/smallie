@@ -1,6 +1,6 @@
 # Changelog
 
-Versions are `major.minor.patch`: the major version stays 0 for now, each minor version adds agents, and each patch is a bug fix.
+Versions are `major.minor.patch`: the major version stays 0 for now, each minor version adds agents, and each patch groups 2-3 bug fixes.
 
 ## 0.1.0 - Docs agent and SQL agent
 - **Docs Agent**: RAG over uploaded PDFs/DOCX with pgvector indexing, citations with page numbers
@@ -21,15 +21,15 @@ Versions are `major.minor.patch`: the major version stays 0 for now, each minor 
   - Core: config, LLM, database, memory, accounts, auth, conversations and the shared prompts moved to `app/core/`
   - Orchestration: the router and assistant graph moved to `app/orchestration/`
 
-## 0.2.1 - Fix: foreign words in Vietnamese answers
-- Weaker models (mostly the Nemotron fallback, which answered most requests while the free Gemma was rate-limited) slipped single words of other scripts into Vietnamese answers, e.g. Korean 독者 ("reader"), Thai เด่น ("standing out"), Chinese 半 ("half")
-  - Temperature lowered from 0.2 to 0, so the model is less likely to pick unlikely wrong-language words
-  - `OPENROUTER_FALLBACK_MODEL` accepts a comma-separated list tried in order; the default puts the free Gemma 4 26B (good at Vietnamese) before Nemotron
-  - Note: this only lowers the chance of untranslated words; it doesn't fully fix it. The cause is the models themselves, so Nemotron (and other weak-in-Vietnamese models) can still slip in words, e.g. Russian, whenever it answers
-
-## 0.2.2 - Fix: more foreign words from low-precision paid providers
-- Paid models are routed to the cheapest provider by default, which for Gemma 4 31B is an fp4 build, and heavier quantization slips words of other scripts into Vietnamese answers more often
-- New `OPENROUTER_QUANTIZATIONS` (e.g. `bf16,fp8`) is sent as `provider.quantizations`; empty keeps any provider, which free endpoints need since they report no precision
+## 0.2.1 - Fixes
+- **Fix: foreign words in Vietnamese answers**
+  - Weaker models (mostly the Nemotron fallback, which answered most requests while the free Gemma was rate-limited) slipped single words of other scripts into Vietnamese answers, e.g. Korean 독者 ("reader"), Thai เด่น ("standing out"), Chinese 半 ("half")
+    - Temperature lowered from 0.2 to 0, so the model is less likely to pick unlikely wrong-language words
+    - `OPENROUTER_FALLBACK_MODEL` accepts a comma-separated list tried in order; the default puts the free Gemma 4 26B (good at Vietnamese) before Nemotron
+    - Note: this only lowers the chance of untranslated words; it doesn't fully fix it. The cause is the models themselves, so Nemotron (and other weak-in-Vietnamese models) can still slip in words, e.g. Russian, whenever it answers
+- **Fix: more foreign words from low-precision paid providers**
+  - Paid models are routed to the cheapest provider by default, which for Gemma 4 31B is an fp4 build, and heavier quantization slips words of other scripts into Vietnamese answers more often
+  - New `OPENROUTER_QUANTIZATIONS` (e.g. `bf16,fp8`) is sent as `provider.quantizations`; empty keeps any provider, which free endpoints need since they report no precision
 
 ## 0.3.0 - Orchestrator and chart agent
 - **Orchestrator** (`app/orchestration/orchestrator.py`): the front door for every message that doesn't clearly point to one agent
@@ -55,23 +55,22 @@ Versions are `major.minor.patch`: the major version stays 0 for now, each minor 
 - Shared `SQL_RULES` for every agent that queries the stock database, now with a rule for PostgreSQL's `round(x::numeric, 2)`
 - **Benchmark** (`scripts/bench_chat.py`): time to first event and first token, total time, model calls and output size per scenario on the real models
 
-## 0.3.1 - Fix: repeated chart requests queried the database again
-- Asking for the same data again in a chat (repeated, reworded or as another chart type) now draws the earlier query result instead of querying again: the prompt lists which tables were already charted, and `chart_sql` reuses a table whose query is the same
+## 0.3.1 - Fixes
+- **Fix: repeated chart requests queried the database again**
+  - Asking for the same data again in a chat (repeated, reworded or as another chart type) now draws the earlier query result instead of querying again: the prompt lists which tables were already charted, and `chart_sql` reuses a table whose query is the same
+- **Fix: slow research answers**
+  - The researcher's notes were its slowest step (37-85 s), mostly spent writing full URLs and long quotes for every fact
+  - It now cites pages by short ids (listed at the end of each tool result) with a length cap on its notes; code expands the ids before the deep links are built, so answers and links are unchanged. In testing the notes got 48% shorter and research answers about a third faster
+  - Ids the model writes in an unexpected form are still expanded, and unknown ones are dropped, so the writer can't turn them into invented links
+- **Fix: English research questions answered in Vietnamese**
+  - Since the orchestrator took over the write-up, the English case was only "the language of the user's latest message" (and its last user-role message is the hidden findings), placed in a system prompt full of Vietnamese examples
+    - `reply_language` now names "English" outright, and the findings message says which language to write in again, right before the model writes
+    - The write-up examples are English (or paired English/Vietnamese) instead of Vietnamese only; `save_memory`'s example is no longer "User prefers answers in Vietnamese", which weak models could save as a real memory
 
-## 0.3.2 - Fix: slow research answers
-- The researcher's notes were its slowest step (37-85 s), mostly spent writing full URLs and long quotes for every fact
-- It now cites pages by short ids (listed at the end of each tool result) with a length cap on its notes; code expands the ids before the deep links are built, so answers and links are unchanged. In testing the notes got 48% shorter and research answers about a third faster
-- Ids the model writes in an unexpected form are still expanded, and unknown ones are dropped, so the writer can't turn them into invented links
-
-## 0.3.3 - Fix: English research questions answered in Vietnamese
-- Since the orchestrator took over the write-up, the English case was only "the language of the user's latest message" (and its last user-role message is the hidden findings), placed in a system prompt full of Vietnamese examples
-  - `reply_language` now names "English" outright, and the findings message says which language to write in again, right before the model writes
-  - The write-up examples are English (or paired English/Vietnamese) instead of Vietnamese only; `save_memory`'s example is no longer "User prefers answers in Vietnamese", which weak models could save as a real memory
-
-## 0.3.4 - Fix: a direct specialist that found nothing ended the turn
-- A message the router sent straight to docs, sql or chart used to end with that agent's "couldn't find it"; now, when its reply has no answer (no final text, every tool result empty or an error, or a short "not found" reply), a `fallback` node removes the attempt from the thread and the orchestrator takes over with a summary of what was tried (the UI drops the streamed reply)
-  - Never after a handoff or a forced route (`/api/chat/<route>`); the orchestrator gets no `handoff` while falling back
-  - Loop guard for every orchestrator run (`no_repeats`): an identical tool call within one message is not run again, and each specialist is asked at most twice per message, the failed direct attempt included
-
-## 0.3.5 - Fix: LaTeX symbols shown raw in replies
-- Models sometimes write math like `$\rightarrow$`, which the chat showed as raw text; known commands (arrows, comparisons, Greek letters, `\%`, `\text{}`) now become Unicode characters before rendering, and dollar amounts are left alone
+## 0.3.2 - Fixes
+- **Fix: a direct specialist that found nothing ended the turn**
+  - A message the router sent straight to docs, sql or chart used to end with that agent's "couldn't find it"; now, when its reply has no answer (no final text, every tool result empty or an error, or a short "not found" reply), a `fallback` node removes the attempt from the thread and the orchestrator takes over with a summary of what was tried (the UI drops the streamed reply)
+    - Never after a handoff or a forced route (`/api/chat/<route>`); the orchestrator gets no `handoff` while falling back
+    - Loop guard for every orchestrator run (`no_repeats`): an identical tool call within one message is not run again, and each specialist is asked at most twice per message, the failed direct attempt included
+- **Fix: LaTeX symbols shown raw in replies**
+  - Models sometimes write math like `$\rightarrow$`, which the chat showed as raw text; known commands (arrows, comparisons, Greek letters, `\%`, `\text{}`) now become Unicode characters before rendering, and dollar amounts are left alone

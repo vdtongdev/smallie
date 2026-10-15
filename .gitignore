@@ -6,3 +6,8 @@ uploads/*
 !uploads/.gitkeep
 .pytest_cache/
 cloudrun.env.yaml
+
+# Local Claude Code skills (not shared)
+.claude/skills/
+.antipatterns/
+CLAUDE.local.md

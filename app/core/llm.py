@@ -6,6 +6,18 @@ from app.core.config import OPENROUTER_BASE_URL, get_settings
 _HEADERS = {"HTTP-Referer": "http://localhost:8000", "X-Title": "smallie"}
 
 
+class OpenRouterChat(ChatOpenAI):
+    """ChatOpenAI that keeps OpenRouter's `usage.cost` (USD), which langchain_openai drops,
+    as `response_metadata["cost"]` (app/core/usage.py totals it)."""
+
+    def _convert_chunk_to_generation_chunk(self, chunk, default_chunk_class, base_generation_info):
+        generation = super()._convert_chunk_to_generation_chunk(chunk, default_chunk_class, base_generation_info)
+        cost = (chunk.get("usage") or {}).get("cost")
+        if generation is not None and cost is not None:
+            generation.message.response_metadata["cost"] = cost
+        return generation
+
+
 def get_chat_model(model: str | None = None, *, streaming: bool = True) -> ChatOpenAI:
     s = get_settings()
     model = model or s.openrouter_chat_model
@@ -18,7 +30,7 @@ def get_chat_model(model: str | None = None, *, streaming: bool = True) -> ChatO
     quantizations = [q.strip() for q in s.openrouter_quantizations.split(",") if q.strip()]
     if quantizations:
         extra_body["provider"] = {"quantizations": quantizations}
-    return ChatOpenAI(
+    return OpenRouterChat(
         model=model,
         api_key=s.openrouter_api_key,
         base_url=OPENROUTER_BASE_URL,
@@ -27,6 +39,7 @@ def get_chat_model(model: str | None = None, *, streaming: bool = True) -> ChatO
         # (Chinese, Korean, Thai) into Vietnamese answers.
         temperature=0,
         streaming=streaming,
+        stream_usage=True,  # the last streamed chunk carries tokens and cost
         extra_body=extra_body or None,
         # Retries also count against the free quota and can't help once the daily cap is hit.
         max_retries=1,

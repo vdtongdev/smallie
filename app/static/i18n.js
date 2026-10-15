@@ -1,6 +1,10 @@
 const I18N = {
   en: {
     newChat: "+ New chat",
+    usage: "Usage",
+    usageTokens: "Tokens: {n}",
+    usageDetail: "{input} in · {output} out",
+    usageCost: "Cost: ${cost}",
     upload: "Upload PDF / DOCX",
     send: "Send",
     placeholder: "Ask about your documents or the stock market…",
@@ -50,6 +54,10 @@ const I18N = {
   },
   vi: {
     newChat: "+ Cuộc trò chuyện mới",
+    usage: "Mức sử dụng",
+    usageTokens: "Token: {n}",
+    usageDetail: "{input} vào · {output} ra",
+    usageCost: "Chi phí: ${cost}",
     upload: "Tải lên PDF / DOCX",
     send: "Gửi",
     placeholder: "Hỏi về tài liệu của bạn hoặc thị trường cổ phiếu…",

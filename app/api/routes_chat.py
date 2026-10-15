@@ -18,6 +18,7 @@ from app.core.auth import get_current_user
 from app.core.config import get_settings
 from app.core.conversations import create_conversation, get_conversation, list_conversations, touch_conversation
 from app.core.memory import AgentContext, load_recent_chats, recall, save_turn, turns
+from app.core.usage import UsageCounter, add_usage
 
 router = APIRouter(tags=["chat"])
 log = logging.getLogger(__name__)
@@ -55,6 +56,7 @@ async def chat(
     config = {"configurable": {"thread_id": conversation["id"]}}
     cross_chat = get_settings().cross_chat_history
     finished = False
+    usage = UsageCounter()
 
     async def events():
         nonlocal finished
@@ -67,7 +69,7 @@ async def chat(
             )
             stream = assistant.astream(
                 {"messages": [{"role": "user", "content": body.message}]},
-                config=config,
+                config={**config, "callbacks": [usage]},
                 context=AgentContext(user_id=user_id, user=user, memories=memories,
                                      recent_chats=recent_chats, agent=kind),
                 stream_mode=["messages", "updates"],
@@ -86,6 +88,10 @@ async def chat(
             yield _sse({"type": "error", "code": "internal", "message": str(exc)[:500]})
         finally:
             await asyncio.to_thread(touch_conversation, conversation["id"])
+            try:  # failed and cut-off runs still spent tokens
+                await add_usage(store, user_id, usage)
+            except Exception:  # noqa: BLE001 - usage is best effort
+                log.exception("Saving token usage failed")
         yield _sse({"type": "done"})
 
     async def remember_turn():

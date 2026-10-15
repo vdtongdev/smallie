@@ -74,3 +74,9 @@ Versions are `major.minor.patch`: the major version stays 0 for now, each minor 
     - Loop guard for every orchestrator run (`no_repeats`): an identical tool call within one message is not run again, and each specialist is asked at most twice per message, the failed direct attempt included
 - **Fix: LaTeX symbols shown raw in replies**
   - Models sometimes write math like `$\rightarrow$`, which the chat showed as raw text; known commands (arrows, comparisons, Greek letters, `\%`, `\text{}`) now become Unicode characters before rendering, and dollar amounts are left alone
+
+## Unreleased (next: 0.4.0)
+- **Token usage and cost in the sidebar**: a "Usage" box at the bottom of the chat list shows the account's total tokens (hover for input/output) and cost in USD as OpenRouter bills it, updated after every reply
+  - Counts every model call of a message, including agents the orchestrator asks as tools; embedding calls (memories, chat history, documents) are not counted
+  - Totals start with this release; `GET /api/usage` returns them, and deleting an account deletes them
+  - Two of one account's chats finishing at the same moment can lose one message's numbers

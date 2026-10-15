@@ -169,6 +169,7 @@ $("langBtn").onclick = () => {
   if (!state.me) return; // logged out: only the login form needs the new language
   loadConversations();
   loadDocuments();
+  loadUsage();
   if ($("readmeDialog").open) loadMarketStatus();
   if ($("adminDialog").open) loadAccounts();
   if (!state.conversationId) showWelcome();
@@ -179,6 +180,19 @@ $("readmeBtn").onclick = () => {
   loadMarketStatus();
   $("readmeDialog").showModal();
 };
+
+// ---------- usage ----------
+// Tokens and cost of all this account's chats (/api/usage), in the sidebar's bottom box.
+async function loadUsage() {
+  const usage = await api("/usage").catch(() => null);
+  if (!usage) return;
+  const locale = state.lang === "vi" ? "vi-VN" : "en-US";
+  const n = (x) => x.toLocaleString(locale);
+  $("usageTokens").textContent = t("usageTokens").replace("{n}", n(usage.input_tokens + usage.output_tokens));
+  $("usageTokens").title = t("usageDetail").replace("{input}", n(usage.input_tokens)).replace("{output}", n(usage.output_tokens));
+  $("usageCost").textContent = t("usageCost").replace("{cost}", usage.cost.toFixed(usage.cost < 0.01 ? 6 : 4)); // one call costs ~$0.000005
+  $("usageBox").hidden = false;
+}
 
 // Readme examples go into the message box, ready to send or edit.
 $("readmeDialog").addEventListener("click", (e) => {
@@ -471,6 +485,7 @@ async function sendMessage(text) {
     document.querySelectorAll(".msg.assistant:empty").forEach((el) => el.remove());
     setBusy(false);
     loadConversations();
+    loadUsage();
   }
 }
 
@@ -631,6 +646,7 @@ function showApp() {
   else newChat();
   loadDocuments();
   loadAgents();
+  loadUsage();
 }
 
 function postJson(path, body) {

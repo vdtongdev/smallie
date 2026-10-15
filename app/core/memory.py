@@ -25,6 +25,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from app.core.config import get_settings
 from app.core.llm import get_embeddings
+from app.core.usage import usage_namespace
 
 
 @dataclass
@@ -167,8 +168,8 @@ async def forget_conversation(store: BaseStore, user_id: str, conversation_id: s
 
 
 async def forget_user(store: BaseStore, user_id: str) -> None:
-    """Remove all of a deleted account's memories and indexed chat history."""
-    for namespace in (memory_namespace(user_id), history_namespace(user_id)):
+    """Remove all of a deleted account's memories, indexed chat history and token usage."""
+    for namespace in (memory_namespace(user_id), history_namespace(user_id), usage_namespace(user_id)):
         while items := await store.asearch(namespace, limit=100):
             for item in items:
                 await store.adelete(namespace, item.key)

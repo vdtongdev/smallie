@@ -131,6 +131,19 @@ button.link { border: none; background: transparent; color: var(--accent); paddi
 }
 .conversation-list li:hover, .conversation-list li.active { background: var(--user-bubble); }
 .conversation-list .title { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.usage-box {
+  margin-top: auto; /* bottom of the sidebar */
+  position: sticky;
+  bottom: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.usage-box strong { color: var(--text); }
 .icon-btn { border: none; background: transparent; color: var(--muted); padding: 2px 6px; }
 .icon-btn:hover { color: var(--danger); }
 

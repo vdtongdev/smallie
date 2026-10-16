@@ -1,14 +1,20 @@
 from collections.abc import Callable, Sequence
 
 from langchain.agents import create_agent
-from langchain.agents.middleware import AgentMiddleware, ModelCallLimitMiddleware, ModelRequest, dynamic_prompt
+from langchain.agents.middleware import (
+    AgentMiddleware,
+    ModelCallLimitMiddleware,
+    ModelRequest,
+    dynamic_prompt,
+    wrap_model_call,
+)
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.store.base import BaseStore
 
 from app.core.config import get_settings
 from app.core.llm import get_chat_model
-from app.core.memory import MEMORY_TOOLS, AgentContext
+from app.core.memory import MEMORY_TOOLS, AgentContext, trim_history
 from app.core.prompts import MEMORIES_SECTION, RECENT_CHATS_SECTION, USER_SECTION
 
 
@@ -50,10 +56,16 @@ def build_agent(
     call_limit = ModelCallLimitMiddleware(
         run_limit=max_model_calls or get_settings().max_model_calls, exit_behavior="end"
     )
+
+    @wrap_model_call
+    async def short_history(request: ModelRequest, handler):
+        # Only the model's view is trimmed; the checkpointed thread keeps every message.
+        return await handler(request.override(messages=trim_history(request.messages)))
+
     return create_agent(
         get_chat_model(model),
         tools=[*tools, *MEMORY_TOOLS],
-        middleware=[prompt_with_memories, call_limit, *middleware],
+        middleware=[prompt_with_memories, call_limit, short_history, *middleware],
         context_schema=AgentContext,
         checkpointer=checkpointer,
         store=store,

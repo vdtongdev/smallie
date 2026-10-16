@@ -9,7 +9,7 @@ LangChain agents behind a FastAPI app with a small web UI. You type into one cha
 
 The **Readme** button in the header explains how to use the app, with example questions.
 
-All agents understand and reply in **English and Vietnamese**. They remember each conversation and keep **long-term memories about the user across all chats**. They can also look back at your earlier chats. Memories are managed by the agents; the UI has no memory list (`GET/DELETE /api/memories` still exist).
+All agents understand and reply in **English and Vietnamese**. They remember each conversation and keep **long-term memories about the user across all chats**. They can also look back at your earlier chats. Memories are saved automatically after replies; the UI has no memory list (`GET/DELETE /api/memories` still exist).
 
 ## Prerequisites (install once)
 
@@ -130,7 +130,7 @@ scripts/          load_stocks.py (fill/refresh stock data), reindex.py (after ch
 
 **Memory**
 - *Within a chat:* every message is checkpointed in Postgres (`thread_id` = conversation id), so chats survive restarts.
-- *Across chats:* the agent saves durable facts with `save_memory`. Before each turn, the facts most related to the user's message are added to the system prompt. Memories are stored under `("users", <user_id>, "memories")`.
+- *Across chats:* after each reply the orchestrator writes (not plain stock, chart or document lookups), one extra model call picks out durable facts about the user (identity, work, goals, preferences, investment profile) and saves them; a fact close to one already saved replaces it. Before each turn, the facts most related to the user's message are added to the system prompt. Memories are stored under `("users", <user_id>, "memories")`.
 - The checkpointer and the store share one psycopg connection pool that checks each connection before use. If Postgres restarts (for example when WSL shuts down), the app reconnects on its own and doesn't need a restart.
 - The UI remembers the open chat, so reloading the page brings it back.
 

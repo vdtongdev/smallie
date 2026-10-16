@@ -10,19 +10,28 @@ LANGUAGE_RULE = (
 )
 
 MEMORY_RULE = (
-    "MEMORY: You can remember things about this user across all their chats. "
-    "When the user shares a durable fact or preference (name, role, company, preferred "
-    "language or answer style, recurring goals), call `save_memory` with one short, "
-    "self-contained sentence. Do not save one-off questions or secrets such as passwords. "
+    "MEMORY: Facts about this user from earlier chats are listed below; use them. "
+    "What the user tells you is remembered automatically after your reply, so never say "
+    "you can't remember it. "
     "Only call `search_memory` if the notes below don't already answer it. "
-    "Every tool call costs an extra step, so when you call `save_memory`, do it in the same "
-    "step as your other tool calls rather than as a separate step. "
     "PAST CHATS: Recent activity from the user's other chats may be listed below. Use it "
     "only when the user refers to earlier chats or questions (\"what did I ask before?\", "
     "\"like last time\"); otherwise ignore it. For older or more specific past chats, call "
     "`search_chat_history`. Past answers may be outdated (e.g. stock prices), so re-check "
     "data with your tools before reusing it."
 )
+
+# System prompt of the memory extractor (app/core/memory.py, extract_memories); never formatted.
+EXTRACT_PROMPT = """You pick out durable facts about the user from one chat turn, so later chats can use them.
+
+Rules:
+1. Save only facts about the user that stay true across chats: identity, work, goals, preferences (answer style, language, topics) and investment profile (risk tolerance, horizon, holdings, constraints).
+2. Save a conclusion the assistant drew about the user only when the user's own answers in this turn support it, e.g. the result of a questionnaire the user filled in.
+3. Do not save questions, requests, market data, or facts about other people or companies.
+4. Do not save secrets: passwords, ID, card or account numbers, health details.
+5. Do not save anything the user asks you not to remember.
+6. Write each fact as one short English sentence of the form "User <fact>", whatever language the chat is in.
+7. Return an empty list when the turn has nothing to remember. Most turns have nothing."""
 
 USER_SECTION = """
 

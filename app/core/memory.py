@@ -13,18 +13,21 @@ import uuid
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Literal
 
 from langchain.tools import ToolRuntime, tool
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.store.base import BaseStore
 from langgraph.store.postgres.aio import AsyncPostgresStore
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
+from pydantic import BaseModel, Field
 
 from app.core.config import get_settings
-from app.core.llm import get_embeddings
+from app.core.llm import get_chat_model, get_embeddings
+from app.core.prompts import EXTRACT_PROMPT
 from app.core.usage import usage_namespace
 
 
@@ -59,6 +62,7 @@ HISTORY_ANSWER_CHARS = 500
 # embedding model: rewordings 0.86-0.98, a moved city 0.90, different stocks or styles 0.78-0.82.
 # shortcut: tuned for one model, re-measure after changing OPENROUTER_EMBED_MODEL.
 SAME_MEMORY = 0.85
+EXTRACT_ANSWER_CHARS = 3000  # enough for a questionnaire's conclusion
 
 
 # pgvector can only build HNSW indexes for vectors of up to 2000 dimensions.
@@ -179,20 +183,34 @@ async def forget_user(store: BaseStore, user_id: str) -> None:
                 await store.adelete(namespace, item.key)
 
 
-@tool
-async def save_memory(fact: str, runtime: ToolRuntime[AgentContext]) -> str:
-    """Remember a durable fact or preference about the user for future chats.
-
-    Args:
-        fact: One short, self-contained sentence about the user, in the form
-            "User <one fact or preference>".
-    """
-    namespace = memory_namespace(runtime.context.user_id)
-    closest = await runtime.store.asearch(namespace, query=fact, limit=1)
+async def remember(store: BaseStore, user_id: str, fact: str, kind: str) -> None:
+    namespace = memory_namespace(user_id)
+    closest = await store.asearch(namespace, query=fact, limit=1)
     # A rewording or a newer version of a saved fact replaces it instead of piling up.
     same = closest and closest[0].score is not None and closest[0].score >= SAME_MEMORY
-    await runtime.store.aput(namespace, closest[0].key if same else str(uuid.uuid4()), {"text": fact})
-    return f"Saved: {fact}"
+    await store.aput(namespace, closest[0].key if same else str(uuid.uuid4()), {"text": fact, "kind": kind})
+
+
+class Memory(BaseModel):
+    kind: Literal["identity", "work", "goal", "preference", "investment_profile"]
+    text: str = Field(min_length=6, max_length=200, description='One English sentence: "User <fact>".')
+
+
+class MemoryUpdate(BaseModel):
+    """Durable facts about the user from this chat turn; empty when there are none."""
+
+    memories: list[Memory] = Field(default_factory=list, max_length=5)
+
+
+async def extract_memories(store: BaseStore, user_id: str, question: str, answer: str, callbacks: list) -> None:
+    """Save what one finished turn says about the user. A plain model call after the reply,
+    because free models rarely chose to call a save tool themselves (AP-006)."""
+    model = get_chat_model(get_settings().openrouter_orchestrator_model or None)
+    extractor = model.with_structured_output(MemoryUpdate, method="function_calling")
+    turn = f"User: {question}\n\nAssistant: {_short(answer, EXTRACT_ANSWER_CHARS)}"
+    update = await extractor.ainvoke([SystemMessage(EXTRACT_PROMPT), HumanMessage(turn)], config={"callbacks": callbacks})
+    for memory in update.memories:
+        await remember(store, user_id, memory.text, memory.kind)
 
 
 @tool
@@ -222,4 +240,4 @@ async def search_chat_history(query: str, runtime: ToolRuntime[AgentContext]) ->
     )
 
 
-MEMORY_TOOLS = [save_memory, search_memory, search_chat_history]
+MEMORY_TOOLS = [search_memory, search_chat_history]

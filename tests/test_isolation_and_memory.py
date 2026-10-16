@@ -5,7 +5,6 @@ from langgraph.store.memory import InMemoryStore
 
 from app.core.config import get_settings
 from app.agents.docs import tools as docs_tools
-from app.core.memory import memory_namespace, recall
 from tests.conftest import requires_db
 
 
@@ -38,72 +37,6 @@ def test_document_search_only_returns_the_users_own_chunks(monkeypatch):
 @pytest.fixture
 def memory_store() -> InMemoryStore:
     return InMemoryStore(index={"dims": 16, "embed": DeterministicFakeEmbedding(size=16), "fields": ["text"]})
-
-
-async def test_recall_is_scoped_per_user(memory_store):
-    await memory_store.aput(memory_namespace("alice"), "1", {"text": "User's name is Alice"})
-    await memory_store.aput(memory_namespace("alice"), "2", {"text": "Prefers answers in Vietnamese"})
-    await memory_store.aput(memory_namespace("bob"), "1", {"text": "User's name is Bob"})
-
-    alice = await recall(memory_store, "alice", "what is my name?")
-    assert "Alice" in alice and "Vietnamese" in alice
-    assert "Bob" not in alice
-    assert await recall(memory_store, "carol", "anything") == ""
-
-
-async def test_recall_formats_bullets(memory_store):
-    await memory_store.aput(memory_namespace("u"), "1", {"text": "Works in sales"})
-    assert await recall(memory_store, "u", "job") == "- Works in sales"
-
-
-async def _texts(store, user_id: str) -> list[str]:
-    return sorted(i.value["text"] for i in await store.asearch(memory_namespace(user_id), limit=10))
-
-
-async def test_remember_replaces_a_near_duplicate(memory_store):
-    from app.core.memory import remember
-
-    await remember(memory_store, "alice", "fact one", "goal")
-    await remember(memory_store, "alice", "fact one", "goal")  # the fake embedding only matches identical text
-    await remember(memory_store, "alice", "fact two", "goal")
-    await remember(memory_store, "bob", "fact one", "goal")
-    assert await _texts(memory_store, "alice") == ["fact one", "fact two"]
-    assert await _texts(memory_store, "bob") == ["fact one"]
-
-
-async def test_extract_memories_saves_what_the_model_returns(memory_store, monkeypatch):
-    from types import SimpleNamespace
-
-    from app.core import memory
-
-    seen = []
-
-    async def ainvoke(messages, config):
-        seen.append(messages[1].content)
-        return memory.MemoryUpdate(memories=[
-            memory.Memory(kind="investment_profile", text="User has a balanced risk tolerance"),
-            memory.Memory(kind="goal", text="User invests for the long term"),
-        ])
-
-    extractor = SimpleNamespace(ainvoke=ainvoke)
-    monkeypatch.setattr(memory, "get_chat_model", lambda model=None: SimpleNamespace(
-        with_structured_output=lambda schema, method: extractor))
-    await memory.extract_memories(memory_store, "alice", "q1: B", "You are balanced.", [])
-    assert seen == ["User: q1: B\n\nAssistant: You are balanced."]
-    assert await _texts(memory_store, "alice") == ["User has a balanced risk tolerance", "User invests for the long term"]
-    assert await _texts(memory_store, "bob") == []
-
-
-def test_memory_schema_rejects_unknown_kinds_and_too_many_facts():
-    from pydantic import ValidationError
-
-    from app.core.memory import MemoryUpdate
-
-    with pytest.raises(ValidationError):
-        MemoryUpdate.model_validate({"memories": [{"kind": "password", "text": "User password is x"}]})
-    with pytest.raises(ValidationError):
-        MemoryUpdate.model_validate({"memories": [{"kind": "goal", "text": "User fact"}] * 6})
-    assert MemoryUpdate.model_validate({}).memories == []
 
 
 def test_only_the_orchestrators_answers_are_mined():

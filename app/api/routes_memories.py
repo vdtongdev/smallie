@@ -1,19 +1,21 @@
-"""Let users see and delete what the assistant remembers about them."""
+"""Let users see and delete what the assistant learned about them (their knowledge graph's facts)."""
 
-from fastapi import APIRouter, Depends, Request
+import asyncio
+
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.core.auth import get_current_user
-from app.core.memory import memory_namespace
+from app.core.graph import delete_fact, list_facts
 
 router = APIRouter(tags=["memories"])
 
 
 @router.get("/memories")
-async def list_memories(request: Request, user_id: str = Depends(get_current_user)):
-    items = await request.app.state.store.asearch(memory_namespace(user_id), limit=200)
-    return [{"id": i.key, "text": i.value.get("text", ""), "created_at": i.created_at} for i in items]
+async def list_memories(user_id: str = Depends(get_current_user)):
+    return await asyncio.to_thread(list_facts, user_id)
 
 
 @router.delete("/memories/{memory_id}", status_code=204)
-async def forget(memory_id: str, request: Request, user_id: str = Depends(get_current_user)):
-    await request.app.state.store.adelete(memory_namespace(user_id), memory_id)
+async def forget(memory_id: str, user_id: str = Depends(get_current_user)):
+    if not await asyncio.to_thread(delete_fact, user_id, memory_id):
+        raise HTTPException(404, "Memory not found")

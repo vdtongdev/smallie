@@ -18,7 +18,8 @@ from app.orchestration.router import ORCHESTRATOR
 from app.core.auth import get_current_user
 from app.core.config import get_settings
 from app.core.conversations import create_conversation, get_conversation, list_conversations, touch_conversation
-from app.core.memory import AgentContext, extract_memories, load_recent_chats, recall, save_turn, turns
+from app.core.graph import extract_facts, recall_facts
+from app.core.memory import AgentContext, load_recent_chats, save_turn, turns
 from app.core.usage import UsageCounter, add_usage
 
 router = APIRouter(tags=["chat"])
@@ -64,7 +65,7 @@ async def chat(
         yield _sse({"type": "conversation", "id": conversation["id"], "title": conversation["title"]})
         try:
             memories, recent_chats, user = await asyncio.gather(
-                recall(store, user_id, body.message),
+                asyncio.to_thread(recall_facts, user_id),
                 _recent_chats(request, user_id, conversation["id"]) if cross_chat else _empty(),
                 _user(user_id),
             )
@@ -116,9 +117,9 @@ async def chat(
         if answer and _answered_by(messages) == ORCHESTRATOR:
             extraction = UsageCounter()
             try:
-                await extract_memories(store, user_id, body.message, answer, [extraction])
+                await extract_facts(user_id, body.message, answer, [extraction], conversation_id=conversation["id"])
             except Exception:  # noqa: BLE001
-                log.exception("Extracting memories failed")
+                log.exception("Extracting facts failed")
             try:
                 await add_usage(store, user_id, extraction)
             except Exception:  # noqa: BLE001

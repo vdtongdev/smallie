@@ -2,16 +2,19 @@
 
 from functools import lru_cache
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     Column,
     DateTime,
     Engine,
     ForeignKey,
+    Index,
     Integer,
     MetaData,
     String,
     Table,
     Text,
+    UniqueConstraint,
     create_engine,
     func,
     text,
@@ -52,7 +55,41 @@ documents = Table(
     Column("status", String(16), nullable=False),  # "processing" | "ready" | "failed"
     Column("error", Text),
     Column("chunk_count", Integer, nullable=False, server_default="0"),
+    Column("summary", Text),  # "<doc type>: <one line>" from the document card (app/features/documents/card.py)
     Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
+)
+
+# Knowledge graph, one per user (app/core/graph.py): a vertex table and an edge table, so a
+# PostgreSQL 20 `CREATE PROPERTY GRAPH` can later sit on top of them without moving data.
+graph_nodes = Table(
+    "graph_nodes",
+    metadata,
+    Column("id", String(36), primary_key=True),
+    Column("user_id", String(64), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False),
+    Column("kind", String(8), nullable=False),  # "user" | "file" | "entity"
+    Column("name", Text, nullable=False),
+    Column("norm", Text, nullable=False),  # graph.normalize(name), for exact matches
+    Column("document_id", String(36), ForeignKey("documents.id", ondelete="CASCADE"), unique=True),  # file nodes
+    # shortcut: no vector index, a query only scans one user's nodes; add HNSW past ~10k nodes per user.
+    Column("embedding", Vector(get_settings().embed_dim)),  # entity nodes
+    Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
+    Index("graph_nodes_name", "user_id", "kind", "norm", unique=True, postgresql_where=text("document_id IS NULL")),
+)
+
+graph_edges = Table(
+    "graph_edges",
+    metadata,
+    Column("id", String(36), primary_key=True),
+    Column("user_id", String(64), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False),
+    Column("source_id", String(36), ForeignKey("graph_nodes.id", ondelete="CASCADE"), index=True, nullable=False),
+    Column("target_id", String(36), ForeignKey("graph_nodes.id", ondelete="CASCADE"), index=True, nullable=False),
+    Column("relation", String(40), nullable=False),
+    Column("source", String(8), nullable=False),  # "chat" | "document" | "import"
+    Column("document_id", String(36), ForeignKey("documents.id", ondelete="CASCADE")),  # edges from a document card
+    Column("conversation_id", String(36)),  # no FK: deleting a chat keeps what was learned in it
+    Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
+    Column("updated_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
+    UniqueConstraint("user_id", "source_id", "relation", "target_id"),
 )
 
 
@@ -79,9 +116,11 @@ def readonly_engine(sqlalchemy_url: str) -> Engine:
 
 def init_db() -> None:
     with get_engine().begin() as conn:
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))  # graph_nodes.embedding needs it
         metadata.create_all(conn)
         # create_all doesn't alter existing tables; these columns came with accounts.
         conn.execute(text(
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS username text UNIQUE, "
             "ADD COLUMN IF NOT EXISTS password_hash text"
         ))
+        conn.execute(text("ALTER TABLE documents ADD COLUMN IF NOT EXISTS summary text"))  # came with the graph

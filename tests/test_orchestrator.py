@@ -26,7 +26,7 @@ def _assistant(monkeypatch, model, documents=("handbook.pdf",)):
     monkeypatch.setattr(sql_agent, "describe_schema", lambda: "")
     monkeypatch.setattr(research_agent, "describe_schema", lambda: "")
     monkeypatch.setattr(sql_agent, "stock_tickers", lambda: frozenset({"AAPL"}))
-    monkeypatch.setattr(docs_agent, "document_names", lambda user_id: list(documents))
+    monkeypatch.setattr(docs_agent, "document_names", lambda user_id: [(name, None) for name in documents])
     return build_assistant(InMemorySaver(), InMemoryStore())
 
 

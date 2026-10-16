@@ -2,13 +2,15 @@ import shutil
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, UploadFile
 from sqlalchemy import delete, select
 
 from app.core.auth import get_current_user
 from app.core.config import get_settings
 from app.core.db import documents, get_engine
-from app.features.documents.ingest import SUPPORTED_SUFFIXES, delete_document_chunks, ingest_document
+from app.core.graph import drop_orphans
+from app.features.documents.card import process_document
+from app.features.documents.ingest import SUPPORTED_SUFFIXES, delete_document_chunks
 
 router = APIRouter(tags=["documents"])
 
@@ -17,7 +19,8 @@ _PUBLIC_COLUMNS = (documents.c.id, documents.c.filename, documents.c.status,
 
 
 @router.post("/documents", status_code=202)
-def upload(files: list[UploadFile], background: BackgroundTasks, user_id: str = Depends(get_current_user)):
+def upload(files: list[UploadFile], background: BackgroundTasks, request: Request,
+           user_id: str = Depends(get_current_user)):
     settings = get_settings()
     max_bytes = settings.max_upload_mb * 1024 * 1024
     for f in files:
@@ -38,7 +41,7 @@ def upload(files: list[UploadFile], background: BackgroundTasks, user_id: str = 
         row = {"id": doc_id, "user_id": user_id, "filename": filename, "path": str(path), "status": "processing"}
         with get_engine().begin() as conn:
             conn.execute(documents.insert().values(**row))
-        background.add_task(ingest_document, doc_id, user_id, path, filename)
+        background.add_task(process_document, request.app.state.store, doc_id, user_id, path, filename)
         created.append({"id": doc_id, "filename": filename, "status": "processing"})
     return created
 
@@ -63,5 +66,6 @@ def remove(document_id: str, user_id: str = Depends(get_current_user)):
         if row["status"] == "processing":
             raise HTTPException(409, "Document is still being processed")
         delete_document_chunks(document_id, row["chunk_count"])
-        conn.execute(delete(documents).where(documents.c.id == document_id))
+        conn.execute(delete(documents).where(documents.c.id == document_id))  # cascades to its graph node
+    drop_orphans(user_id)  # entities only this file mentioned
     Path(row["path"]).unlink(missing_ok=True)

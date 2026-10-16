@@ -10,7 +10,7 @@ LANGUAGE_RULE = (
 )
 
 MEMORY_RULE = (
-    "MEMORY: Facts about this user from earlier chats are listed below; use them. "
+    "MEMORY: Facts about this user from earlier chats and their files are listed below; use them. "
     "What the user tells you is remembered automatically after your reply, so never say "
     "you can't remember it. "
     "Only call `search_memory` if the notes below don't already answer it. "
@@ -21,17 +21,20 @@ MEMORY_RULE = (
     "data with your tools before reusing it."
 )
 
-# System prompt of the memory extractor (app/core/memory.py, extract_memories); never formatted.
-EXTRACT_PROMPT = """You pick out durable facts about the user from one chat turn, so later chats can use them.
+# System prompt of the fact extractor (app/core/graph.py, extract_facts); never formatted.
+# Every name in graph.FUNCTIONAL must appear in rule 4 (tests/test_graph.py checks it).
+EXTRACT_PROMPT = """You pick out durable facts about the user from one chat turn and return them as (subject, relation, object) triples for the user's knowledge graph.
 
 Rules:
-1. Save only facts about the user that stay true across chats: identity, work, goals, preferences (answer style, language, topics) and investment profile (risk tolerance, horizon, holdings, constraints).
-2. Save a conclusion the assistant drew about the user only when the user's own answers in this turn support it, e.g. the result of a questionnaire the user filled in.
-3. Do not save questions, requests, market data, or facts about other people or companies.
-4. Do not save secrets: passwords, ID, card or account numbers, health details.
-5. Do not save anything the user asks you not to remember.
-6. Write each fact as one short English sentence of the form "User <fact>", whatever language the chat is in.
-7. Return an empty list when the turn has nothing to remember. Most turns have nothing."""
+1. Save only facts that stay true across chats: the user's identity, work, goals, preferences (answer style, language, topics), investment profile (risk tolerance, horizon, holdings, constraints), and what the user says about their own files.
+2. Every triple must have the user or one of the user's files as its subject or object. Write the user as exactly "User". Write a file name exactly as it appears in the list of the user's files.
+3. Write the relation as short English snake_case verb phrase, such as "holds". Write subjects and objects as short names in English, keeping proper names as written.
+4. For these single-valued facts, use exactly these relations with "User" as the subject: lives_in, works_at, has_role, risk_tolerance, investment_horizon, prefers_language.
+5. Save a conclusion the assistant drew about the user only when the user's own answers in this turn support it, such as the result of a questionnaire the user filled in.
+6. Do not save questions, requests, market data, or facts that touch neither the user nor their files.
+7. Do not save secrets: passwords, ID, card or account numbers, health details.
+8. Do not save anything the user asks you not to remember.
+9. Return an empty list when the turn has nothing to remember. Most turns have nothing."""
 
 USER_SECTION = """
 
@@ -39,7 +42,7 @@ YOU ARE TALKING TO: {user}"""
 
 MEMORIES_SECTION = """
 
-WHAT YOU KNOW ABOUT THIS USER (from earlier chats; may be empty):
+WHAT YOU KNOW ABOUT THIS USER (from earlier chats and their files, newest first; may be empty):
 {memories}"""
 
 RECENT_CHATS_SECTION = """

@@ -70,6 +70,7 @@ def create_account(name: str, username: str, password: str) -> str:
                 raise AccountLimitReached
             conn.execute(users.insert().values(
                 id=user_id, display_name=name, username=username, password_hash=password_hash,
+                graph_built_at=func.now(),  # nothing from before the graph: scripts.build_graph skips it
             ))
     except IntegrityError as exc:
         raise UsernameTaken from exc

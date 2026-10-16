@@ -5,7 +5,6 @@ from langgraph.store.memory import InMemoryStore
 
 from app.core.config import get_settings
 from app.agents.docs import tools as docs_tools
-from app.core.memory import memory_namespace, recall
 from tests.conftest import requires_db
 
 
@@ -40,20 +39,14 @@ def memory_store() -> InMemoryStore:
     return InMemoryStore(index={"dims": 16, "embed": DeterministicFakeEmbedding(size=16), "fields": ["text"]})
 
 
-async def test_recall_is_scoped_per_user(memory_store):
-    await memory_store.aput(memory_namespace("alice"), "1", {"text": "User's name is Alice"})
-    await memory_store.aput(memory_namespace("alice"), "2", {"text": "Prefers answers in Vietnamese"})
-    await memory_store.aput(memory_namespace("bob"), "1", {"text": "User's name is Bob"})
+def test_only_the_orchestrators_answers_are_mined():
+    from langchain_core.messages import AIMessage, HumanMessage
 
-    alice = await recall(memory_store, "alice", "what is my name?")
-    assert "Alice" in alice and "Vietnamese" in alice
-    assert "Bob" not in alice
-    assert await recall(memory_store, "carol", "anything") == ""
+    from app.api.routes_chat import _answered_by
 
-
-async def test_recall_formats_bullets(memory_store):
-    await memory_store.aput(memory_namespace("u"), "1", {"text": "Works in sales"})
-    assert await recall(memory_store, "u", "job") == "- Works in sales"
+    assert _answered_by([HumanMessage("q"), AIMessage("a", name="orchestrator")]) == "orchestrator"
+    assert _answered_by([HumanMessage("q"), AIMessage("", name="orchestrator"), AIMessage("rows", name="sql_agent")]) == "sql_agent"
+    assert _answered_by([HumanMessage("q")]) is None
 
 
 async def test_search_chat_history_is_scoped_and_forgets_deleted_chats(memory_store):

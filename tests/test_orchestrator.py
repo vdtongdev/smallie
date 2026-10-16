@@ -26,7 +26,7 @@ def _assistant(monkeypatch, model, documents=("handbook.pdf",)):
     monkeypatch.setattr(sql_agent, "describe_schema", lambda: "")
     monkeypatch.setattr(research_agent, "describe_schema", lambda: "")
     monkeypatch.setattr(sql_agent, "stock_tickers", lambda: frozenset({"AAPL"}))
-    monkeypatch.setattr(docs_agent, "document_names", lambda user_id: list(documents))
+    monkeypatch.setattr(docs_agent, "document_names", lambda user_id: [(name, None) for name in documents])
     return build_assistant(InMemorySaver(), InMemoryStore())
 
 
@@ -83,7 +83,7 @@ async def test_asking_one_specialist_first_becomes_a_handoff(monkeypatch):
     model = per_agent(
         orchestrator=[AIMessage("", tool_calls=[
             {"name": "ask_sql", "args": {"question": "Most valuable tech company?"}, "id": "s"},
-            {"name": "save_memory", "args": {"fact": "Likes tech stocks."}, "id": "m"},
+            {"name": "search_memory", "args": {"query": "favourite stocks"}, "id": "m"},
         ])],
         sql=[AIMessage("NVIDIA, at $5.5T.")],
     )
@@ -102,11 +102,11 @@ def test_only_a_first_single_delegation_is_rewritten():
     single = orchestrator_module.single_delegation
     ask = lambda *names: AIMessage("", tool_calls=[{"name": n, "args": {}, "id": n} for n in names])  # noqa: E731
     assert single(ask("ask_sql"), ["docs", "sql"]) == "sql"
-    assert single(ask("ask_sql", "save_memory"), ["docs", "sql"]) == "sql"
+    assert single(ask("ask_sql", "search_memory"), ["docs", "sql"]) == "sql"
     assert single(ask("ask_sql", "ask_docs"), ["docs", "sql"]) is None  # several: compose
     assert single(ask("ask_research"), ["docs", "sql"]) is None  # research never answers directly
     assert single(ask("tavily_tavily_search"), ["docs", "sql"]) is None
-    rewritten = orchestrator_module.as_handoff(ask("ask_sql", "save_memory"), "sql")
+    rewritten = orchestrator_module.as_handoff(ask("ask_sql", "search_memory"), "sql")
     assert [(c["name"], c["args"]) for c in rewritten.tool_calls] == [("handoff", {"agent": "sql"})]
 
 
@@ -173,8 +173,8 @@ def test_composing_starts_with_tool_results_or_findings():
     assert not is_composing([HumanMessage("hi")])
     assert is_composing([HumanMessage("q"), _call("ask_sql", {}), ToolMessage("rows", name="ask_sql", tool_call_id="c1")])
     assert is_composing([HumanMessage("q"), HumanMessage("FINDINGS", name=orchestrator_module.FINDINGS)])
-    # Saving a memory isn't something to write up.
-    assert not is_composing([HumanMessage("I'm Dung"), ToolMessage("saved", name="save_memory", tool_call_id="1")])
+    # Looking up a memory isn't something to write up.
+    assert not is_composing([HumanMessage("I'm Dung"), ToolMessage("none", name="search_memory", tool_call_id="1")])
     # Results of an earlier turn don't count.
     assert not is_composing([ToolMessage("rows", name="ask_sql", tool_call_id="1"), HumanMessage("thanks")])
 

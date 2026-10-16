@@ -14,10 +14,12 @@ from app.core.accounts import get_profile
 from app.agents.artifacts import artifacts_from
 from app.agents.registry import ROUTES, SILENT_STEPS, STEPS
 from app.orchestration.orchestrator import HANDOFF
+from app.orchestration.router import ORCHESTRATOR
 from app.core.auth import get_current_user
 from app.core.config import get_settings
 from app.core.conversations import create_conversation, get_conversation, list_conversations, touch_conversation
-from app.core.memory import AgentContext, load_recent_chats, recall, save_turn, turns
+from app.core.graph import extract_facts, recall_facts
+from app.core.memory import AgentContext, load_recent_chats, save_turn, turns
 from app.core.usage import UsageCounter, add_usage
 
 router = APIRouter(tags=["chat"])
@@ -63,7 +65,7 @@ async def chat(
         yield _sse({"type": "conversation", "id": conversation["id"], "title": conversation["title"]})
         try:
             memories, recent_chats, user = await asyncio.gather(
-                recall(store, user_id, body.message),
+                asyncio.to_thread(recall_facts, user_id),
                 _recent_chats(request, user_id, conversation["id"]) if cross_chat else _empty(),
                 _user(user_id),
             )
@@ -95,19 +97,41 @@ async def chat(
         yield _sse({"type": "done"})
 
     async def remember_turn():
-        # Runs after the response is sent, so the embedding call doesn't delay "done".
-        if not (finished and cross_chat):
+        # Runs after the response is sent, so the embedding and extraction calls don't delay "done".
+        if not finished:
             return
         try:
-            state = await assistant.aget_state(config)
-            pairs = turns(state.values.get("messages", []))
-            answer = pairs[-1][1] if pairs else ""
-            await save_turn(store, user_id, conversation, body.message, answer)
-        except Exception:  # noqa: BLE001 - history is best effort
-            log.exception("Saving chat history failed")
+            messages = (await assistant.aget_state(config)).values.get("messages", [])
+        except Exception:  # noqa: BLE001 - history and memory are best effort
+            log.exception("Reading the finished turn failed")
+            return
+        pairs = turns(messages)
+        answer = pairs[-1][1] if pairs else ""
+        if cross_chat:
+            try:
+                await save_turn(store, user_id, conversation, body.message, answer)
+            except Exception:  # noqa: BLE001
+                log.exception("Saving chat history failed")
+        # Only the orchestrator's turns: plain data lookups (sql, chart, docs) rarely say anything
+        # about the user and would cost an extra model call each.
+        if answer and _answered_by(messages) == ORCHESTRATOR:
+            extraction = UsageCounter()
+            try:
+                await extract_facts(user_id, body.message, answer, [extraction], conversation_id=conversation["id"])
+            except Exception:  # noqa: BLE001
+                log.exception("Extracting facts failed")
+            try:
+                await add_usage(store, user_id, extraction)
+            except Exception:  # noqa: BLE001
+                log.exception("Saving token usage failed")
 
     return StreamingResponse(events(), media_type="text/event-stream", background=BackgroundTask(remember_turn),
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+def _answered_by(messages: list) -> str | None:
+    """Name of the AIMessage that holds the turn's final text."""
+    return next((m.name for m in reversed(messages) if isinstance(m, AIMessage) and m.text), None)
 
 
 async def _empty() -> str:

@@ -1,4 +1,4 @@
-"""Re-embed every document chunk and memory after changing OPENROUTER_EMBED_MODEL or EMBED_DIM.
+"""Re-embed every document chunk, store item and graph entity after changing OPENROUTER_EMBED_MODEL or EMBED_DIM.
 
 Usage (app stopped):  uv run python -m scripts.reindex
 """
@@ -9,10 +9,11 @@ from contextlib import AsyncExitStack
 from pathlib import Path
 
 import psycopg
-from sqlalchemy import select
+from sqlalchemy import select, text, update
 
 from app.core.config import get_settings
-from app.core.db import documents, get_engine, init_db
+from app.core.db import documents, get_engine, graph_nodes, init_db
+from app.core.llm import get_embeddings
 from app.features.documents.ingest import delete_document_chunks, ingest_document
 from app.core.memory import MAX_INDEXED_DIMS, open_persistence
 
@@ -45,6 +46,18 @@ def resize_memory_vectors(dims: int) -> None:
             )
 
 
+def reembed_graph(dims: int) -> int:
+    """Resize graph_nodes.embedding and re-embed every entity name."""
+    with get_engine().begin() as conn:
+        conn.execute(text(f"ALTER TABLE graph_nodes ALTER COLUMN embedding TYPE vector({int(dims)}) USING NULL"))
+        rows = conn.execute(select(graph_nodes.c.id, graph_nodes.c.name).where(graph_nodes.c.kind == "entity")).all()
+        for start in range(0, len(rows), 64):
+            batch = rows[start:start + 64]
+            for (node_id, _), vector in zip(batch, get_embeddings().embed_documents([name for _, name in batch])):
+                conn.execute(update(graph_nodes).where(graph_nodes.c.id == node_id).values(embedding=vector))
+    return len(rows)
+
+
 async def reembed_memories() -> int:
     async with AsyncExitStack() as stack:
         _, store = await open_persistence(stack)
@@ -69,6 +82,7 @@ def main() -> None:
     else:
         count = asyncio.run(reembed_memories())
     print(f"  re-embedded {count} memories")
+    print(f"Knowledge graph: re-embedded {reembed_graph(settings.embed_dim)} entities")
 
 
 if __name__ == "__main__":

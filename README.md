@@ -9,7 +9,7 @@ LangChain agents behind a FastAPI app with a small web UI. You type into one cha
 
 The **Readme** button in the header explains how to use the app, with example questions.
 
-All agents understand and reply in **English and Vietnamese**. They remember each conversation and keep **long-term memories about the user across all chats**. They can also look back at your earlier chats. Memories are managed by the agents; the UI has no memory list (`GET/DELETE /api/memories` still exist).
+All agents understand and reply in **English and Vietnamese**. They remember each conversation and keep **long-term memories about the user across all chats**. They can also look back at your earlier chats. Memories live in a **knowledge graph per user** (plain Postgres tables): facts about you, learned automatically after replies, plus a node per uploaded file linked to the people and companies it is about, so a question about one of them searches the right file. The UI has no memory list (`GET/DELETE /api/memories` still exist).
 
 ## Prerequisites (install once)
 
@@ -88,15 +88,16 @@ These are set in `.env`; all calls go through OpenRouter.
 - `OPENROUTER_ORCHESTRATOR_MODEL`: the model of the orchestrator. It is skipped when the message clearly points to one agent (a ticker, "stock", a file name, "research", "latest news"…). Empty means it uses `OPENROUTER_CHAT_MODEL`. `ORCHESTRATOR_MAX_MODEL_CALLS` (4) caps its own calls per message.
 - `TAVILY_API_KEY`: web search for the research agent (free 1,000 credits/month at https://app.tavily.com). Without it, research uses the other sources. `MCP_SERVERS` adds more remote MCP servers, and `EXTERNAL_DATABASE_URL` lets the researcher read another Postgres (see `.env.example`).
 - `OPENROUTER_EMBED_MODEL`: defaults to `baai/bge-m3`, which is multilingual and costs about $0.01 per 1M tokens. A $1 top-up covers thousands of documents. The fully free option is `liquid/lfm-2.5-embedding-350m:free`, but the provider may keep and train on your data.
-- **Free-tier limits:** about 20 requests/min, and 50 requests/day unless you have bought at least $10 of credits (then 1000/day). A general question takes 1 model call. A database or documents question takes 2–5, plus 1 when the orchestrator has to hand it over. A question that combines agents takes 1 + each agent's calls + 1 to write the answer. A research question takes up to `RESEARCH_MAX_MODEL_CALLS` (8) for the researcher plus 1 for the write-up. `uv run python -m scripts.bench_chat` measures the calls and latency of typical questions on your models.
-- **Changing the embedding model or `EMBED_DIM`:** stop the app, then run `uv run python -m scripts.reindex`.
+- **Free-tier limits:** about 20 requests/min, and 50 requests/day unless you have bought at least $10 of credits (then 1000/day). A general question takes 1 model call, plus 1 after the reply to learn facts about you. Each uploaded file takes 1 (its document card). A database or documents question takes 2–5, plus 1 when the orchestrator has to hand it over. A question that combines agents takes 1 + each agent's calls + 1 to write the answer. A research question takes up to `RESEARCH_MAX_MODEL_CALLS` (8) for the researcher plus 1 for the write-up. `uv run python -m scripts.bench_chat` measures the calls and latency of typical questions on your models.
+- **Changing the embedding model or `EMBED_DIM`:** stop the app, then run `uv run python -m scripts.reindex` (it also re-embeds the knowledge graph's names).
 
 ## How it works
 
 ```
 app/
   core/           shared infrastructure: config, OpenRouter models (llm.py), app tables (db.py),
-                  memory (checkpointer + store), auth/accounts, conversations, shared prompt rules
+                  memory (checkpointer + store), knowledge graph (graph.py), auth/accounts,
+                  conversations, shared prompt rules
   agents/         one package per agent (agent.py with its SPEC, tools.py, prompts.py)
     registry.py   the list of agents the router can pick
     factory.py    create_agent + memory tools + memory-aware dynamic prompt + call limit
@@ -130,7 +131,12 @@ scripts/          load_stocks.py (fill/refresh stock data), reindex.py (after ch
 
 **Memory**
 - *Within a chat:* every message is checkpointed in Postgres (`thread_id` = conversation id), so chats survive restarts.
-- *Across chats:* the agent saves durable facts with `save_memory`. Before each turn, the facts most related to the user's message are added to the system prompt. Memories are stored under `("users", <user_id>, "memories")`.
+- *Across chats:* a knowledge graph per user (`app/core/graph.py`, tables `graph_nodes` and `graph_edges`).
+  - After each reply the orchestrator writes (not plain stock, chart or document lookups), one extra model call picks out facts about you as triples (`User works_at <company>`, risk tolerance, goals, preferences, what a file of yours is).
+  - Names are matched to existing nodes (exact, then by embedding). A new value of a one-value fact (where you live or work, your risk tolerance…) replaces the old one.
+  - Each upload gets a *document card*: one model call reads the start of the file and stores its type, a one-line summary and up to 10 names it is about.
+  - Before each turn, your newest facts go into every agent's prompt. When a documents question names a person or company the graph links to a file, the search looks in that file first, then in all files.
+  - Deleting a chat keeps the facts; deleting a file or the account removes its part of the graph.
 - The checkpointer and the store share one psycopg connection pool that checks each connection before use. If Postgres restarts (for example when WSL shuts down), the app reconnects on its own and doesn't need a restart.
 - The UI remembers the open chat, so reloading the page brings it back.
 
@@ -188,6 +194,15 @@ The app runs as a container on **Cloud Run** (free tier, scales to zero). All da
    - `--max-instances 1` caps the cost.
    - `--allow-unauthenticated` only opens the URL; the app still requires a login.
 6. Share the printed `https://smallie-....run.app` URL. Run the same deploy command again after code or `cloudrun.env.yaml` changes; each deploy creates a new revision.
+
+**Upgrading a database from before the knowledge graph** (once): the app creates the graph tables at startup, but old memories and files need converting.
+1. Back up first: in the Neon console create a branch (an instant copy), e.g. `pre-graph-<date>`. Delete it after a week or so.
+2. Deploy the new version.
+3. From your PC, with the same embedding settings as the deployment, run:
+   ```powershell
+   $env:DATABASE_URL="<neon owner url>"; uv run python -m scripts.build_graph
+   ```
+   For each user it turns the old memory sentences into graph facts (one model call per 5 memories, then deletes them) and reads every turn of their past chats for facts (one call per 4 turns of a chat; short chats still take one call each, so expect roughly one call per chat). Then it writes a card for every file that has none (one call each, read from the stored chunks). It prints the number of calls first. Each user is built once: a finished user is skipped on later runs, and a run stopped by the rate limit resumes where it stopped. New accounts never need it.
 
 **Current deployment:** project `smallie-review`, region `asia-southeast1`, https://smallie-976519788978.asia-southeast1.run.app, database on Neon (Singapore, Postgres 18). App logs:
 ```powershell

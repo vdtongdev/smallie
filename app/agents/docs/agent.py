@@ -10,6 +10,7 @@ from app.agents.factory import build_agent
 from app.core.db import documents, get_engine
 
 MAX_LISTED_DOCUMENTS = 30  # file names shown to the orchestrator
+MAX_CARDS = 10  # newest files shown with their card summary
 MIN_STEM_CHARS = 4  # shorter file names match too many messages
 MIN_WORD_CHARS = 5  # words of a file name that count as mentioning it
 # File-name words that don't tell one file from a question ("final", "v2"...).
@@ -20,21 +21,25 @@ HINTS = re.compile(r"\b(documents?|files?|pdfs?|docx|uploads?|uploaded|tài li�
 PERSONAL_FILES = re.compile(r"\b(resumes?|résumés?|cv|curriculum vitae|hồ sơ xin việc)\b", re.IGNORECASE)
 
 
-def document_names(user_id: str) -> list[str]:
-    """The user's uploaded files that are (or will soon be) searchable."""
+def document_names(user_id: str) -> list[tuple[str, str | None]]:
+    """(file name, card summary or None) of the user's files that are (or will soon be) searchable."""
     with get_engine().connect() as conn:
-        return list(conn.execute(
-            select(documents.c.filename)
+        return [tuple(row) for row in conn.execute(
+            select(documents.c.filename, documents.c.summary)
             .where(documents.c.user_id == user_id, documents.c.status != "failed")
             .order_by(documents.c.created_at.desc())
-        ).scalars())
+        )]
 
 
 async def route_info(user_id: str) -> RouteInfo | None:
-    names = await asyncio.to_thread(document_names, user_id)
-    if not names:
+    files = await asyncio.to_thread(document_names, user_id)
+    if not files:
         return None  # nothing to search
-    listed = ", ".join(names[:MAX_LISTED_DOCUMENTS]) + (" …" if len(names) > MAX_LISTED_DOCUMENTS else "")
+    names = [name for name, _ in files]
+    # Summaries are joined into the notes as text, never formatted, so braces in them are safe.
+    shown = [f"{name} ({summary})" if summary and i < MAX_CARDS else name
+             for i, (name, summary) in enumerate(files[:MAX_LISTED_DOCUMENTS])]
+    listed = ", ".join(shown) + (" …" if len(files) > MAX_LISTED_DOCUMENTS else "")
     stems = [stem for stem in (name.rsplit(".", 1)[0].lower() for name in names) if len(stem) >= MIN_STEM_CHARS]
     return RouteInfo(
         prompt_note=f"The user's uploaded documents: {listed}",

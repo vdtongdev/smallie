@@ -56,8 +56,8 @@ def chunk_ids(document_id: str, count: int) -> list[str]:
     return [f"{document_id}:{i}" for i in range(count)]
 
 
-def ingest_document(document_id: str, user_id: str, path: Path, filename: str) -> None:
-    """Background job: index one uploaded file and record the outcome on its row."""
+def ingest_document(document_id: str, user_id: str, path: Path, filename: str) -> list[Document]:
+    """Index one uploaded file and record the outcome on its row; returns its chunks ([] on failure)."""
     try:
         chunks = load_and_split(path, filename)
         if not chunks:
@@ -66,9 +66,11 @@ def ingest_document(document_id: str, user_id: str, path: Path, filename: str) -
             chunk.metadata.update(user_id=user_id, document_id=document_id)
         get_vector_store().add_documents(chunks, ids=chunk_ids(document_id, len(chunks)))
         _set_status(document_id, "ready", chunk_count=len(chunks), error=None)
+        return chunks
     except Exception as exc:  # noqa: BLE001 - any failure is reported to the user via status
         log.exception("Ingestion failed for %s", filename)
         _set_status(document_id, "failed", error=str(exc)[:500])
+        return []
 
 
 def delete_document_chunks(document_id: str, chunk_count: int) -> None:

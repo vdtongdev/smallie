@@ -28,7 +28,8 @@ from langchain_core.callbacks import AsyncCallbackHandler
 from app.agents.registry import AGENTS
 from app.api.routes_chat import _events_from
 from app.core.db import init_db
-from app.core.memory import AgentContext, memory_namespace, open_persistence, recall
+from app.core.graph import recall_facts
+from app.core.memory import AgentContext, open_persistence
 from app.orchestration.graph import build_assistant
 
 SCENARIOS = {
@@ -143,7 +144,7 @@ async def run_scenario(assistant, store, user_id: str, name: str, run: int) -> R
     start = time.perf_counter()
     elapsed = lambda: round(time.perf_counter() - start, 2)  # noqa: E731
     try:
-        memories = await recall(store, user_id, message)
+        memories = await asyncio.to_thread(recall_facts, user_id)
         stream = assistant.astream(
             {"messages": [{"role": "user", "content": message}]}, config=config,
             context=AgentContext(user_id=user_id, memories=memories),
@@ -206,21 +207,15 @@ async def main(args) -> None:
             if spec.prepare:
                 await spec.prepare(stack)
         assistant = build_assistant(checkpointer, store)
-        before = {item.key for item in await store.asearch(memory_namespace(user_id), limit=10_000)}
-        try:
-            for run in range(1, args.runs + 1):
-                for i, name in enumerate(names):
-                    if results:
-                        await asyncio.sleep(PAUSE_SECONDS)
-                    print(f"[run {run}] {name}: {' / '.join(messages_of(name))}", flush=True)
-                    results.append(await run_scenario(assistant, store, user_id, name, run))
-                    r = results[-1]
-                    print(f"  {'->'.join(r.route)}  {len(r.calls)} calls  {r.total:.1f}s  {r.error}", flush=True)
-        finally:
-            # Memories the agents saved while benchmarking are not the user's.
-            for item in await store.asearch(memory_namespace(user_id), limit=10_000):
-                if item.key not in before:
-                    await store.adelete(item.namespace, item.key)
+        # Facts are only learned after a chat request (routes_chat), so benchmarking adds none.
+        for run in range(1, args.runs + 1):
+            for i, name in enumerate(names):
+                if results:
+                    await asyncio.sleep(PAUSE_SECONDS)
+                print(f"[run {run}] {name}: {' / '.join(messages_of(name))}", flush=True)
+                results.append(await run_scenario(assistant, store, user_id, name, run))
+                r = results[-1]
+                print(f"  {'->'.join(r.route)}  {len(r.calls)} calls  {r.total:.1f}s  {r.error}", flush=True)
     report(results)
     if args.out:
         with open(args.out, "w", encoding="utf-8") as f:

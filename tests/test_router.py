@@ -35,7 +35,7 @@ async def test_forced_agent_is_used(monkeypatch):
 
 async def test_obvious_route_uses_keywords_tickers_and_file_names(monkeypatch):
     monkeypatch.setattr(sql_agent, "stock_tickers", lambda: frozenset({"AAPL", "MSFT"}))
-    monkeypatch.setattr(docs_agent, "document_names", lambda user_id: ["handbook.pdf", "Q3 report.docx"])
+    monkeypatch.setattr(docs_agent, "document_names", lambda user_id: [("handbook.pdf", None), ("Q3 report.docx", None)])
     available = await available_agents("u1", AGENTS)
     assert obvious_route("What did AAPL close at?", available) == "sql"
     assert obvious_route("giá cổ phiếu Apple hôm nay?", available) == "sql"
@@ -48,7 +48,7 @@ async def test_obvious_route_uses_keywords_tickers_and_file_names(monkeypatch):
 
 
 async def test_obvious_message_goes_straight_to_its_agent(monkeypatch):
-    monkeypatch.setattr(docs_agent, "document_names", lambda user_id: ["handbook.pdf"])
+    monkeypatch.setattr(docs_agent, "document_names", lambda user_id: [("handbook.pdf", None)])
     monkeypatch.setattr(sql_agent, "stock_tickers", lambda: frozenset({"AAPL"}))
     router = router_module.build_router()
     state = {"messages": [HumanMessage("AAPL dividend yield?")]}
@@ -67,7 +67,7 @@ WEB = AgentSpec(
 
 
 async def test_new_agent_routes_by_its_hints_or_when_forced(monkeypatch):
-    monkeypatch.setattr(docs_agent, "document_names", lambda user_id: ["handbook.pdf"])
+    monkeypatch.setattr(docs_agent, "document_names", lambda user_id: [("handbook.pdf", None)])
     router = router_module.build_router((*AGENTS, WEB))
     assert await router({"messages": [HumanMessage("any news today?")]}, _runtime()) == {"route": "web", "direct": True}
     assert await router({"messages": [HumanMessage("hi")]}, _runtime(agent="web")) == {"route": "web", "direct": False}
@@ -75,7 +75,7 @@ async def test_new_agent_routes_by_its_hints_or_when_forced(monkeypatch):
 
 async def test_research_hints_route_to_research(monkeypatch):
     monkeypatch.setattr(sql_agent, "stock_tickers", lambda: frozenset({"NVDA"}))
-    monkeypatch.setattr(docs_agent, "document_names", lambda user_id: ["handbook.pdf"])
+    monkeypatch.setattr(docs_agent, "document_names", lambda user_id: [("handbook.pdf", None)])
     available = await available_agents("u1", AGENTS)
     assert obvious_route("Research the EV battery market", available) == "research"
     assert obvious_route("latest news about OpenRouter?", available) == "research"
@@ -102,7 +102,7 @@ def test_orchestrator_and_old_writer_answers_have_a_route():
 async def test_a_mention_of_another_agent_leaves_the_message_to_the_orchestrator(monkeypatch):
     monkeypatch.setattr(sql_agent, "stock_tickers", lambda: frozenset({"NVDA"}))
     monkeypatch.setattr(docs_agent, "document_names", lambda user_id: [
-        "Eric-Jorgenson_The-Almanack-of-Naval-Ravikant_Final.pdf", "SWE_Resume_Tong.pdf"])
+        ("Eric-Jorgenson_The-Almanack-of-Naval-Ravikant_Final.pdf", None), ("SWE_Resume_Tong.pdf", None)])
     available = await available_agents("u1", AGENTS)
     # A ticker or a stock word alone still goes straight to sql.
     assert obvious_route("What did NVDA close at?", available) == "sql"
@@ -117,7 +117,7 @@ async def test_a_mention_of_another_agent_leaves_the_message_to_the_orchestrator
 
 async def test_chart_words_win_over_a_ticker_but_not_over_a_mention_of_files(monkeypatch):
     monkeypatch.setattr(sql_agent, "stock_tickers", lambda: frozenset({"AAPL", "MSFT", "NVDA"}))
-    monkeypatch.setattr(docs_agent, "document_names", lambda user_id: ["SWE_Resume_Tong.pdf"])
+    monkeypatch.setattr(docs_agent, "document_names", lambda user_id: [("SWE_Resume_Tong.pdf", None)])
     available = await available_agents("u1", AGENTS)
     assert obvious_route("Chart AAPL vs MSFT closing prices this year", available) == "chart"
     assert obvious_route("vẽ biểu đồ vốn hóa top 10 công ty công nghệ", available) == "chart"

@@ -2,13 +2,14 @@
 
 - Short-term: LangGraph AsyncPostgresSaver checkpoints every message of a thread;
   thread_id == conversation id.
-- Long-term: LangGraph AsyncPostgresStore with a semantic index. Memories live under
-  the namespace ("users", <user_id>, "memories"), so each user only ever sees their own.
+- Long-term: the user's knowledge graph (app/core/graph.py). The LangGraph AsyncPostgresStore
+  (semantic index) keeps the indexed chat history and token usage.
 - Cross-chat history: the latest turns of the user's other chats are read from their
   checkpoints for every request (recency), and every finished turn is also indexed under
   ("users", <user_id>, "history") for `search_chat_history` (older or specific chats).
 """
 
+import asyncio
 import uuid
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
@@ -24,6 +25,7 @@ from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
 from app.core.config import get_settings
+from app.core.graph import search_facts
 from app.core.llm import get_embeddings
 from app.core.usage import usage_namespace
 
@@ -43,6 +45,7 @@ class AgentContext:
 
 
 def memory_namespace(user_id: str) -> tuple[str, ...]:
+    """Sentence memories from before the knowledge graph; scripts.build_graph converts and empties it."""
     return ("users", user_id, "memories")
 
 
@@ -100,12 +103,6 @@ async def open_persistence(stack: AsyncExitStack) -> tuple[AsyncPostgresSaver, A
     await checkpointer.setup()
     await store.setup()
     return checkpointer, store
-
-
-async def recall(store: BaseStore, user_id: str, query: str, limit: int = 5) -> str:
-    """Return the user's memories most related to `query`, as a bullet list."""
-    items = await store.asearch(memory_namespace(user_id), query=query, limit=limit)
-    return "\n".join(f"- {item.value['text']}" for item in items)
 
 
 def turns(messages: list[BaseMessage]) -> list[tuple[str, str]]:
@@ -168,7 +165,8 @@ async def forget_conversation(store: BaseStore, user_id: str, conversation_id: s
 
 
 async def forget_user(store: BaseStore, user_id: str) -> None:
-    """Remove all of a deleted account's memories, indexed chat history and token usage."""
+    """Remove a deleted account's store items: old sentence memories, indexed chat history and
+    token usage. Its graph rows go with the users row (ON DELETE CASCADE)."""
     for namespace in (memory_namespace(user_id), history_namespace(user_id), usage_namespace(user_id)):
         while items := await store.asearch(namespace, limit=100):
             for item in items:
@@ -176,25 +174,14 @@ async def forget_user(store: BaseStore, user_id: str) -> None:
 
 
 @tool
-async def save_memory(fact: str, runtime: ToolRuntime[AgentContext]) -> str:
-    """Remember a durable fact or preference about the user for future chats.
-
-    Args:
-        fact: One short, self-contained sentence, e.g. "User's name is Alex" or
-            "User works as a data analyst".
-    """
-    await runtime.store.aput(memory_namespace(runtime.context.user_id), str(uuid.uuid4()), {"text": fact})
-    return f"Saved: {fact}"
-
-
-@tool
 async def search_memory(query: str, runtime: ToolRuntime[AgentContext]) -> str:
-    """Search what you remember about the user from earlier conversations.
+    """Search what you know about the user from earlier chats and their files, beyond the facts
+    already listed in your instructions.
 
     Args:
         query: What you want to know, e.g. "user's job" or "preferred language".
     """
-    found = await recall(runtime.store, runtime.context.user_id, query)
+    found = await asyncio.to_thread(search_facts, runtime.context.user_id, query)
     return found or "No related memories."
 
 
@@ -214,4 +201,4 @@ async def search_chat_history(query: str, runtime: ToolRuntime[AgentContext]) ->
     )
 
 
-MEMORY_TOOLS = [save_memory, search_memory, search_chat_history]
+MEMORY_TOOLS = [search_memory, search_chat_history]

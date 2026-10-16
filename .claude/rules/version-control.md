@@ -17,4 +17,4 @@ Count the items of the open patch from the existing branches (`git branch -a --l
 
 ## Finish
 
-Keep working and committing on the branch. When the user says "done", push the branch and open a PR to `main` with `gh pr create`. Do not merge it unless the user asks.
+Keep working and committing on the branch. When the user approves the changes, push the branch and open a PR to `main` with `gh pr create`. Do not merge it unless the user asks.

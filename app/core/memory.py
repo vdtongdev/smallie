@@ -184,8 +184,8 @@ async def save_memory(fact: str, runtime: ToolRuntime[AgentContext]) -> str:
     """Remember a durable fact or preference about the user for future chats.
 
     Args:
-        fact: One short, self-contained sentence, e.g. "User's name is Alex" or
-            "User works as a data analyst".
+        fact: One short, self-contained sentence about the user, in the form
+            "User <one fact or preference>".
     """
     namespace = memory_namespace(runtime.context.user_id)
     closest = await runtime.store.asearch(namespace, query=fact, limit=1)

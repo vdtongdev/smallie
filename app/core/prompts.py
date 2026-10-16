@@ -23,18 +23,19 @@ MEMORY_RULE = (
 
 # System prompt of the fact extractor (app/core/graph.py, extract_facts); never formatted.
 # Every name in graph.FUNCTIONAL must appear in rule 4 (tests/test_graph.py checks it).
-EXTRACT_PROMPT = """You pick out durable facts about the user from one chat turn and return them as (subject, relation, object) triples for the user's knowledge graph.
+EXTRACT_PROMPT = """You pick out durable facts about the user from chat turns (one or more) and return them as (subject, relation, object) triples for the user's knowledge graph.
 
 Rules:
 1. Save only facts that stay true across chats: the user's identity, work, goals, preferences (answer style, language, topics), investment profile (risk tolerance, horizon, holdings, constraints), and what the user says about their own files.
 2. Every triple must have the user or one of the user's files as its subject or object. Write the user as exactly "User". Write a file name exactly as it appears in the list of the user's files.
 3. Write the relation as short English snake_case verb phrase, such as "holds". Write subjects and objects as short names in English, keeping proper names as written.
 4. For these single-valued facts, use exactly these relations with "User" as the subject: lives_in, works_at, has_role, risk_tolerance, investment_horizon, prefers_language.
-5. Save a conclusion the assistant drew about the user only when the user's own answers in this turn support it, such as the result of a questionnaire the user filled in.
+5. Save a conclusion the assistant drew about the user only when the user's own answers in these turns support it, such as the result of a questionnaire the user filled in.
 6. Do not save questions, requests, market data, or facts that touch neither the user nor their files.
 7. Do not save secrets: passwords, ID, card or account numbers, health details.
 8. Do not save anything the user asks you not to remember.
-9. Return an empty list when the turn has nothing to remember. Most turns have nothing."""
+9. Return an empty list when the turns have nothing to remember. Most turns have nothing.
+10. When the turns disagree, keep what the latest turn says."""
 
 USER_SECTION = """
 

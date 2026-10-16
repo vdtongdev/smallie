@@ -31,6 +31,7 @@ users = Table(
     Column("display_name", Text),
     Column("username", Text, unique=True),  # login name; NULL for legacy users
     Column("password_hash", Text),  # NULL for the admin, whose password is APP_PASSWORD
+    Column("graph_built_at", DateTime(timezone=True)),  # set once scripts.build_graph filled the user's graph
     Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
 )
 
@@ -41,6 +42,7 @@ conversations = Table(
     Column("user_id", String(64), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False),
     Column("kind", String(16), nullable=False),  # mode it was started with: "auto" or an agent route
     Column("title", Text, nullable=False),
+    Column("mined_turns", Integer, nullable=False, server_default="0"),  # turns scripts.build_graph read so far
     Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
     Column("updated_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
 )
@@ -123,4 +125,7 @@ def init_db() -> None:
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS username text UNIQUE, "
             "ADD COLUMN IF NOT EXISTS password_hash text"
         ))
-        conn.execute(text("ALTER TABLE documents ADD COLUMN IF NOT EXISTS summary text"))  # came with the graph
+        # These came with the knowledge graph.
+        conn.execute(text("ALTER TABLE documents ADD COLUMN IF NOT EXISTS summary text"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS graph_built_at timestamptz"))
+        conn.execute(text("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS mined_turns integer NOT NULL DEFAULT 0"))

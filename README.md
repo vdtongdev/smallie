@@ -202,7 +202,7 @@ The app runs as a container on **Cloud Run** (free tier, scales to zero). All da
    ```powershell
    $env:DATABASE_URL="<neon owner url>"; uv run python -m scripts.build_graph
    ```
-   It turns each user's old memory sentences into graph facts (one model call per 5 memories, then deletes them) and writes a card for every file that has none (one call each, read from the stored chunks). It is safe to run again, e.g. after a rate limit.
+   For each user it turns the old memory sentences into graph facts (one model call per 5 memories, then deletes them) and reads every turn of their past chats for facts (one call per 4 turns of a chat; short chats still take one call each, so expect roughly one call per chat). Then it writes a card for every file that has none (one call each, read from the stored chunks). It prints the number of calls first. Each user is built once: a finished user is skipped on later runs, and a run stopped by the rate limit resumes where it stopped. New accounts never need it.
 
 **Current deployment:** project `smallie-review`, region `asia-southeast1`, https://smallie-976519788978.asia-southeast1.run.app, database on Neon (Singapore, Postgres 18). App logs:
 ```powershell

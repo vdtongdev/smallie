@@ -35,6 +35,7 @@ SAME_ENTITY = 0.85
 FUNCTIONAL = frozenset({"lives_in", "works_at", "has_role", "risk_tolerance", "investment_horizon",
                         "prefers_language"})
 RECALL_FACTS = 20  # facts about the user put into every prompt, newest first
+MAX_FACTS = 8  # per extraction call (scripts.build_graph sends several turns at once)
 SEARCH_NODES = 5  # nodes nearest to a search_memory query
 MIN_TEXT_MATCH = 4  # shorter entity names found in a question would scope searches by accident
 EXTRACT_ANSWER_CHARS = 3000  # enough for a questionnaire's conclusion
@@ -60,9 +61,15 @@ class Fact(BaseModel):
 
 
 class FactUpdate(BaseModel):
-    """Durable facts about the user from this chat turn; empty when there are none."""
+    """Durable facts about the user from these chat turns; empty when there are none."""
 
-    facts: list[Fact] = Field(default_factory=list, max_length=5)
+    facts: list[Fact] = Field(default_factory=list, max_length=MAX_FACTS)
+
+    @field_validator("facts", mode="before")
+    @classmethod
+    def first_ones(cls, value):
+        # A few facts too many shouldn't throw the whole reply away.
+        return value[:MAX_FACTS] if isinstance(value, list) else value
 
 
 # ---------- nodes ----------
@@ -281,10 +288,20 @@ def documents_for(user_id: str, query: str, entity: str = "") -> list[str]:
 
 # ---------- extraction ----------
 
+def format_turn(question: str, answer: str, answer_chars: int = EXTRACT_ANSWER_CHARS) -> str:
+    return f"User: {question}\n\nAssistant: {answer[:answer_chars]}"
+
+
 async def extract_facts(user_id: str, question: str, answer: str, callbacks: list, source: str = "chat",
                         conversation_id: str | None = None) -> int:
     """Learn what one finished turn says about the user. A plain model call after the reply,
     because free models rarely chose to call a save tool themselves (AP-006)."""
+    return await extract_from_turns(user_id, format_turn(question, answer), callbacks, source, conversation_id)
+
+
+async def extract_from_turns(user_id: str, turns: str, callbacks: list, source: str = "chat",
+                             conversation_id: str | None = None) -> int:
+    """One extraction call over `turns` (one or more formatted chat turns); returns facts kept."""
     def file_names() -> list[str]:
         with get_engine().connect() as conn:
             return list(conn.execute(select(documents.c.filename).where(
@@ -292,8 +309,7 @@ async def extract_facts(user_id: str, question: str, answer: str, callbacks: lis
 
     files = await asyncio.to_thread(file_names)
     # File names go into the message, not a template: they may contain braces.
-    turn = (f"The user's files: {', '.join(files)}\n\n" if files else "") + \
-        f"User: {question}\n\nAssistant: {answer[:EXTRACT_ANSWER_CHARS]}"
+    turn = (f"The user's files: {', '.join(files)}\n\n" if files else "") + turns
     model = get_chat_model(get_settings().openrouter_orchestrator_model or None)
     extractor = model.with_structured_output(FactUpdate, method="function_calling")
     update_ = await extractor.ainvoke([SystemMessage(EXTRACT_PROMPT), HumanMessage(turn)], config={"callbacks": callbacks})

@@ -75,8 +75,8 @@ def test_fact_schema_normalizes_relations_and_rejects_bad_ones():
     assert Fact(subject="User", relation="Works at", object="x").relation == "works_at"
     with pytest.raises(ValidationError):
         Fact(subject="User", relation="123", object="x")
-    with pytest.raises(ValidationError):
-        FactUpdate.model_validate({"facts": [{"subject": "User", "relation": "holds", "object": "x"}] * 6})
+    too_many = FactUpdate.model_validate({"facts": [{"subject": "User", "relation": "holds", "object": "x"}] * 9})
+    assert len(too_many.facts) == graph.MAX_FACTS  # the first ones are kept
     assert FactUpdate.model_validate({}).facts == []
 
 
@@ -208,6 +208,81 @@ def test_search_follows_the_graph_to_the_linked_file(make_user, embeddings, chun
     unknown = search_with_graph(alice, "termination", entity="Initech")  # falls back to every file
     assert "contract.pdf" in unknown and "resume.pdf" in unknown
     assert search_with_graph(bob, "termination", entity="Acme") == NO_PASSAGES  # never alice's files
+
+
+async def chat_history(checkpointer, conversation_id: str, questions: list[str]) -> None:
+    from langchain_core.messages import AIMessage
+    from langgraph.graph import START, MessagesState, StateGraph
+
+    def reply(state: MessagesState) -> dict:
+        return {"messages": [AIMessage(f"answer to {state['messages'][-1].text}", name="sql_agent")]}
+
+    graph_ = StateGraph(MessagesState)
+    graph_.add_node("reply", reply)
+    graph_.add_edge(START, "reply")
+    app = graph_.compile(checkpointer=checkpointer)
+    for question in questions:
+        await app.ainvoke({"messages": [("user", question)]}, {"configurable": {"thread_id": conversation_id}})
+
+
+@requires_db
+async def test_build_graph_mines_every_past_turn_once_per_user(make_user, monkeypatch):
+    from langgraph.checkpoint.memory import InMemorySaver
+    from langgraph.store.memory import InMemoryStore
+
+    from app.core.db import conversations
+    from app.core.memory import memory_namespace
+    from scripts import build_graph
+
+    calls = []
+
+    async def extract(user_id, text, callbacks, source, conversation_id=None):
+        calls.append((user_id, text, conversation_id))
+        return 1
+
+    monkeypatch.setattr(build_graph, "extract_from_turns", extract)
+    store, checkpointer = InMemoryStore(), InMemorySaver()
+    user, resumed = make_user(), make_user()
+    chat, empty, other = (str(uuid.uuid4()) for _ in range(3))
+    with get_engine().begin() as conn:
+        conn.execute(conversations.insert().values(
+            [{"id": chat, "user_id": user, "kind": "auto", "title": "a", "mined_turns": 0},
+             {"id": empty, "user_id": user, "kind": "auto", "title": "no checkpoint", "mined_turns": 0},
+             {"id": other, "user_id": resumed, "kind": "auto", "title": "a", "mined_turns": 4}]))
+    questions = [f"q{i}" for i in range(1, 6)]
+    await chat_history(checkpointer, chat, questions)
+    await chat_history(checkpointer, other, questions)
+    await store.aput(memory_namespace(user), "m1", {"text": "User likes tea"})
+
+    assert {user, resumed} <= set(build_graph.users_to_build())
+    assert await build_graph.build_user(store, checkpointer, user) == 3
+    memory_call, first_batch, second_batch = calls
+    assert "User likes tea" in memory_call[1] and memory_call[2] is None
+    assert first_batch[2] == second_batch[2] == chat  # every turn, sql answers too
+    assert all(f"User: q{i}" in first_batch[1] for i in range(1, 5)) and "answer to q4" in first_batch[1]
+    assert "User: q5" in second_batch[1] and "User: q1" not in second_batch[1]
+    assert await store.asearch(memory_namespace(user)) == []
+
+    calls.clear()
+    assert await build_graph.build_user(store, checkpointer, resumed) == 1  # resumes after turn 4
+    assert len(calls) == 1 and "User: q5" in calls[0][1] and "User: q4" not in calls[0][1]
+
+    remaining = set(build_graph.users_to_build())
+    assert user not in remaining and resumed not in remaining  # never built twice
+    with get_engine().connect() as conn:
+        assert conn.execute(select(conversations.c.mined_turns).where(conversations.c.id == chat)).scalar() == 5
+
+
+@requires_db
+def test_new_accounts_never_need_building(make_user):
+    from app.core import accounts
+    from scripts.build_graph import users_to_build
+
+    user_id = accounts.create_account("Test", f"test-graph-{uuid.uuid4().hex[:8]}", "a long enough password")
+    try:
+        assert user_id not in users_to_build()
+    finally:
+        accounts.delete_user_row(user_id)
 
 
 @requires_db

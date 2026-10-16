@@ -80,3 +80,30 @@ Versions are `major.minor.patch`: the major version stays 0 for now, each minor 
   - Counts every model call of a message, including agents the orchestrator asks as tools; embedding calls (memories, chat history, documents) are not counted
   - Totals start with this release; `GET /api/usage` returns them, and deleting an account deletes them
   - Two of one account's chats finishing at the same moment can lose one message's numbers
+
+## 0.3.4 - Knowledge graph and fixes
+- **Knowledge graph per user** (`app/core/graph.py`) in place of sentence memories
+  - Stored in plain Postgres tables (`graph_nodes`, `graph_edges`), created at startup; laid out so PostgreSQL 20's `CREATE PROPERTY GRAPH` can sit on top later (SQL/PGQ was pulled from PostgreSQL 19, and Neon offers up to 18)
+  - Nodes are you, your files and the people, companies and other names around them; only facts that touch you or one of your files are kept
+  - New values of one-value facts (name, where you live or work, role, risk tolerance, investment horizon, preferred language) replace the old ones
+  - Names written slightly differently ("Acme Corp" / "ACME Corporation") become one node; aliases such as "Saigon" / "Ho Chi Minh City" stay separate
+  - Your newest 20 facts go into every agent's prompt; recall is now a plain database lookup, one embedding call less per message
+  - `GET/DELETE /api/memories` list and delete facts; deleting a chat keeps what was learned in it, deleting a file or an account removes its part of the graph
+- **Document cards**: each upload gets one model call that reads the start of the file (6,000 characters) and stores its type, a one-line summary and up to 10 names it is about
+  - A documents question about a person or company the graph links to a file searches that file first, then every file; the name can come from the model or from the question itself
+  - The orchestrator sees each file's summary next to its name
+  - Limit: names that appear only later in a file aren't linked, and a name in a question must be written in full ("Graham" doesn't match "Benjamin Graham"); the search then covers every file as before
+- **`scripts/build_graph.py`**: run once after deploying; for each user it converts the old memories and mines every turn of every past chat (one call per 4 turns of a chat, about one call per chat), then writes cards for existing files
+  - Each user is built once (`users.graph_built_at`; new accounts never need it), and a run stopped by the rate limit resumes where it stopped
+  - It spends free-quota calls and prints how many before it starts
+- **Fix: personal details and preferences were not remembered**
+  - Saving depended on the free model choosing to call `save_memory`, which it rarely did: a risk-profile questionnaire answered in chat saved nothing
+  - Now one model call after each reply the orchestrator writes picks out the facts about you (`extract_facts`); plain stock, chart and document lookups are skipped, so they cost no extra call. The agents no longer have a save tool
+- **Fix: the same memory saved again and again**
+  - Each save added a new item, so one fact repeated across chats filled the few memories shown to the agents; with the graph it was worded under different relation names instead (your name saved as `has_name`, `is_named` and `is`)
+  - Known wordings now map to one relation, the extractor is told which relations to reuse, and each pair of nodes keeps one learned fact. On a real graph this cut 25 facts to 19
+  - Limit: two genuinely different facts about the same pair, with relation names the model invented, keep only the newest
+- **Fix: sample facts from a tool description could be saved as real memories**
+  - The `save_memory` description gave "User's name is Alex" and "User works as a data analyst" as examples, which weak models could store as facts about you (same cause as the 0.3.1 fix)
+  - The description first got a placeholder instead; the tool is now gone, since facts are extracted after replies
+- `uv run python -m scripts.reindex` now also re-embeds the graph's names

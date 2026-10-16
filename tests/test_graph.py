@@ -80,10 +80,35 @@ def test_fact_schema_normalizes_relations_and_rejects_bad_ones():
     assert FactUpdate.model_validate({}).facts == []
 
 
-def test_every_single_valued_relation_is_named_in_the_prompt():
+def test_every_standard_relation_is_named_in_the_prompt():
     from app.core.prompts import EXTRACT_PROMPT
 
-    assert all(relation in EXTRACT_PROMPT for relation in graph.FUNCTIONAL)
+    assert graph.FUNCTIONAL <= graph.STANDARD
+    assert all(relation in EXTRACT_PROMPT for relation in graph.STANDARD)
+    assert all(target in graph.STANDARD for target in graph.ALIASES.values())
+
+
+def test_known_wordings_become_the_standard_relation():
+    assert Fact(subject="User", relation="is named", object="x").relation == "has_name"
+    assert Fact(subject="User", relation="works_for", object="x").relation == "works_at"
+
+
+@requires_db
+def test_one_fact_is_kept_once_whatever_it_is_called(make_user, embeddings):
+    user = make_user()
+    resume = add_document(user, "resume.pdf")
+    save = lambda *facts: graph.save_facts(user, [Fact(subject=s, relation=r, object=o) for s, r, o in facts], "chat")  # noqa: E731
+    save(("User", "is", "An"), ("User", "is_named", "An"))  # invented, then standard: the standard one stays
+    save(("User", "has_name", "An"), ("User", "called", "An"))  # invented next to a standard one: dropped
+    save(("User", "has_income_type", "unstable income"))
+    save(("User", "has_financial_characteristic", "unstable income"))  # newest invented wording wins
+    save(("resume.pdf", "is_cv_of", "User"), ("User", "describes_career_of", "resume.pdf"))  # one link, User -> file
+    save(("User", "holds", "Acme"), ("User", "works_at", "Acme"))  # two standard relations both stay
+    texts = sorted(f["text"] for f in graph.list_facts(user))
+    assert texts == ["User describes career of resume.pdf", "User has financial characteristic unstable income",
+                     "User has name An", "User holds Acme", "User works at Acme"]
+    assert resume  # the file node was linked, not a new entity named after it
+    assert node_names(user, "file") == ["resume.pdf"]
 
 
 @requires_db
@@ -113,7 +138,7 @@ def test_names_merge_and_general_knowledge_is_dropped(make_user, embeddings):
         Fact(subject="User", relation="admires", object="ACME Corporation"),  # same embedding
         Fact(subject="Acme Corp", relation="located_in", object="Singapore"),  # touches neither user nor a file
     ], "chat")
-    assert kept == 3
+    assert kept == 1  # all three name one node, and one pair keeps one edge (the standard `holds`)
     assert node_names(user) == ["Acme Corp"]
 
 

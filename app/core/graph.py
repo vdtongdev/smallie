@@ -32,8 +32,21 @@ from app.core.prompts import EXTRACT_PROMPT
 # shortcut: tuned for one model, re-measure after changing OPENROUTER_EMBED_MODEL.
 SAME_ENTITY = 0.85
 # Relations with one value per user: a new value replaces the old edge. EXTRACT_PROMPT lists them.
-FUNCTIONAL = frozenset({"lives_in", "works_at", "has_role", "risk_tolerance", "investment_horizon",
+FUNCTIONAL = frozenset({"has_name", "lives_in", "works_at", "has_role", "risk_tolerance", "investment_horizon",
                         "prefers_language"})
+# The relations EXTRACT_PROMPT asks for. Between two nodes, one of these wins over an invented one.
+STANDARD = FUNCTIONAL | {"holds", "interested_in", "has_skill", "studied_at", "has_goal", "prefers"}
+# Wordings free models used for a standard relation (seen in real extractions).
+ALIASES = {
+    "is_named": "has_name", "named": "has_name", "is_called": "has_name", "name_is": "has_name",
+    "has_full_name": "has_name", "works_for": "works_at", "employed_at": "works_at", "employed_by": "works_at",
+    "lives_at": "lives_in", "resides_in": "lives_in", "studies_at": "studied_at", "graduated_from": "studied_at",
+    "educated_at": "studied_at", "is_interested_in": "interested_in", "interests": "interested_in",
+    "has_skills": "has_skill", "skilled_in": "has_skill", "has_risk_tolerance": "risk_tolerance",
+    "has_risk_profile": "risk_tolerance", "risk_profile": "risk_tolerance",
+    "has_investment_horizon": "investment_horizon", "preferred_language": "prefers_language",
+    "has_goal_of": "has_goal", "goal": "has_goal",
+}
 RECALL_FACTS = 20  # facts about the user put into every prompt, newest first
 MAX_FACTS = 8  # per extraction call (scripts.build_graph sends several turns at once)
 SEARCH_NODES = 5  # nodes nearest to a search_memory query
@@ -57,7 +70,8 @@ class Fact(BaseModel):
     @field_validator("relation", mode="before")
     @classmethod
     def snake_case(cls, value: str) -> str:
-        return re.sub(r"[\s-]+", "_", str(value).strip().lower())
+        relation = re.sub(r"[\s-]+", "_", str(value).strip().lower())
+        return ALIASES.get(relation, relation)
 
 
 class FactUpdate(BaseModel):
@@ -149,6 +163,21 @@ def _link(conn: Connection, user_id: str, source_id: str, relation: str, target_
     ))
 
 
+def _keep_one_edge(conn: Connection, user_id: str, source_id: str, target_id: str, relation: str) -> bool:
+    """One learned edge per pair of nodes, since two relations between the same pair were almost
+    always one fact worded twice ("has_income_type"/"has_financial_characteristic"). Standard
+    relations win over invented ones, the newest invented one over older ones, and two different
+    standard relations both stay (holds and works_at the same company). False: skip the new edge."""
+    pair = and_(graph_edges.c.user_id == user_id, graph_edges.c.source_id == source_id,
+                graph_edges.c.target_id == target_id, graph_edges.c.relation != relation,
+                graph_edges.c.source != "document")  # card edges are the file's, not learned facts
+    existing = set(conn.execute(select(graph_edges.c.relation).where(pair)).scalars())
+    if relation not in STANDARD and existing & STANDARD:
+        return False
+    conn.execute(delete(graph_edges).where(pair, graph_edges.c.relation.not_in(STANDARD)))
+    return True
+
+
 def save_facts(user_id: str, facts: list[Fact], source: str, conversation_id: str | None = None) -> int:
     """Store facts that touch the user or one of their files; returns how many were kept."""
     with get_engine().connect() as conn:
@@ -174,12 +203,15 @@ def save_facts(user_id: str, facts: list[Fact], source: str, conversation_id: st
             subject, target = resolve(fact.subject), resolve(fact.object)
             if not subject or not target or subject == target or not ({subject, target} & anchors):
                 continue  # general knowledge, not about the user or their files
+            if target == user_node and subject in anchors:
+                subject, target = target, subject  # "<file> is_cv_of User" is the same link as User -> file
             if subject == user_node and fact.relation in FUNCTIONAL:
                 conn.execute(delete(graph_edges).where(
                     graph_edges.c.user_id == user_id, graph_edges.c.source_id == user_node,
                     graph_edges.c.relation == fact.relation, graph_edges.c.target_id != target))
-            _link(conn, user_id, subject, fact.relation, target, source, conversation_id=conversation_id)
-            kept += 1
+            if _keep_one_edge(conn, user_id, subject, target, fact.relation):
+                _link(conn, user_id, subject, fact.relation, target, source, conversation_id=conversation_id)
+                kept += 1
         _drop_orphans(conn, user_id)
     return kept
 
@@ -302,14 +334,19 @@ async def extract_facts(user_id: str, question: str, answer: str, callbacks: lis
 async def extract_from_turns(user_id: str, turns: str, callbacks: list, source: str = "chat",
                              conversation_id: str | None = None) -> int:
     """One extraction call over `turns` (one or more formatted chat turns); returns facts kept."""
-    def file_names() -> list[str]:
+    def known() -> tuple[list[str], list[str]]:
         with get_engine().connect() as conn:
-            return list(conn.execute(select(documents.c.filename).where(
-                documents.c.user_id == user_id, documents.c.status != "failed")).scalars())
+            files = conn.execute(select(documents.c.filename).where(
+                documents.c.user_id == user_id, documents.c.status != "failed")).scalars()
+            relations = conn.execute(select(graph_edges.c.relation).distinct().where(
+                graph_edges.c.user_id == user_id, graph_edges.c.source != "document")).scalars()
+            return list(files), sorted(set(relations) - STANDARD)
 
-    files = await asyncio.to_thread(file_names)
-    # File names go into the message, not a template: they may contain braces.
-    turn = (f"The user's files: {', '.join(files)}\n\n" if files else "") + turns
+    files, relations = await asyncio.to_thread(known)
+    # Names go into the message, not a template: file names may contain braces.
+    turn = (f"The user's files: {', '.join(files)}\n" if files else "") + \
+        (f"Relations already in the user's graph: {', '.join(relations)}\n" if relations else "") + \
+        ("\n" if files or relations else "") + turns
     model = get_chat_model(get_settings().openrouter_orchestrator_model or None)
     extractor = model.with_structured_output(FactUpdate, method="function_calling")
     update_ = await extractor.ainvoke([SystemMessage(EXTRACT_PROMPT), HumanMessage(turn)], config={"callbacks": callbacks})

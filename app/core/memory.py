@@ -55,6 +55,7 @@ RECENT_TURNS = 3  # turns shown per chat
 QUESTION_CHARS = 300
 ANSWER_CHARS = 200
 HISTORY_ANSWER_CHARS = 500
+HISTORY_TURNS = 10  # earlier turns of the thread a model call sees, besides the current one
 
 
 # pgvector can only build HNSW indexes for vectors of up to 2000 dimensions.
@@ -117,6 +118,20 @@ def turns(messages: list[BaseMessage]) -> list[tuple[str, str]]:
         elif isinstance(message, AIMessage) and message.text and pairs:
             pairs[-1][1] = message.text  # the last text reply of the turn is the answer
     return [(q, a) for q, a in pairs]
+
+
+def trim_history(messages: list[BaseMessage]) -> list[BaseMessage]:
+    """What a model call sees of the thread: the current turn whole, and of the last
+    HISTORY_TURNS earlier turns only the user's messages and the text answers. Old tool calls
+    and results (SQL tables, document chunks) would otherwise be resent on every call."""
+    # Unnamed: the orchestrator's hidden notes are named HumanMessages inside the current turn.
+    starts = [i for i, m in enumerate(messages) if isinstance(m, HumanMessage) and not m.name]
+    if not starts:
+        return messages
+    first, current = starts[-1 - min(HISTORY_TURNS, len(starts) - 1)], starts[-1]
+    earlier = [m for m in messages[first:current]
+               if isinstance(m, HumanMessage) or (isinstance(m, AIMessage) and m.text and not m.tool_calls)]
+    return [*earlier, *messages[current:]]
 
 
 def _short(text: str, limit: int) -> str:

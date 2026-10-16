@@ -81,6 +81,23 @@ async def test_search_chat_history_is_scoped_and_forgets_deleted_chats(memory_st
     assert "Apple" not in found and "Revenue" in found
 
 
+def test_trim_history_drops_old_tool_steps_and_turns(monkeypatch):
+    from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+
+    from app.core import memory
+
+    def turn(n: int) -> list:
+        call = AIMessage(content="", tool_calls=[{"name": "run_sql", "args": {}, "id": f"c{n}"}])
+        return [HumanMessage(f"q{n}"), call, ToolMessage(f"rows{n}", tool_call_id=f"c{n}"), AIMessage(f"a{n}")]
+
+    monkeypatch.setattr(memory, "HISTORY_TURNS", 2)
+    current = [*turn(4)[:3], HumanMessage("hidden note", name="research_findings")]
+    trimmed = memory.trim_history([*turn(1), *turn(2), *turn(3), *current])
+    assert [m.text for m in trimmed[:4]] == ["q2", "a2", "q3", "a3"]
+    assert trimmed[4:] == current  # the current turn stays whole, hidden note included
+    assert memory.trim_history([]) == []
+
+
 async def test_recent_chats_show_latest_turns_of_other_chats():
     from datetime import datetime, timezone
 

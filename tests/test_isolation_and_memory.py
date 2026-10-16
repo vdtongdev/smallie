@@ -56,6 +56,26 @@ async def test_recall_formats_bullets(memory_store):
     assert await recall(memory_store, "u", "job") == "- Works in sales"
 
 
+async def test_save_memory_replaces_a_near_duplicate(memory_store):
+    from types import SimpleNamespace
+
+    from app.core.memory import AgentContext, save_memory
+
+    async def save(user_id: str, fact: str) -> None:
+        runtime = SimpleNamespace(store=memory_store, context=AgentContext(user_id=user_id))
+        await save_memory.coroutine(fact=fact, runtime=runtime)
+
+    async def texts(user_id: str) -> list[str]:
+        return sorted(i.value["text"] for i in await memory_store.asearch(memory_namespace(user_id), limit=10))
+
+    await save("alice", "fact one")
+    await save("alice", "fact one")  # the fake embedding only matches identical text
+    await save("alice", "fact two")
+    await save("bob", "fact one")
+    assert await texts("alice") == ["fact one", "fact two"]
+    assert await texts("bob") == ["fact one"]
+
+
 async def test_search_chat_history_is_scoped_and_forgets_deleted_chats(memory_store):
     from types import SimpleNamespace
 

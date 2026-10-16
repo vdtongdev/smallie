@@ -55,6 +55,10 @@ RECENT_TURNS = 3  # turns shown per chat
 QUESTION_CHARS = 300
 ANSWER_CHARS = 200
 HISTORY_ANSWER_CHARS = 500
+# Cosine similarity at which a new memory replaces the closest saved one. Measured on the default
+# embedding model: rewordings 0.86-0.98, a moved city 0.90, different stocks or styles 0.78-0.82.
+# shortcut: tuned for one model, re-measure after changing OPENROUTER_EMBED_MODEL.
+SAME_MEMORY = 0.85
 
 
 # pgvector can only build HNSW indexes for vectors of up to 2000 dimensions.
@@ -183,7 +187,11 @@ async def save_memory(fact: str, runtime: ToolRuntime[AgentContext]) -> str:
         fact: One short, self-contained sentence, e.g. "User's name is Alex" or
             "User works as a data analyst".
     """
-    await runtime.store.aput(memory_namespace(runtime.context.user_id), str(uuid.uuid4()), {"text": fact})
+    namespace = memory_namespace(runtime.context.user_id)
+    closest = await runtime.store.asearch(namespace, query=fact, limit=1)
+    # A rewording or a newer version of a saved fact replaces it instead of piling up.
+    same = closest and closest[0].score is not None and closest[0].score >= SAME_MEMORY
+    await runtime.store.aput(namespace, closest[0].key if same else str(uuid.uuid4()), {"text": fact})
     return f"Saved: {fact}"
 
 

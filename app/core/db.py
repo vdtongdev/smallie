@@ -58,6 +58,7 @@ documents = Table(
     Column("error", Text),
     Column("chunk_count", Integer, nullable=False, server_default="0"),
     Column("summary", Text),  # "<doc type>: <one line>" from the document card (app/features/documents/card.py)
+    Column("image_count", Integer, nullable=False, server_default="0"),  # images read into chunks (the image agent's files)
     Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
 )
 
@@ -129,3 +130,5 @@ def init_db() -> None:
         conn.execute(text("ALTER TABLE documents ADD COLUMN IF NOT EXISTS summary text"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS graph_built_at timestamptz"))
         conn.execute(text("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS mined_turns integer NOT NULL DEFAULT 0"))
+        # This came with the image agent.
+        conn.execute(text("ALTER TABLE documents ADD COLUMN IF NOT EXISTS image_count integer NOT NULL DEFAULT 0"))

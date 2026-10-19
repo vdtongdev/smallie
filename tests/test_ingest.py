@@ -5,9 +5,13 @@ from docx import Document as DocxDocument
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
+from app.features.documents import ingest
+from app.features.documents.images import ImageReading
 from app.features.documents.ingest import chunk_ids, load_and_split
 
 VI_TEXT = "Chính sách đổi trả: khách hàng được đổi sản phẩm trong vòng 30 ngày kể từ ngày mua."
+READING = ImageReading(description="A bar chart of sales.", text="Q1 10, Q2 12", doc_type="chart",
+                       summary="Quarterly sales.", entities=[])
 
 
 @pytest.fixture
@@ -66,3 +70,37 @@ def test_unsupported_type_rejected(tmp_path: Path):
 
 def test_chunk_ids_are_deterministic():
     assert chunk_ids("doc", 3) == ["doc:0", "doc:1", "doc:2"]
+
+
+def test_image_chunks_come_after_text_chunks(english_pdf: Path):
+    chunks = load_and_split(english_pdf, "handbook.pdf", [(2, READING)])
+    assert [c.metadata.get("kind") for c in chunks] == [None, None, "image"]  # ids 0..n stay deterministic
+    assert chunks[2].metadata["page"] == 2 and chunks[2].page_content.startswith("[Image 1, p. 2]")
+
+
+def test_image_file_has_only_image_chunks_and_long_text_is_split(tmp_path: Path):
+    long_reading = READING.model_copy(update={"text": VI_TEXT * 40})
+    chunks = load_and_split(tmp_path / "scan.png", "scan.png", [(None, long_reading)])
+    assert len(chunks) > 1
+    assert all(c.metadata["kind"] == "image" and len(c.page_content) <= 800 for c in chunks)
+    assert load_and_split(tmp_path / "scan.png", "scan.png") == []  # no reading, no chunks
+
+
+def test_ingest_saves_image_count_and_returns_readings(tmp_path: Path, monkeypatch):
+    saved, stored = {}, []
+    monkeypatch.setattr(ingest, "read_file_images", lambda path, filename, callbacks: [(None, READING)])
+    monkeypatch.setattr(ingest, "_set_status", lambda document_id, status, **values: saved.update(status=status, **values))
+    monkeypatch.setattr(ingest, "get_vector_store", lambda: type("Store", (), {
+        "add_documents": lambda self, docs, ids: stored.extend(ids)})())
+    chunks, readings = ingest.ingest_document("doc", "u1", tmp_path / "chart.png", "chart.png", ["usage"])
+    assert readings == [READING]
+    assert saved == {"status": "ready", "chunk_count": 1, "image_count": 1, "error": None}
+    assert stored == ["doc:0"] and chunks[0].metadata["user_id"] == "u1"
+
+
+def test_image_that_could_not_be_read_fails_the_file(tmp_path: Path, monkeypatch):
+    saved = {}
+    monkeypatch.setattr(ingest, "read_file_images", lambda path, filename, callbacks: [])  # every call failed
+    monkeypatch.setattr(ingest, "_set_status", lambda document_id, status, **values: saved.update(status=status, **values))
+    assert ingest.ingest_document("doc", "u1", tmp_path / "photo.jpg", "photo.jpg") == ([], [])
+    assert saved["status"] == "failed" and saved["error"] == "No text or readable images found."

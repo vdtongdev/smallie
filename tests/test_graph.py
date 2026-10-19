@@ -331,8 +331,8 @@ async def test_document_card_is_best_effort(make_user, embeddings, monkeypatch):
 
     monkeypatch.setattr(card_module, "get_chat_model", lambda model=None: SimpleNamespace(
         with_structured_output=lambda schema, method: SimpleNamespace(ainvoke=ainvoke)))
-    monkeypatch.setattr(card_module, "ingest_document", lambda document_id, user_id, path, filename:
-                        [] if filename == "c.pdf" else [Document("Opening text.")])
+    monkeypatch.setattr(card_module, "ingest_document", lambda document_id, user_id, path, filename, callbacks:
+                        ([], []) if filename == "c.pdf" else ([Document("Opening text.")], []))
     for document_id, filename in ((good, "a.pdf"), (broken, "b.pdf"), (empty, "c.pdf")):
         await card_module.process_document(InMemoryStore(), document_id, user, None, filename)
 
@@ -342,3 +342,43 @@ async def test_document_card_is_best_effort(make_user, embeddings, monkeypatch):
                                       .where(documents.c.user_id == user)).all())
     assert summaries == {"a.pdf": "Contract: A supply deal.", "b.pdf": None, "c.pdf": None}
     assert node_names(user) == ["Acme"]
+
+
+async def test_image_upload_card_comes_from_its_reading(monkeypatch):
+    from app.features.documents import card as card_module
+    from app.features.documents.images import ImageReading
+
+    reading = ImageReading(description="A receipt.", doc_type="receipt", summary="A cafe receipt.",
+                           entities=["Some Cafe", "x" * 81])
+    cards, usages = [], []
+
+    async def add_usage(store, user_id, counter):
+        usages.append(counter)
+
+    monkeypatch.setattr(card_module, "ingest_document", lambda document_id, user_id, path, filename, callbacks:
+                        ([Document("[Image 1]\nDescription: A receipt.")], [reading]))
+    monkeypatch.setattr(card_module, "save_card", lambda *args: cards.append(args))
+    monkeypatch.setattr(card_module, "get_chat_model", lambda *a, **k: 1 / 0)  # no card call for an image
+    monkeypatch.setattr(card_module, "add_usage", add_usage)
+    await card_module.process_document(None, "doc", "u1", None, "receipt.JPG")
+    assert cards == [("u1", "doc", "receipt: A cafe receipt.", ["Some Cafe"])]  # names over 80 chars dropped
+    assert len(usages) == 1  # the vision calls' tokens are recorded
+
+
+async def test_pdf_card_still_needs_its_own_call(monkeypatch):
+    from app.features.documents import card as card_module
+
+    written = []
+
+    async def write_card(store, document_id, user_id, filename, chunks):
+        written.append(filename)
+
+    async def add_usage(store, user_id, counter):
+        pass
+
+    monkeypatch.setattr(card_module, "ingest_document", lambda document_id, user_id, path, filename, callbacks:
+                        ([Document("Text.")], []))
+    monkeypatch.setattr(card_module, "write_card", write_card)
+    monkeypatch.setattr(card_module, "add_usage", add_usage)
+    await card_module.process_document(None, "doc", "u1", None, "report.pdf")
+    assert written == ["report.pdf"]

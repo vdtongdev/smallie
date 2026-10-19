@@ -1,13 +1,15 @@
 import asyncio
 import re
+from pathlib import Path
 
 from sqlalchemy import select
 
 from app.agents.base import AgentSpec, RouteInfo
 from app.agents.docs.prompts import DOCS_SYSTEM, ROUTE_DESCRIPTION, TOOL_DESCRIPTION
 from app.agents.docs.tools import NO_PASSAGES, search_documents
-from app.agents.factory import build_agent
+from app.agents.factory import build_agent, search_first
 from app.core.db import documents, get_engine
+from app.features.documents.images import IMAGE_SUFFIXES
 
 MAX_LISTED_DOCUMENTS = 30  # file names shown to the orchestrator
 MAX_CARDS = 10  # newest files shown with their card summary
@@ -41,10 +43,13 @@ async def route_info(user_id: str) -> RouteInfo | None:
              for i, (name, summary) in enumerate(files[:MAX_LISTED_DOCUMENTS])]
     listed = ", ".join(shown) + (" …" if len(files) > MAX_LISTED_DOCUMENTS else "")
     stems = [stem for stem in (name.rsplit(".", 1)[0].lower() for name in names) if len(stem) >= MIN_STEM_CHARS]
+    # A word of an image file's name points to the image agent (app/agents/image/agent.py), not here.
+    document_stems = [name.rsplit(".", 1)[0].lower() for name in names
+                      if Path(name).suffix.lower() not in IMAGE_SUFFIXES]
     return RouteInfo(
         prompt_note=f"The user's uploaded documents: {listed}",
         matches=lambda message: any(stem in message.lower() for stem in stems),
-        mentions=make_mentions(stems),
+        mentions=make_mentions([stem for stem in document_stems if len(stem) >= MIN_STEM_CHARS]),
     )
 
 
@@ -58,7 +63,8 @@ def make_mentions(stems: list[str]):
 
 
 def build_docs_agent():
-    return build_agent(name="docs_agent", system_prompt=DOCS_SYSTEM, tools=[search_documents])
+    return build_agent(name="docs_agent", system_prompt=DOCS_SYSTEM, tools=[search_documents],
+                       middleware=[search_first(search_documents.name)])
 
 
 SPEC = AgentSpec(

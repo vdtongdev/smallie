@@ -64,7 +64,7 @@
       <div id="chatView" class="view">
         <section id="docsPanel" class="docs-panel">
           <label class="upload">
-            <input id="fileInput" type="file" accept=".pdf,.docx" multiple hidden>
+            <input id="fileInput" type="file" accept=".pdf,.docx,.png,.jpg,.jpeg,.webp" multiple hidden>
             <span data-i18n="upload"></span>
           </label>
           <ul id="documentList" class="document-list"></ul>
@@ -85,7 +85,7 @@
     <article class="readme">
       <div data-lang="en">
         <h1>How to use smallie</h1>
-        <p>smallie is a chat assistant with four specialists. You just ask. The <strong>Assistant</strong> answers general
+        <p>smallie is a chat assistant with five specialists. You just ask. The <strong>Assistant</strong> answers general
           questions itself (explanations, maths, writing, a quick web search for recent facts), passes a question to the right
           specialist, or asks several of them and combines their answers. The badge above each reply shows who answered.
           If none of them can do what you ask, it tells you so.</p>
@@ -97,13 +97,16 @@
             your files when they help); the Assistant then writes a short summary or a structured report with sources.</li>
           <li><strong>Chart agent</strong> draws line, bar, area, pie and scatter charts of the stock data, or of numbers
             from another answer, and sums up what they show.</li>
+          <li><strong>Image agent</strong> answers questions about your uploaded images (photos, screenshots, scans and
+            pictures inside PDF or Word files) from what was read from each image when you uploaded it.</li>
         </ul>
         <p>Write in English or Vietnamese; answers come back in the language you used.</p>
 
         <h2>Ask about your documents</h2>
         <ol>
-          <li>Click <strong>Upload PDF / DOCX</strong> and choose one or more files (up to 25 MB each).</li>
-          <li>Wait until the file shows <em>ready</em>. Indexing takes a few seconds to a minute.</li>
+          <li>Click <strong>Upload files</strong> and choose one or more PDF, Word or image files (PNG, JPG, WEBP; up to 25 MB each).
+            Pictures, scanned pages and screenshots are read once when you upload them, including the text on them.</li>
+          <li>Wait until the file shows <em>ready</em>. Indexing takes a few seconds to a minute; files with many pictures take longer.</li>
           <li>Ask a question. Click an example to put it in the message box:</li>
         </ol>
         <div class="examples">
@@ -166,7 +169,7 @@
 
       <div data-lang="vi">
         <h1>Hướng dẫn sử dụng smallie</h1>
-        <p>smallie là trợ lý trò chuyện với bốn chuyên gia. Bạn chỉ cần hỏi. <strong>Trợ lý</strong> tự trả lời các câu hỏi
+        <p>smallie là trợ lý trò chuyện với năm chuyên gia. Bạn chỉ cần hỏi. <strong>Trợ lý</strong> tự trả lời các câu hỏi
           chung (giải thích, tính toán, viết, tìm nhanh trên web khi cần thông tin mới), chuyển câu hỏi cho chuyên gia phù hợp,
           hoặc hỏi nhiều chuyên gia rồi tổng hợp câu trả lời. Nhãn phía trên mỗi câu trả lời cho biết ai đã trả lời.
           Nếu không ai làm được điều bạn yêu cầu, trợ lý sẽ nói rõ.</p>
@@ -178,13 +181,16 @@
             và tệp của bạn khi hữu ích); sau đó Trợ lý viết bản tóm tắt ngắn hoặc báo cáo có cấu trúc kèm nguồn.</li>
           <li><strong>Trợ lý biểu đồ</strong> vẽ biểu đồ đường, cột, vùng, tròn và phân tán từ dữ liệu cổ phiếu hoặc từ số liệu
             trong câu trả lời khác, kèm nhận xét ngắn.</li>
+          <li><strong>Trợ lý hình ảnh</strong> trả lời câu hỏi về hình ảnh bạn tải lên (ảnh chụp, ảnh chụp màn hình, trang scan và
+            hình trong tệp PDF hoặc Word) dựa trên nội dung đã được đọc từ mỗi hình khi bạn tải lên.</li>
         </ul>
         <p>Bạn có thể viết bằng tiếng Việt hoặc tiếng Anh; câu trả lời sẽ dùng ngôn ngữ bạn đã viết.</p>
 
         <h2>Hỏi về tài liệu của bạn</h2>
         <ol>
-          <li>Bấm <strong>Tải lên PDF / DOCX</strong> và chọn một hoặc nhiều tệp (tối đa 25 MB mỗi tệp).</li>
-          <li>Chờ đến khi tệp hiện <em>sẵn sàng</em>. Việc xử lý mất từ vài giây đến một phút.</li>
+          <li>Bấm <strong>Tải lên tệp</strong> và chọn một hoặc nhiều tệp PDF, Word hoặc hình ảnh (PNG, JPG, WEBP; tối đa 25 MB mỗi tệp).
+            Hình ảnh, trang scan và ảnh chụp màn hình được đọc một lần khi tải lên, kể cả chữ trên đó.</li>
+          <li>Chờ đến khi tệp hiện <em>sẵn sàng</em>. Việc xử lý mất từ vài giây đến một phút; tệp có nhiều hình sẽ lâu hơn.</li>
           <li>Đặt câu hỏi. Bấm vào một ví dụ để đưa nó vào ô soạn tin:</li>
         </ol>
         <div class="examples">

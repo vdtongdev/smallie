@@ -86,7 +86,7 @@ def test_signup_logs_in(client):
 def test_agents_endpoint_and_unknown_agent(client):
     signup(client)
     agents = client.get("/api/agents").json()
-    assert [a["route"] for a in agents] == ["orchestrator", "docs", "sql", "research", "chart"]
+    assert [a["route"] for a in agents] == ["orchestrator", "docs", "sql", "research", "chart", "image"]
     assert agents[0]["labels"] == {"en": "Assistant", "vi": "Trợ lý"}
     assert agents[1]["labels"]["vi"] == "Trợ lý tài liệu"
     assert agents[1]["steps"] == {}

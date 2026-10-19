@@ -6,6 +6,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from app.agents.base import AgentSpec
 from app.agents.registry import AGENTS, MESSAGE_ROUTES
 from app.agents.docs import agent as docs_agent
+from app.agents.image import agent as image_agent
 from app.agents.research import agent as research_agent
 from app.agents.sql import agent as sql_agent
 from app.core.memory import AgentContext
@@ -126,3 +127,41 @@ async def test_chart_words_win_over_a_ticker_but_not_over_a_mention_of_files(mon
     assert obvious_route("vẽ một con mèo", available) is None  # drawing a picture isn't a chart
     assert obvious_route("Chart my resume's skills against NVDA", available) is None  # files too: orchestrator
     assert obvious_route("plot that", available) == "chart"
+
+
+def _with_images(monkeypatch):
+    monkeypatch.setattr(sql_agent, "stock_tickers", lambda: frozenset({"AAPL", "MSFT"}))
+    monkeypatch.setattr(docs_agent, "document_names", lambda user_id: [("receipt.png", None), ("report.pdf", None)])
+    monkeypatch.setattr(image_agent, "image_files", lambda user_id: [
+        ("receipt.png", "receipt: A cafe receipt.", 1), ("report.pdf", None, 3)])
+
+
+async def test_image_words_and_image_files_route_to_image(monkeypatch):
+    _with_images(monkeypatch)
+    available = await available_agents("u1", AGENTS)
+    assert obvious_route("What does the photo show?", available) == "image"
+    assert obvious_route("Ảnh chụp này có gì?", available) == "image"
+    assert obvious_route("Summarize receipt.png", available) == "image"  # an image file: image beats docs
+    assert obvious_route("What's on the receipt?", available) == "image"  # its name, without the extension
+    assert obvious_route("how much did I pay?\n\nAttached: receipt.png", available) == "image"  # chat attachment
+    assert obvious_route("What does the diagram in report.pdf show?", available) == "image"  # image word beats docs
+    assert obvious_route("Summarize report.pdf", available) == "docs"  # a PDF with images is still a document
+    assert obvious_route("ảnh hưởng của lãi suất lên cổ phiếu", available) == "sql"  # "ảnh hưởng" = influence, not image
+    assert obvious_route("Chart AAPL vs MSFT", available) == "chart"
+
+
+async def test_words_of_an_image_file_name_point_to_image_not_docs(monkeypatch):
+    monkeypatch.setattr(docs_agent, "document_names", lambda user_id: [
+        ("tedlasso quote.jpg", None), ("Eric-Jorgenson_The-Almanack-of-Naval-Ravikant_Final.pdf", None)])
+    monkeypatch.setattr(image_agent, "image_files", lambda user_id: [("tedlasso quote.jpg", "quote graphic: …", 1)])
+    available = await available_agents("u1", AGENTS)
+    assert obvious_route("what is the quote in the ted lasso picture?", available) == "image"
+    # ...but a word of a document's name still means the docs part needs answering too.
+    assert obvious_route("What does the photo show, and what does the Almanack say?", available) is None
+
+
+async def test_without_image_files_there_is_no_image_agent(monkeypatch):
+    monkeypatch.setattr(docs_agent, "document_names", lambda user_id: [("handbook.pdf", None)])
+    available = await available_agents("u1", AGENTS)
+    assert "image" not in {spec.route for spec, _ in available}
+    assert obvious_route("What does the photo show?", available) is None  # the orchestrator explains

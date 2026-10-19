@@ -78,4 +78,5 @@ PROMPT_PHRASES = {
     "docs": "answers questions using the user's uploaded documents",
     "research": "You are a research assistant.",
     "chart": "You are a chart assistant.",
+    "image": "You are an image assistant.",
 }

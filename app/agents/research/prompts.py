@@ -56,5 +56,5 @@ SOURCE_LINES = {
     "knowledge": "- Wikipedia (en/vi) and arXiv papers (knowledge_* tools).",
     "external_db": "- An external read-only PostgreSQL database (external_db_* tools: list_tables, describe_table, query).",
 }
-DOCUMENTS_LINE = "- The user's uploaded PDF/DOCX files (`search_documents`; cite as [filename, p. N])."
+DOCUMENTS_LINE = "- The user's uploaded PDF, Word and image files (`search_documents`; cite as [filename, p. N])."
 MARKET_LINE = "- The stock database: ~200 US stocks, profiles and daily prices (`run_sql`, schema below)."

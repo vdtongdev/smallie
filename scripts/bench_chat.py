@@ -94,6 +94,7 @@ AGENT_PHRASES = {
     "You are a data analyst": "sql",
     "uploaded documents": "docs",
     "You are a chart assistant": "chart",
+    "You are an image assistant": "image",
 }
 
 

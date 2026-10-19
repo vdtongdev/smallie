@@ -163,6 +163,7 @@ def test_tools_cover_every_delegable_and_handoff_agent(monkeypatch):
     lines = orchestrator_module.agent_lines(AGENTS)
     assert "- sql:" in lines and "`handoff` or `ask_sql`" in lines
     assert "- research:" in lines and "Use: `ask_research`." in lines  # research is never handed off
+    assert "- image:" in lines and "`handoff` or `ask_image`" in lines
     handoff = orchestrator_module.make_handoff_tool(["docs", "sql"])
     assert handoff.return_direct
     assert set(handoff.args["agent"]["enum"]) == {"docs", "sql"}

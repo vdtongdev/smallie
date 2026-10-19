@@ -102,7 +102,7 @@ def test_unreadable_image_is_skipped(tmp_path, monkeypatch):
 - [ ] **Step 3: Implement** `images_in` with a private `_to_jpeg(data: bytes) -> bytes | None` that returns `None` when the image is too small or Pillow can't open it (logged).
   - Steps inside `_to_jpeg`: `Image.open`, then `convert("RGB")`, then `thumbnail((1600, 1600))`, then save as JPEG at quality 85.
   - PDF: `page.images` gives the bytes in `image.data`.
-  - DOCX: `docx2txt.process(str(path), tmpdir)`, then read the files it wrote, sorted by name, inside a `tempfile.TemporaryDirectory`.
+  - DOCX: read the `word/media/*` entries straight from the zip (`zipfile`, stdlib), sorted by their number. Not `docx2txt.process(path, dir)`: it also extracts the package thumbnail (`docProps/thumbnail.jpeg`), which isn't an image in the document.
 - [ ] **Step 4: Run** `uv run pytest tests/test_images.py -v`. Expected: PASS.
 - [ ] **Step 5: Commit** `git commit -m "Extract images from PDF, DOCX and image files"`
 

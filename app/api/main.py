@@ -22,6 +22,16 @@ STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 SESSION_MAX_AGE = 60 * 60 * 24 * 30  # stay logged in for 30 days
 
 
+class RevalidatedStaticFiles(StaticFiles):
+    """The UI files, re-checked by the browser on every load (a 304 via the ETag when unchanged).
+    Without Cache-Control browsers guess a freshness time and keep running an old app.js after an update."""
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
@@ -73,4 +83,4 @@ app.include_router(routes_usage.router, prefix="/api")
 for feature in FEATURES:
     for feature_router in feature.routers:
         app.include_router(feature_router, prefix="/api")
-app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
+app.mount("/", RevalidatedStaticFiles(directory=STATIC_DIR, html=True), name="static")

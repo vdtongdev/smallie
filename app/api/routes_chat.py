@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from starlette.background import BackgroundTask
 
 from app.core.accounts import get_profile
@@ -18,6 +19,7 @@ from app.orchestration.router import ORCHESTRATOR
 from app.core.auth import get_current_user
 from app.core.config import get_settings
 from app.core.conversations import create_conversation, get_conversation, list_conversations, touch_conversation
+from app.core.db import documents, get_engine
 from app.core.graph import extract_facts, recall_facts
 from app.core.memory import AgentContext, load_recent_chats, save_turn, turns
 from app.core.usage import UsageCounter, add_usage
@@ -26,11 +28,41 @@ router = APIRouter(tags=["chat"])
 log = logging.getLogger(__name__)
 
 TOOL_RESULT_PREVIEW = 4000
+MAX_ATTACHMENTS = 5
+ATTACHED = "Attached: "  # line the UI shows as chips (app.js addUserMessage)
 
 
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=8000)
     conversation_id: str | None = None
+    # Document ids uploaded from the chat box; they are ordinary uploads, available in every chat.
+    attachments: list[str] = Field(default_factory=list, max_length=MAX_ATTACHMENTS)
+
+
+def attachment_names(user_id: str, ids: list[str]) -> list[str]:
+    """File names of the user's attached documents, in the given order. 404 for an id that isn't
+    one of theirs (without naming it), 409 for one that isn't searchable yet."""
+    if not ids:
+        return []
+    with get_engine().connect() as conn:
+        rows = {row.id: row for row in conn.execute(select(documents.c.id, documents.c.filename, documents.c.status)
+                                                     .where(documents.c.user_id == user_id, documents.c.id.in_(ids)))}
+    names = []
+    for document_id in ids:
+        row = rows.get(document_id)
+        if row is None:
+            raise HTTPException(404, "Attachment not found")
+        if row.status == "processing":
+            raise HTTPException(409, f"{row.filename} is still being read")
+        if row.status == "failed":
+            raise HTTPException(409, f"{row.filename} could not be read")
+        names.append(row.filename)
+    return names
+
+
+def with_attachments(message: str, names: list[str]) -> str:
+    """The message the agents see: the file names make the router and the search point at those files."""
+    return f"{message}\n\n{ATTACHED}{', '.join(names)}" if names else message
 
 
 def _sse(event: dict) -> str:
@@ -46,6 +78,8 @@ async def chat(
 ):
     if kind != "auto" and kind not in ROUTES:
         raise HTTPException(404, "Unknown agent")
+    # Checked before a new conversation is created, so a bad attachment leaves no empty chat behind.
+    message = with_attachments(body.message, await asyncio.to_thread(attachment_names, user_id, body.attachments))
     if body.conversation_id:
         conversation = await asyncio.to_thread(get_conversation, user_id, body.conversation_id)
         if not conversation:
@@ -70,7 +104,7 @@ async def chat(
                 _user(user_id),
             )
             stream = assistant.astream(
-                {"messages": [{"role": "user", "content": body.message}]},
+                {"messages": [{"role": "user", "content": message}]},
                 config={**config, "callbacks": [usage]},
                 context=AgentContext(user_id=user_id, user=user, memories=memories,
                                      recent_chats=recent_chats, agent=kind),
@@ -109,7 +143,7 @@ async def chat(
         answer = pairs[-1][1] if pairs else ""
         if cross_chat:
             try:
-                await save_turn(store, user_id, conversation, body.message, answer)
+                await save_turn(store, user_id, conversation, message, answer)
             except Exception:  # noqa: BLE001
                 log.exception("Saving chat history failed")
         # Only the orchestrator's turns: plain data lookups (sql, chart, docs) rarely say anything
@@ -117,7 +151,7 @@ async def chat(
         if answer and _answered_by(messages) == ORCHESTRATOR:
             extraction = UsageCounter()
             try:
-                await extract_facts(user_id, body.message, answer, [extraction], conversation_id=conversation["id"])
+                await extract_facts(user_id, message, answer, [extraction], conversation_id=conversation["id"])
             except Exception:  # noqa: BLE001
                 log.exception("Extracting facts failed")
             try:

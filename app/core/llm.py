@@ -18,12 +18,15 @@ class OpenRouterChat(ChatOpenAI):
         return generation
 
 
-def get_chat_model(model: str | None = None, *, streaming: bool = True) -> ChatOpenAI:
+
+
+def get_chat_model(model: str | None = None, *, streaming: bool = True, fallbacks: str | None = None) -> ChatOpenAI:
     s = get_settings()
     model = model or s.openrouter_chat_model
     # OpenRouter falls back server-side (`models`), inside the same request. A client-side
     # fallback would send extra requests, and on the free tier every request counts.
-    fallbacks = [m for m in (f.strip() for f in s.openrouter_fallback_model.split(",")) if m and m != model]
+    fallback_list = s.openrouter_fallback_model if fallbacks is None else fallbacks
+    fallbacks = [m for m in (f.strip() for f in fallback_list.split(",")) if m and m != model]
     extra_body = {"models": [model, *fallbacks]} if fallbacks else {}
     # Paid models are routed to the cheapest provider by default, often an fp4 build, and
     # heavier quantization makes Vietnamese answers slip into other scripts more often.

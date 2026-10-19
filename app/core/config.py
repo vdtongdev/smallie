@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     openrouter_quantizations: str = ""  # comma-separated provider precisions, e.g. "bf16,fp8"; empty = any
     openrouter_orchestrator_model: str = ""  # the front-door agent; empty = chat model
     openrouter_embed_model: str = "baai/bge-m3"
+    openrouter_vision_model: str = ""  # comma-separated: the model, then its fallbacks; empty = no image reading
     embed_dim: int = 1024
 
     database_url: str = "postgresql://smallie:smallie@localhost:5433/smallie"

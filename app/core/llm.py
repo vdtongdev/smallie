@@ -20,7 +20,8 @@ class OpenRouterChat(ChatOpenAI):
 
 
 
-def get_chat_model(model: str | None = None, *, streaming: bool = True, fallbacks: str | None = None) -> ChatOpenAI:
+def get_chat_model(model: str | None = None, *, streaming: bool = True, fallbacks: str | None = None,
+                   quantizations: str | None = None) -> ChatOpenAI:
     s = get_settings()
     model = model or s.openrouter_chat_model
     # OpenRouter falls back server-side (`models`), inside the same request. A client-side
@@ -30,7 +31,9 @@ def get_chat_model(model: str | None = None, *, streaming: bool = True, fallback
     extra_body = {"models": [model, *fallbacks]} if fallbacks else {}
     # Paid models are routed to the cheapest provider by default, often an fp4 build, and
     # heavier quantization makes Vietnamese answers slip into other scripts more often.
-    quantizations = [q.strip() for q in s.openrouter_quantizations.split(",") if q.strip()]
+    # `quantizations` replaces the setting: providers that don't report one (e.g. Google's) fail the filter.
+    quantization_list = s.openrouter_quantizations if quantizations is None else quantizations
+    quantizations = [q.strip() for q in quantization_list.split(",") if q.strip()]
     if quantizations:
         extra_body["provider"] = {"quantizations": quantizations}
     return OpenRouterChat(

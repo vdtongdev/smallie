@@ -19,6 +19,7 @@ def test_quantizations_limit_the_providers(monkeypatch):
     monkeypatch.setattr(settings, "openrouter_fallback_model", "")
     monkeypatch.setattr(settings, "openrouter_quantizations", "bf16, fp8,")
     assert get_chat_model("main").extra_body == {"provider": {"quantizations": ["bf16", "fp8"]}}
+    assert get_chat_model("main", quantizations="").extra_body is None  # explicit "": no filter
 
 
 def test_explicit_fallbacks_replace_the_chat_fallbacks(monkeypatch):

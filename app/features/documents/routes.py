@@ -10,6 +10,7 @@ from app.core.config import get_settings
 from app.core.db import documents, get_engine
 from app.core.graph import drop_orphans
 from app.features.documents.card import process_document
+from app.features.documents.images import IMAGE_SUFFIXES
 from app.features.documents.ingest import SUPPORTED_SUFFIXES, delete_document_chunks
 
 router = APIRouter(tags=["documents"])
@@ -24,8 +25,11 @@ def upload(files: list[UploadFile], background: BackgroundTasks, request: Reques
     settings = get_settings()
     max_bytes = settings.max_upload_mb * 1024 * 1024
     for f in files:
-        if Path(f.filename or "").suffix.lower() not in SUPPORTED_SUFFIXES:
-            raise HTTPException(400, f"{f.filename}: only PDF and DOCX files are supported")
+        suffix = Path(f.filename or "").suffix.lower()
+        if suffix not in SUPPORTED_SUFFIXES:
+            raise HTTPException(400, f"{f.filename}: only PDF, DOCX or image (PNG, JPG, WEBP) files are supported")
+        if suffix in IMAGE_SUFFIXES and not settings.openrouter_vision_model.strip():
+            raise HTTPException(400, f"{f.filename}: image reading is turned off")
         if f.size is not None and f.size > max_bytes:
             raise HTTPException(413, f"{f.filename}: larger than {settings.max_upload_mb} MB")
 

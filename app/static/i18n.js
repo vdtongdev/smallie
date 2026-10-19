@@ -51,6 +51,10 @@ const I18N = {
     downloadPng: "Download PNG",
     showData: "Show data",
     loadFailed: "Could not load this chat",
+    attach: "Attach an image or file (you can also paste or drop images here)",
+    readingFile: "reading…",
+    removeAttachment: "Remove (the file stays under Documents)",
+    tooManyAttachments: "At most 5 attachments per message.",
   },
   vi: {
     newChat: "+ Cuộc trò chuyện mới",
@@ -104,5 +108,9 @@ const I18N = {
     downloadPng: "Tải ảnh PNG",
     showData: "Xem dữ liệu",
     loadFailed: "Không tải được cuộc trò chuyện này",
+    attach: "Đính kèm hình ảnh hoặc tệp (bạn cũng có thể dán hoặc kéo thả hình vào đây)",
+    readingFile: "đang đọc…",
+    removeAttachment: "Bỏ đính kèm (tệp vẫn nằm trong Tài liệu)",
+    tooManyAttachments: "Tối đa 5 tệp đính kèm mỗi tin nhắn.",
   },
 };

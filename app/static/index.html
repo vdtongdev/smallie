@@ -72,7 +72,12 @@
 
         <section id="messages" class="messages" aria-live="polite"></section>
 
+        <div id="attachments" class="attachments" hidden></div>
         <form id="chatForm" class="composer">
+          <label class="attach-btn" data-i18n-title="attach">
+            <input id="attachInput" type="file" accept=".pdf,.docx,.png,.jpg,.jpeg,.webp" multiple hidden>
+            <span aria-hidden="true">📎</span>
+          </label>
           <textarea id="input" rows="1" required></textarea>
           <button id="sendBtn" class="primary" type="submit" data-i18n="send"></button>
         </form>

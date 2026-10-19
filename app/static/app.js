@@ -8,7 +8,11 @@ const state = {
   busy: false,
   docsPoll: null,
   agents: {}, // route -> {labels: {en, vi}, steps: {step: {en, vi}}}, from /api/agents
+  attachments: [], // files attached in the chat box: {id, filename, status, error}
 };
+
+const MAX_ATTACHMENTS = 5; // per message, as the server allows (routes_chat.MAX_ATTACHMENTS)
+const ATTACHED = "\n\nAttached: "; // the line the server adds to a message (routes_chat.with_attachments)
 
 const $ = (id) => document.getElementById(id);
 const t = (key) => I18N[state.lang][key] ?? key;
@@ -148,6 +152,7 @@ function applyLanguage() {
   $("input").placeholder = t("placeholder");
   document.querySelectorAll("[data-lang]").forEach((el) => (el.hidden = el.dataset.lang !== state.lang));
   labelAgentBadges();
+  renderAttachments();
 }
 
 function labelAgentBadges() {
@@ -228,9 +233,12 @@ function setConversation(id) {
 
 function setBusy(busy) {
   state.busy = busy;
-  $("sendBtn").disabled = busy;
+  updateSendButton();
   $("newChatBtn").disabled = busy;
 }
+
+const attachmentsPending = () => state.attachments.some((a) => a.status === "processing");
+const updateSendButton = () => ($("sendBtn").disabled = state.busy || attachmentsPending());
 
 // ---------- conversations ----------
 async function loadConversations() {
@@ -310,11 +318,28 @@ function scrollToBottom() {
   box.scrollTop = box.scrollHeight;
 }
 
-function addUserMessage(text) {
+// `files`: names attached to a message being sent; a message from history carries them as its last line.
+function addUserMessage(text, files = []) {
   $("messages").querySelector(".welcome")?.remove();
+  const at = text.lastIndexOf(ATTACHED);
+  if (at !== -1 && !text.slice(at + ATTACHED.length).includes("\n")) {
+    // shortcut: a file name containing ", " shows as two chips; harmless, the server has the real names.
+    files = text.slice(at + ATTACHED.length).split(", ");
+    text = text.slice(0, at);
+  }
   const div = document.createElement("div");
   div.className = "msg user";
   div.textContent = text;
+  if (files.length) {
+    const row = document.createElement("div");
+    row.className = "msg-attachments";
+    for (const name of files) {
+      const chip = document.createElement("span");
+      chip.textContent = `📎 ${name}`;
+      row.append(chip);
+    }
+    div.append(row);
+  }
   $("messages").append(div);
   scrollToBottom();
 }
@@ -403,9 +428,9 @@ function dropReplies() {
 }
 
 // ---------- chat ----------
-async function sendMessage(text) {
+async function sendMessage(text, attachments = []) {
   setBusy(true);
-  addUserMessage(text);
+  addUserMessage(text, attachments.map((a) => a.filename));
   let current = addAssistantMessage();
   current.update(`_${t("thinking")}_`);
   let started = false;
@@ -417,7 +442,8 @@ async function sendMessage(text) {
     const res = await fetch(`/api/chat/${KIND}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: text, conversation_id: state.conversationId }),
+      body: JSON.stringify({ message: text, conversation_id: state.conversationId,
+                             attachments: attachments.map((a) => a.id) }),
     });
     if (res.status === 401) return showLogin();
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.statusText);
@@ -492,10 +518,13 @@ async function sendMessage(text) {
 $("chatForm").onsubmit = (e) => {
   e.preventDefault();
   const text = $("input").value.trim();
-  if (!text || state.busy) return;
+  if (!text || state.busy || attachmentsPending()) return;
+  const attached = state.attachments.filter((a) => a.status === "ready"); // failed ones are dropped
+  state.attachments = [];
+  renderAttachments();
   $("input").value = "";
   autoSize();
-  sendMessage(text);
+  sendMessage(text, attached);
 };
 
 $("input").addEventListener("keydown", (e) => {
@@ -539,7 +568,78 @@ async function loadDocuments() {
   }
   clearTimeout(state.docsPoll);
   if (docs.some((d) => d.status === "processing")) state.docsPoll = setTimeout(loadDocuments, 2000);
+  // Attached files follow their document (reading… -> ready / failed); a deleted one is dropped.
+  const byId = Object.fromEntries(docs.map((d) => [d.id, d]));
+  state.attachments = state.attachments.filter((a) => byId[a.id])
+    .map((a) => ({ ...a, status: byId[a.id].status, error: byId[a.id].error }));
+  renderAttachments();
 }
+
+// ---------- chat attachments ----------
+// Files attached in the chat box are ordinary uploads (they also show under Documents and stay
+// available in every chat); a message sends the ids of the ready ones.
+async function attachFiles(files) {
+  const room = MAX_ATTACHMENTS - state.attachments.length;
+  if (!files.length) return;
+  if (files.length > room) alert(t("tooManyAttachments"));
+  if (room <= 0) return;
+  const form = new FormData();
+  files.slice(0, room).forEach((f) => form.append("files", f));
+  try {
+    const created = await api("/documents", { method: "POST", body: form });
+    state.attachments.push(...created.map((d) => ({ ...d, error: null })));
+  } catch (err) {
+    alert(err.message);
+  }
+  loadDocuments(); // shows them under Documents and polls their status
+}
+
+function renderAttachments() {
+  const box = $("attachments");
+  box.innerHTML = "";
+  box.hidden = !state.attachments.length;
+  for (const a of state.attachments) {
+    const chip = document.createElement("span");
+    chip.className = "chip";
+    chip.title = a.error || "";
+    const name = document.createElement("span");
+    name.textContent = a.filename;
+    const status = document.createElement("span");
+    status.className = `badge ${a.status}`;
+    status.textContent = a.status === "ready" ? "✓" : t(a.status === "processing" ? "readingFile" : "status_failed");
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "icon-btn";
+    remove.textContent = "×";
+    remove.title = t("removeAttachment");
+    remove.onclick = () => { // the file stays under Documents
+      state.attachments = state.attachments.filter((x) => x.id !== a.id);
+      renderAttachments();
+    };
+    chip.append(name, status, remove);
+    box.append(chip);
+  }
+  updateSendButton();
+}
+
+$("attachInput").onchange = (e) => {
+  attachFiles([...e.target.files]);
+  e.target.value = "";
+};
+
+$("input").addEventListener("paste", (e) => {
+  const images = [...(e.clipboardData?.files || [])].filter((f) => f.type.startsWith("image/"));
+  if (!images.length) return; // plain text pastes as usual
+  e.preventDefault();
+  // Every pasted image is called "image.png"; a unique name keeps them apart in Documents and answers.
+  attachFiles(images.map((f, i) => new File([f], `pasted-${Date.now()}-${i}.${f.type.split("/")[1]}`, { type: f.type })));
+});
+
+$("chatForm").addEventListener("dragover", (e) => e.preventDefault());
+$("chatForm").addEventListener("drop", (e) => {
+  e.preventDefault();
+  attachFiles([...e.dataTransfer.files]);
+});
 
 $("fileInput").onchange = async (e) => {
   const files = [...e.target.files];
@@ -609,6 +709,8 @@ $("adminBtn").onclick = () => {
 function showLogin() {
   state.me = null;
   state.conversationId = null;
+  state.attachments = [];
+  renderAttachments();
   clearTimeout(state.docsPoll);
   ["messages", "conversationList", "documentList"].forEach((id) => ($(id).innerHTML = ""));
   document.querySelectorAll("dialog[open]").forEach((d) => d.close());

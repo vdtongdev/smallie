@@ -1,11 +1,12 @@
 # [smallie](https://smallie-976519788978.asia-southeast1.run.app/)
 
-LangChain agents behind a FastAPI app with a small web UI. You type into one chat, and an **orchestrator** handles each message. It answers general questions itself (explanations, maths, writing, small talk, with a quick web search for fresh facts). It hands a question to the right specialist, or asks several specialists and writes the combined answer. When nothing it has can answer, it says so. There are four specialists today, and the code is laid out so more can be added (see "Adding an agent" below):
+LangChain agents behind a FastAPI app with a small web UI. You type into one chat, and an **orchestrator** handles each message. It answers general questions itself (explanations, maths, writing, small talk, with a quick web search for fresh facts). It hands a question to the right specialist, or asks several specialists and writes the combined answer. When nothing it has can answer, it says so. There are five specialists today, and the code is laid out so more can be added (see "Adding an agent" below):
 
-- **Documents**: upload PDF/DOCX files and ask questions about them. Answers cite the file and page.
+- **Documents**: upload PDF, Word or image files and ask questions about them. Answers cite the file and page.
 - **Database**: ask questions in plain language about a stock database (200 popular stocks loaded from Yahoo Finance with `yfinance`). The agent writes and runs read-only SQL.
 - **Charts**: say "chart", "plot" or "vẽ biểu đồ" to get an interactive line, bar, area, pie or scatter chart of the stock data, or of numbers from another answer ("plot that"). The data goes from the database straight to the chart (Chart.js in the browser); the model only sees a short summary, so charts of hundreds of points stay fast.
 - **Research**: a researcher gathers facts from the web (Tavily), Wikipedia, arXiv, an optional external Postgres, the stock database and your files. The orchestrator then turns those findings into a summary or a structured report with sources. External tools come in through MCP (`langchain-mcp-adapters`), and the researcher loads "skills" (instruction files) on demand.
+- **Images**: upload photos, screenshots or scans (or attach them in the chat box with 📎, paste or drag and drop) and ask about them. Pictures inside PDF and Word files, and scanned PDFs, work too. A vision model reads each image once when it's uploaded (a description plus the text on it), so answers come from that reading and cite the file. Attached images show as thumbnails in the chat, and a click opens them full size.
 
 The **Readme** button in the header explains how to use the app, with example questions.
 
@@ -87,8 +88,9 @@ These are set in `.env`; all calls go through OpenRouter.
 - `OPENROUTER_CHAT_MODEL`: defaults to a free model with tool calling. Free models come and go, so see the list at https://openrouter.ai/models?supported_parameters=tools&max_price=0. `OPENROUTER_FALLBACK_MODEL` (comma-separated, tried in order) is used automatically when the main one fails or is rate-limited; pick models that write good Vietnamese, since weaker ones slip Chinese, Korean or Thai words into Vietnamese answers. With a paid model, `OPENROUTER_QUANTIZATIONS=bf16,fp8` keeps OpenRouter off the cheapest fp4 providers, which slip more.
 - `OPENROUTER_ORCHESTRATOR_MODEL`: the model of the orchestrator. It is skipped when the message clearly points to one agent (a ticker, "stock", a file name, "research", "latest news"…). Empty means it uses `OPENROUTER_CHAT_MODEL`. `ORCHESTRATOR_MAX_MODEL_CALLS` (4) caps its own calls per message.
 - `TAVILY_API_KEY`: web search for the research agent (free 1,000 credits/month at https://app.tavily.com). Without it, research uses the other sources. `MCP_SERVERS` adds more remote MCP servers, and `EXTERNAL_DATABASE_URL` lets the researcher read another Postgres (see `.env.example`).
+- `OPENROUTER_VISION_MODEL`: the model that reads images, comma-separated with its fallbacks (every one must accept image input), e.g. a Gemini Flash model or `google/gemma-4-31b-it`. Empty turns images off: image uploads are refused and pictures inside PDF/Word files are skipped.
 - `OPENROUTER_EMBED_MODEL`: defaults to `baai/bge-m3`, which is multilingual and costs about $0.01 per 1M tokens. A $1 top-up covers thousands of documents. The fully free option is `liquid/lfm-2.5-embedding-350m:free`, but the provider may keep and train on your data.
-- **Free-tier limits:** about 20 requests/min, and 50 requests/day unless you have bought at least $10 of credits (then 1000/day). A general question takes 1 model call, plus 1 after the reply to learn facts about you. Each uploaded file takes 1 (its document card). A database or documents question takes 2–5, plus 1 when the orchestrator has to hand it over. A question that combines agents takes 1 + each agent's calls + 1 to write the answer. A research question takes up to `RESEARCH_MAX_MODEL_CALLS` (8) for the researcher plus 1 for the write-up. `uv run python -m scripts.bench_chat` measures the calls and latency of typical questions on your models.
+- **Free-tier limits:** about 20 requests/min, and 50 requests/day unless you have bought at least $10 of credits (then 1000/day). A general question takes 1 model call, plus 1 after the reply to learn facts about you. Each uploaded file takes 1 (its document card; for an image file, the reading of the image), plus 1 per picture read inside a PDF or Word file (at most 20). A database or documents question takes 2–5, plus 1 when the orchestrator has to hand it over. A question that combines agents takes 1 + each agent's calls + 1 to write the answer. A research question takes up to `RESEARCH_MAX_MODEL_CALLS` (8) for the researcher plus 1 for the write-up. `uv run python -m scripts.bench_chat` measures the calls and latency of typical questions on your models.
 - **Changing the embedding model or `EMBED_DIM`:** stop the app, then run `uv run python -m scripts.reindex` (it also re-embeds the knowledge graph's names).
 
 ## How it works
@@ -102,9 +104,10 @@ app/
     registry.py   the list of agents the router can pick
     factory.py    create_agent + memory tools + memory-aware dynamic prompt + call limit
     docs/         search_documents tool over pgvector
+    image/        search_images tool over the image readings
     sql/          schema in prompt + read-only run_sql tool
   features/       data the agents use, with its API and background jobs
-    documents/    upload routes, ingest.py (PDF/DOCX -> chunks -> pgvector)
+    documents/    upload routes, ingest.py (PDF/DOCX/images -> chunks -> pgvector), images.py (vision reading)
     market/       tickers.py (the 200 stocks), loader.py (yfinance -> market schema), daily scheduler
   orchestration/  START -> router -> one agent, or the orchestrator (answers, hands off, or asks agents) -> END
     formats/      answer formats the orchestrator follows when it writes up results (summary, list, report...)
@@ -145,6 +148,12 @@ scripts/          load_stocks.py (fill/refresh stock data), reindex.py (after ch
 - MCP (`app/core/mcp.py`): remote servers (Tavily, `MCP_SERVERS`) are loaded with `MultiServerMCPClient`, one short session per tool call. Our own servers (`app/features/research/mcp_servers/`: `knowledge` for Wikipedia and arXiv, `external_db` for `EXTERNAL_DATABASE_URL`) run in-process over MCP's memory transport. That needs no subprocess, which wouldn't start on Windows under the selector event loop. Tools are named `<server>_<tool>`. A server that fails to load is skipped with a warning.
 - Skills (`app/agents/skills.py`) are `skills/<role>/<name>/SKILL.md` files. The prompt lists their names and descriptions, and the agent calls `load_skill` to read one. The researcher's skills are `web-research`, `market-data` and `academic`. The answer formats in `app/orchestration/formats/` (`summary`, `list`, `structured-report`, `comparison` and `company-brief`) are always in the orchestrator's prompt while it writes up results, and it picks one from the question.
 
+**Images (`app/features/documents/images.py`, `app/agents/image/`)**
+- At upload, each image file, and each picture inside a PDF or Word file (up to 20 per file; small logos and icons are skipped), is shrunk to at most 1600 px and read once by `OPENROUTER_VISION_MODEL`: a description and the exact text on it. Those readings are stored as searchable chunks next to the file's text, so scanned PDFs work too.
+- The image agent searches only those readings; the documents agent searches everything, readings included. Image words ("photo", "screenshot", "ảnh chụp"…) or an image file's name send a question to the image agent; "summarize report.pdf" stays with documents even if the PDF has pictures.
+- Both agents always search before answering, because small models otherwise answered from their own knowledge.
+- Images attached in the chat box are ordinary uploads (they appear under Documents and stay available in every chat); their names are added to the message, so the question points at those files. The shrunk copy is kept in Postgres to show thumbnails and the full-size pop-up, since the container's disk doesn't keep files.
+
 **SQL safety**
 - The SQL agent connects as `agent_readonly`. That role has SELECT-only access to the `market` schema, read-only transactions, and a 10 s statement timeout. It cannot see the app's own tables.
 - Results are capped at `SQL_MAX_ROWS`.
@@ -156,7 +165,7 @@ scripts/          load_stocks.py (fill/refresh stock data), reindex.py (after ch
 
 ## Deploying (Google Cloud Run + Neon)
 
-The app runs as a container on **Cloud Run** (free tier, scales to zero). All data lives in a free **Neon** Postgres, so nothing is lost when the container stops. Uploaded files are only needed while they're being indexed.
+The app runs as a container on **Cloud Run** (free tier, scales to zero). All data lives in a free **Neon** Postgres, so nothing is lost when the container stops. Uploaded files are only needed while they're being indexed; for images, a shrunk copy (usually 100–400 KB) stays in Postgres so the chat can show it. Add `OPENROUTER_VISION_MODEL` to `cloudrun.env.yaml` to turn images on.
 
 **1. Neon (database), once**
 1. Create a project at https://neon.tech, region AWS Singapore. Copy the **direct** connection string (not the `-pooler` one; the app uses advisory locks).

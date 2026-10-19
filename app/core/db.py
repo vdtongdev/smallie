@@ -10,6 +10,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     MetaData,
     String,
     Table,
@@ -59,6 +60,8 @@ documents = Table(
     Column("chunk_count", Integer, nullable=False, server_default="0"),
     Column("summary", Text),  # "<doc type>: <one line>" from the document card (app/features/documents/card.py)
     Column("image_count", Integer, nullable=False, server_default="0"),  # images read into chunks (the image agent's files)
+    # The JPEG shown in the chat and the Documents bar (image files only); the container disk is ephemeral.
+    Column("preview", LargeBinary),
     Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
 )
 
@@ -132,3 +135,4 @@ def init_db() -> None:
         conn.execute(text("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS mined_turns integer NOT NULL DEFAULT 0"))
         # This came with the image agent.
         conn.execute(text("ALTER TABLE documents ADD COLUMN IF NOT EXISTS image_count integer NOT NULL DEFAULT 0"))
+        conn.execute(text("ALTER TABLE documents ADD COLUMN IF NOT EXISTS preview bytea"))

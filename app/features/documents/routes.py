@@ -2,7 +2,7 @@ import shutil
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, UploadFile
 from sqlalchemy import delete, select
 
 from app.core.auth import get_current_user
@@ -16,7 +16,8 @@ from app.features.documents.ingest import SUPPORTED_SUFFIXES, delete_document_ch
 router = APIRouter(tags=["documents"])
 
 _PUBLIC_COLUMNS = (documents.c.id, documents.c.filename, documents.c.status,
-                   documents.c.error, documents.c.chunk_count, documents.c.created_at)
+                   documents.c.error, documents.c.chunk_count, documents.c.created_at,
+                   documents.c.preview.is_not(None).label("has_image"))
 
 
 @router.post("/documents", status_code=202)
@@ -57,6 +58,17 @@ def list_documents(user_id: str = Depends(get_current_user)):
             select(*_PUBLIC_COLUMNS).where(documents.c.user_id == user_id).order_by(documents.c.created_at.desc())
         ).mappings().all()
     return [dict(r) for r in rows]
+
+
+@router.get("/documents/{document_id}/image")
+def image(document_id: str, user_id: str = Depends(get_current_user)):
+    """An image file's picture for the chat and the Documents bar; a document's image never changes."""
+    with get_engine().connect() as conn:
+        data = conn.execute(select(documents.c.preview).where(
+            documents.c.id == document_id, documents.c.user_id == user_id)).scalar()
+    if data is None:
+        raise HTTPException(404, "Image not found")
+    return Response(data, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=31536000, immutable"})
 
 
 @router.delete("/documents/{document_id}", status_code=204)

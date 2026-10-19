@@ -94,7 +94,7 @@ def test_ingest_saves_image_count_and_returns_readings(tmp_path: Path, monkeypat
         "add_documents": lambda self, docs, ids: stored.extend(ids)})())
     chunks, readings = ingest.ingest_document("doc", "u1", tmp_path / "chart.png", "chart.png", ["usage"])
     assert readings == [READING]
-    assert saved == {"status": "ready", "chunk_count": 1, "image_count": 1, "error": None}
+    assert saved == {"status": "ready", "chunk_count": 1, "image_count": 1, "error": None, "preview": None}  # no file
     assert stored == ["doc:0"] and chunks[0].metadata["user_id"] == "u1"
 
 

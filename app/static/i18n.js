@@ -55,6 +55,7 @@ const I18N = {
     readingFile: "reading…",
     removeAttachment: "Remove (the file stays under Documents)",
     tooManyAttachments: "At most 5 attachments per message.",
+    showImage: "Show image",
   },
   vi: {
     newChat: "+ Cuộc trò chuyện mới",
@@ -112,5 +113,6 @@ const I18N = {
     readingFile: "đang đọc…",
     removeAttachment: "Bỏ đính kèm (tệp vẫn nằm trong Tài liệu)",
     tooManyAttachments: "Tối đa 5 tệp đính kèm mỗi tin nhắn.",
+    showImage: "Xem hình",
   },
 };

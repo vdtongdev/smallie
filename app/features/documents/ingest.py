@@ -16,7 +16,7 @@ from sqlalchemy import update
 from app.core.config import get_settings
 from app.core.db import documents, get_engine
 from app.core.llm import get_embeddings
-from app.features.documents.images import IMAGE_SUFFIXES, ImageReading, image_chunks, read_file_images
+from app.features.documents.images import IMAGE_SUFFIXES, ImageReading, image_chunks, images_in, read_file_images
 
 log = logging.getLogger(__name__)
 
@@ -76,12 +76,21 @@ def ingest_document(document_id: str, user_id: str, path: Path, filename: str,
         for chunk in chunks:
             chunk.metadata.update(user_id=user_id, document_id=document_id)
         get_vector_store().add_documents(chunks, ids=chunk_ids(document_id, len(chunks)))
-        _set_status(document_id, "ready", chunk_count=len(chunks), image_count=len(readings), error=None)
+        _set_status(document_id, "ready", chunk_count=len(chunks), image_count=len(readings), error=None,
+                    preview=_preview(path))
         return chunks, [reading for _, reading in readings]
     except Exception as exc:  # noqa: BLE001 - any failure is reported to the user via status
         log.exception("Ingestion failed for %s", filename)
         _set_status(document_id, "failed", error=str(exc)[:500])
         return [], []
+
+
+def _preview(path: Path) -> bytes | None:
+    """The JPEG the UI shows for an image file (the same shrunk copy the vision model read); None otherwise."""
+    if path.suffix.lower() not in IMAGE_SUFFIXES:
+        return None
+    found = images_in(path)
+    return found[0][1] if found else None
 
 
 def delete_document_chunks(document_id: str, chunk_count: int) -> None:

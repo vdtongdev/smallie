@@ -274,6 +274,12 @@ button.link { border: none; background: transparent; color: var(--accent); paddi
 /* Files attached to a sent message, inside its bubble */
 .msg-attachments { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; white-space: normal; }
 .msg-attachments span { font-size: 12px; border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; background: var(--surface); }
+.msg-attachments .thumb { display: block; max-width: 160px; max-height: 160px; border-radius: 8px; border: 1px solid var(--border); cursor: zoom-in; }
+.doc-image { cursor: zoom-in; text-decoration: underline dotted; }
+/* An image shown full size from a message thumbnail or the Documents bar */
+.image-dialog { padding: 0 16px 12px; max-width: min(92vw, 1200px); }
+.image-dialog img { display: block; max-width: 100%; max-height: 78vh; margin: 0 auto; }
+.image-dialog p { text-align: center; margin: 8px 0 0; }
 .composer textarea {
   flex: 1;
   resize: none;

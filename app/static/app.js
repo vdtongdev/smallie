@@ -9,6 +9,7 @@ const state = {
   docsPoll: null,
   agents: {}, // route -> {labels: {en, vi}, steps: {step: {en, vi}}}, from /api/agents
   attachments: [], // files attached in the chat box: {id, filename, status, error}
+  docs: [], // the Documents list, newest first (GET /api/documents)
 };
 
 const MAX_ATTACHMENTS = 5; // per message, as the server allows (routes_chat.MAX_ATTACHMENTS)
@@ -336,12 +337,38 @@ function addUserMessage(text, files = []) {
     for (const name of files) {
       const chip = document.createElement("span");
       chip.textContent = `📎 ${name}`;
+      chip.dataset.name = name;
       row.append(chip);
     }
     div.append(row);
   }
   $("messages").append(div);
+  showThumbnails();
   scrollToBottom();
+}
+
+// A sent message's 📎 chip becomes a thumbnail once its file's picture is known; the Documents list
+// may arrive after a reopened chat is drawn, so loadDocuments calls this too.
+function showThumbnails() {
+  for (const chip of document.querySelectorAll(".msg-attachments [data-name]")) {
+    // shortcut: matched by name (a message stores names only); of two files with one name, the newest shows.
+    const doc = state.docs.find((d) => d.filename === chip.dataset.name && d.has_image);
+    if (!doc) continue;
+    const img = document.createElement("img");
+    img.className = "thumb";
+    img.src = `/api/documents/${doc.id}/image`;
+    img.alt = img.title = doc.filename;
+    img.onload = scrollToBottom;
+    img.onclick = () => showImage(doc.id, doc.filename);
+    chip.replaceWith(img);
+  }
+}
+
+function showImage(id, filename) {
+  $("imageDialogImg").src = `/api/documents/${id}/image`;
+  $("imageDialogImg").alt = filename;
+  $("imageDialogName").textContent = filename;
+  $("imageDialog").showModal();
 }
 
 function addAssistantMessage() {
@@ -544,6 +571,7 @@ $("input").addEventListener("input", autoSize);
 // ---------- documents ----------
 async function loadDocuments() {
   const docs = await api("/documents").catch(() => []);
+  state.docs = docs;
   const list = $("documentList");
   list.innerHTML = docs.length ? "" : `<li class="muted" style="border:none">${t("noDocuments")}</li>`;
   for (const d of docs) {
@@ -551,6 +579,11 @@ async function loadDocuments() {
     li.title = d.error || "";
     const name = document.createElement("span");
     name.textContent = d.filename;
+    if (d.has_image) {
+      name.className = "doc-image";
+      name.title = t("showImage");
+      name.onclick = () => showImage(d.id, d.filename);
+    }
     const badge = document.createElement("span");
     badge.className = `badge ${d.status}`;
     badge.textContent = t(`status_${d.status}`) + (d.status === "ready" ? ` · ${d.chunk_count} ${t("chunks")}` : "");
@@ -573,6 +606,7 @@ async function loadDocuments() {
   state.attachments = state.attachments.filter((a) => byId[a.id])
     .map((a) => ({ ...a, status: byId[a.id].status, error: byId[a.id].error }));
   renderAttachments();
+  showThumbnails();
 }
 
 // ---------- chat attachments ----------
@@ -710,6 +744,7 @@ function showLogin() {
   state.me = null;
   state.conversationId = null;
   state.attachments = [];
+  state.docs = [];
   renderAttachments();
   clearTimeout(state.docsPoll);
   ["messages", "conversationList", "documentList"].forEach((id) => ($(id).innerHTML = ""));

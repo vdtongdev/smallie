@@ -14,6 +14,7 @@
 
 - Branch: `0.4.0/remote-agents`. Version `0.4.0`; CHANGELOG and `pyproject.toml` change only in the release task (Task 11).
 - Agents never call each other: no `RemoteGraph` inside a specialist, and none pointing at its own server.
+- No loops or runaway calls. Every model call stays under a cap that exists today: the orchestrator's `no_repeats` / `MAX_ASKS` and `ORCHESTRATOR_MAX_MODEL_CALLS`, and each agent's `MAX_MODEL_CALLS` / `RESEARCH_MAX_MODEL_CALLS`. Going remote must add no retry of a run (AP-010) and no path back into routing. One chat message makes the same number of model calls before and after this change (Task 9 measures it).
 - Specialists are stateless: never send `thread_id`. Every `user_id`-scoped query stays scoped.
 - Free tiers only: Cloud Run `--min-instances 0`; cold starts are accepted.
 - Before editing any file run `uv run python .claude/skills/antipatterning/antipattern.py select --path <file> ...` and follow the rules it returns (AP-002: every new engine/pool gets `pool_pre_ping=True` / `check=`). Run it again with every changed path at the end of each task.
@@ -29,7 +30,14 @@
 2. **A rate limit inside a specialist.** The user still sees "OpenRouter rate limit reached …", not "internal error". → Task 3 test.
 3. **A registered agent with no URL in `AGENT_URLS`.** Startup fails with an error naming the route, not a crash at the first chat. → Task 4 test.
 4. **"Plot that" after a remote sql answer.** The table artifact survives the round trip, so the chart agent finds it. → Task 2 test.
-5. **A request without the service token, or with a wrong one.** Rejected with 401, even when `SERVICE_TOKEN` is unset on the server (fail closed). → Task 5 test.
+5. **A request without the service token, or with a wrong one.** Rejected with 401, even when `SERVICE_TOKEN` is unset on the server (fail closed). → Task 4 test.
+6. **Agents talking in a loop, or for too long.** A message keeps the call counts it has today, with no echo back into routing and no repeated runs:
+   - a remote output key such as `route`, `direct`, `failed` or `attempt` must not reach the parent state
+   - an orchestrator that keeps asking the same specialist is still stopped by `MAX_ASKS`
+   - a cold start or a dropped connection must not make the client or the server run the same specialist call twice
+   - no specialist package can import `RemoteGraph`
+
+   → Task 2, Task 3 and Task 4 tests, plus the Task 9 loop audit.
 
 ---
 
@@ -69,7 +77,8 @@
   - `__init__(self, spec: AgentSpec, url: str, *, service_token: str, timeout_s: float, remote: Any = None)`. `remote` defaults to `RemoteGraph("agent", url=url, headers={"x-service-token": service_token}, distributed_tracing=True)` with a `langgraph_sdk` client whose timeout is `timeout_s`; tests inject a fake with an async `ainvoke(input, config, *, context, headers)`.
   - `async node(self, state: dict, config: RunnableConfig, runtime: Runtime[AgentContext]) -> dict`: what `build_assistant` adds as the graph node.
   - `async ainvoke(self, input: dict, config: RunnableConfig | None = None, *, context: AgentContext) -> dict`: what `make_ask_tool` calls.
-  - Both return `{"messages": <only the messages the specialist added>, **<other keys of the output state, e.g. findings>}`.
+  - Both return `{"messages": <only the messages the specialist added>}`, plus `findings` when the output has it. Nothing else from the remote state is copied, so it can't set `route`, `direct`, `failed` or `attempt` and loop the parent graph.
+  - The remote call is never retried: one `ainvoke` is one run.
 
 - [ ] **Step 1: Write the failing tests** (a fake `remote` records its calls):
   - `test_sends_context_and_user_header_without_thread_id`: the call to `remote.ainvoke` gets `context == asdict(ctx)`, `headers == {"x-smallie-user-id": "u-7"}`, and a config whose `configurable` has no `thread_id`, `checkpoint_ns` or `checkpoint_id`. The parent's other `configurable` entries stay (the stream hook).
@@ -77,7 +86,9 @@
   - `test_keeps_table_artifact_for_plot_that` (Review Focus 4): a returned `ToolMessage` dict with `artifact={"tables": [...]}` comes back with `collect(result["messages"])["tables"]` equal to it.
   - `test_counts_usage_of_returned_ai_messages`: config `callbacks=[counter]` (a `UsageCounter`, or a callback manager holding one) → the counter gets the returned AI messages' tokens and cost.
   - `test_remote_rate_limit_becomes_openai_error` (Review Focus 2): the fake raises `RemoteException({"error": "RateLimitError", "message": "..."})` → `pytest.raises(openai.RateLimitError)`; `"AuthenticationError"` → `openai.AuthenticationError`; any other → `RemoteException` unchanged.
-  - `test_unreachable_agent_raises_quickly` (Review Focus 1): the fake raises `httpx.ConnectError` → `node()` raises it (not wrapped, not retried).
+  - `test_unreachable_agent_raises_quickly` (Review Focus 1, 6): the fake raises `httpx.ConnectError` → `node()` raises it (not wrapped), and the fake saw exactly 1 call.
+  - `test_remote_state_cannot_steer_the_parent` (Review Focus 6): fake output `{"messages": [...], "findings": "f", "route": "sql", "direct": True, "failed": "docs", "attempt": "x"}` → the result's keys are exactly `{"messages", "findings"}`.
+  - `test_sdk_client_does_not_retry_runs` (Review Focus 6): build the real `RemoteGraph` client against an `httpx.MockTransport` that answers `POST .../runs/stream` with 503, and assert one request was made. If `langgraph_sdk` retries, disable its retries in the client RemoteAgent builds and note the setting in the code.
 - [ ] **Step 2:** `uv run pytest tests/test_remote.py -v` → the new tests FAIL.
 - [ ] **Step 3: Implement** `RemoteAgent`. Strip the keys with `{k: v for k, v in conf.items() if k not in {"thread_id", "checkpoint_ns", "checkpoint_id", "checkpoint_map"}}`. Find counters in `config["callbacks"]` (a list or a manager's `.handlers`). Build the `openai` errors with `httpx.Response(429 | 401, request=httpx.Request("POST", url))`.
 - [ ] **Step 4:** `uv run pytest tests/test_remote.py -v` → PASS.
@@ -98,6 +109,8 @@
 - [ ] **Step 1: Write the failing tests:**
   - `test_missing_agent_url_names_the_routes` (Review Focus 3): `agent_urls='{"sql": "http://x"}'` → `remote_agents(AGENTS)` raises `RuntimeError` whose message contains `docs`, `chart` and `research`.
   - `test_ask_tool_failure_still_answers` (Review Focus 1): `make_ask_tool(spec, agent)` where `agent.ainvoke` raises `httpx.ConnectError` → the tool returns `"The sql agent failed (ConnectError); it has no answer."`.
+  - `test_max_asks_still_caps_remote_calls` (Review Focus 6): the orchestrator, built with a scripted model (`tests/scripted.py`) that asks `ask_sql` with a different question at every step, and a fake `RemoteAgent` that counts calls → the fake sees at most `MAX_ASKS` calls, and the turn ends with an answer.
+  - `test_specialists_cannot_import_remote_graph` (Review Focus 6): no file under `app/agents/<route>/` (for every route in `ROUTES`) contains `RemoteGraph`, `langgraph.pregel.remote` or `app.agents.remote`.
   - In `tests/test_chat_events.py`, `test_remote_dict_chunks_become_events`: `_to_events("messages", ({"type": "AIMessageChunk", "content": "Hi"}, {"langgraph_node": "model"}), ("sql:abc",))` → `[{"type": "token", "text": "Hi"}]`. An `updates` chunk whose messages are dicts (an AI tool call + a tool result) yields the same `tool_call` / `tool_result` events as message objects do.
 - [ ] **Step 2:** run those tests → FAIL.
 - [ ] **Step 3: Implement:**
@@ -171,6 +184,7 @@
   - `curl http://127.0.0.1:2101/ok` to `:2104/ok` → `{"ok":true}`.
   - A request without `x-service-token` → 401.
   - List the tables the server created in `agent_sql` (`\dt`) and record them in the spec's "Database" section; that closes the spec's open question.
+  - Look at the `run` table's columns and the server's startup log for a retry or re-queue setting (Review Focus 6). If a run interrupted by a container restart is re-queued and run again, find the setting that turns that off (start with the env vars in `langgraph-api`'s docs), set it in the `x-agent` env, and record it in the spec. If there is none, record it as an open risk in the spec's "Open items".
 - [ ] **Step 8: End-to-end check** (spends about 3 free-quota calls). Set `AGENT_URLS` to the four localhost ports and `SERVICE_TOKEN` in `.env`, start `uvicorn`, and ask "AAPL dividend yield?". The answer and the `run_sql` tool events stream, the reply is saved in the thread, and the usage box goes up. Then ask "plot that" and check that the chart draws.
 - [ ] **Step 9:** update README (running the stack, rebuilding after changes), CLAUDE.md (Commands + a **Remote agents** paragraph) and `ARCHITECTURE.md` section 10. **Commit** `Agent server image and compose stack`.
 
@@ -229,8 +243,13 @@
 ### Task 9: Whole-branch review and PR
 
 - [ ] **Step 1:** run `uv run pytest -rs` (all pass, no DB skips), then the antipattern `select` with every changed path.
-- [ ] **Step 2:** run a fresh reviewer on the whole branch diff against `main`, with the spec and this plan as context. Fix the confirmed findings and commit.
-- [ ] **Step 3:** ask the user to approve; then push and `gh pr create` to `main`. Merge only when the user asks.
+- [ ] **Step 2: Loop audit** (Review Focus 6; spends free quota, so ask the user first).
+  1. Run `uv run python -m scripts.bench_chat` on `main` (in-process agents), then on this branch with the compose stack up.
+  2. Model calls per scenario must be equal. Record both tables and the latency difference in the PR description.
+  3. With LangSmith tracing on, open the trace of the composed-answer scenario and check that each specialist ran once per `ask_<route>` call and no run appears twice.
+  4. A higher count on this branch is a bug to fix before the PR, not a note.
+- [ ] **Step 3:** run a fresh reviewer on the whole branch diff against `main`, with the spec and this plan as context; tell it to check Review Focus 6 explicitly. Fix the confirmed findings and commit.
+- [ ] **Step 4:** ask the user to approve; then push and `gh pr create` to `main`. Merge only when the user asks.
 
 ### Task 10: Deploy (with the user)
 

@@ -1,9 +1,18 @@
-import pytest
-from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, SystemMessage, ToolMessage
+from dataclasses import asdict
+from types import SimpleNamespace
 
-from app.agents.remote import as_message
+import httpx
+import openai
+import pytest
+from langchain_core.callbacks import AsyncCallbackManager
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, SystemMessage, ToolMessage
+from langgraph.pregel.remote import RemoteException, RemoteGraph
+
+from app.agents.artifacts import collect
+from app.agents.remote import RemoteAgent, as_message, make_client
 from app.core import db
 from app.core.config import Settings, get_settings
+from app.core.memory import AgentContext
 from app.core.usage import UsageCounter
 
 AI_DICT = {
@@ -53,6 +62,99 @@ def test_usage_counter_counts_one_message():
     counter = UsageCounter()
     counter.count(as_message(AI_DICT))
     assert (counter.input_tokens, counter.output_tokens, counter.cost) == (11, 7, 0.0001)
+
+
+class FakeRemote:
+    """Stands in for RemoteGraph: records each call, returns `output` or raises `error`."""
+
+    def __init__(self, output=None, error=None):
+        self.output, self.error, self.calls = output, error, []
+
+    async def ainvoke(self, input, config=None, *, context=None, headers=None):
+        self.calls.append({"input": input, "config": config, "context": context, "headers": headers})
+        if self.error:
+            raise self.error
+        return self.output
+
+
+SPEC = SimpleNamespace(route="sql")
+CTX = AgentContext(user_id="u-7", memories="- likes AAPL", mentioned=("sql",))
+HUMAN = {"type": "human", "content": "AAPL yield?", "id": "h1"}
+
+
+def agent(remote) -> RemoteAgent:
+    return RemoteAgent(SPEC, "http://sql:8000", service_token="t", timeout_s=5, remote=remote)
+
+
+async def test_sends_context_and_user_header_without_thread_id():
+    remote = FakeRemote(output={"messages": [HUMAN]})
+    config = {"configurable": {"thread_id": "c-42", "checkpoint_ns": "sql:abc", "__pregel_stream": "hook"}}
+    await agent(remote).node({"messages": [as_message(HUMAN)]}, config, SimpleNamespace(context=CTX))
+    call = remote.calls[0]
+    assert call["context"] == asdict(CTX)
+    assert call["headers"] == {"x-smallie-user-id": "u-7"}
+    # Stateless: no thread. checkpoint_ns stays: RemoteGraph prefixes streamed chunks with it.
+    assert call["config"]["configurable"] == {"checkpoint_ns": "sql:abc", "__pregel_stream": "hook"}
+
+
+async def test_returns_only_new_messages_as_objects():
+    remote = FakeRemote(output={"messages": [HUMAN, AI_DICT, TOOL_DICT], "findings": "notes"})
+    result = await agent(remote).node({"messages": [as_message(HUMAN)]}, {}, SimpleNamespace(context=CTX))
+    assert [type(m) for m in result["messages"]] == [AIMessage, ToolMessage]
+    assert result["findings"] == "notes"
+
+
+async def test_keeps_table_artifact_for_plot_that():
+    remote = FakeRemote(output={"messages": [HUMAN, TOOL_DICT]})
+    result = await agent(remote).ainvoke({"messages": [as_message(HUMAN)]}, context=CTX)
+    assert collect(result["messages"])["tables"] == [{"id": "t1", "rows": [[1]]}]
+
+
+@pytest.mark.parametrize("wrap", [lambda c: [c], lambda c: AsyncCallbackManager(handlers=[c])])
+async def test_counts_usage_of_returned_ai_messages(wrap):
+    counter = UsageCounter()
+    remote = FakeRemote(output={"messages": [HUMAN, AI_DICT, TOOL_DICT]})
+    await agent(remote).node({"messages": [as_message(HUMAN)]}, {"callbacks": wrap(counter)},
+                             SimpleNamespace(context=CTX))
+    assert (counter.input_tokens, counter.output_tokens, counter.cost) == (11, 7, 0.0001)
+
+
+@pytest.mark.parametrize("name, expected", [
+    ("RateLimitError", openai.RateLimitError), ("AuthenticationError", openai.AuthenticationError),
+    ("ValueError", RemoteException),
+])
+async def test_remote_errors_become_openai_errors(name, expected):
+    remote = FakeRemote(error=RemoteException({"error": name, "message": "An internal error occurred"}))
+    with pytest.raises(expected):
+        await agent(remote).ainvoke({"messages": []}, context=CTX)
+
+
+async def test_unreachable_agent_raises_quickly():
+    remote = FakeRemote(error=httpx.ConnectError("connection refused"))
+    with pytest.raises(httpx.ConnectError):
+        await agent(remote).node({"messages": []}, {}, SimpleNamespace(context=CTX))
+    assert len(remote.calls) == 1
+
+
+async def test_remote_state_cannot_steer_the_parent():
+    remote = FakeRemote(output={"messages": [HUMAN], "findings": "f", "route": "sql", "direct": True,
+                                "failed": "docs", "attempt": "x"})
+    result = await agent(remote).node({"messages": [as_message(HUMAN)]}, {}, SimpleNamespace(context=CTX))
+    assert set(result) == {"messages", "findings"}
+
+
+async def test_sdk_client_does_not_retry_runs():
+    requests = []
+
+    def unavailable(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(503, json={"detail": "starting"})
+
+    client = make_client("http://sql:8000", service_token="t", timeout_s=5, transport=httpx.MockTransport(unavailable))
+    with pytest.raises(Exception):
+        await RemoteGraph("agent", client=client).ainvoke({"messages": []}, context=asdict(CTX))
+    assert len(requests) == 1
+    assert requests[0].headers["x-service-token"] == "t" and "x-api-key" not in requests[0].headers
 
 
 def test_engines_use_the_pool_size(monkeypatch):

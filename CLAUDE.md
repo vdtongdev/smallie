@@ -16,9 +16,12 @@ Layout of `app/`: `core/` (config, llm, db, memory, auth, accounts, conversation
 
 ## Commands
 
-Development is on Windows with `uv`. Postgres (pgvector) runs on **port 5433** directly in WSL (`db/setup_wsl.sh`; start it with `wsl -d Ubuntu -u root service postgresql start`; it stops when WSL idles, so start it again before running DB tests). Local development doesn't use Docker; `docker compose up -d` is only an alternative setup, and no local `docker build` is needed before deploying.
+Development is on Windows with `uv`. Postgres 18 (pgvector) runs on **port 5433** in the compose `db` container (`smallie-db`), on Docker Engine inside WSL Ubuntu (no Docker Desktop). Run Docker commands through WSL: `wsl -d Ubuntu -u root --cd "/mnt/c/Users/Asus ROG/projects/smallie" -- docker <args>`. The WSL-installed Postgres (`db/setup_wsl.sh`) is legacy and disabled. No local `docker build` is needed before deploying the main app.
+
+**Run `scripts\dev_db.ps1` before DB tests, the app or `bench_chat`.** WSL stops about 25 s after the last `wsl` command ends (measured on WSL 3.0.3), even with Docker running, and takes Postgres with it. Symptoms: DB tests skipped ("Postgres not running"), or a run that freezes in `psycopg.connect` because WSL stopped mid-run (a stack dump shows `wait_conn`). The script starts a hidden `sleep infinity` WSL session that keeps WSL up until the PC shuts down (or `wsl --shutdown`), runs `docker compose up -d db` and waits until `smallie-db` is healthy. It is safe to re-run. A one-off `wsl ... docker ps` only buys 25 s. If a run is already frozen: Ctrl+C, run the script, rerun.
 
 ```powershell
+powershell -ExecutionPolicy Bypass -File scripts\dev_db.ps1   # start Postgres, keep WSL up until shutdown
 uv sync                                            # install deps into .venv
 uv run uvicorn app.api.main:app --reload --loop asyncio:SelectorEventLoop
 uv run pytest                                      # all tests
@@ -31,7 +34,7 @@ gcloud run deploy smallie --source . --region asia-southeast1 --allow-unauthenti
 ```
 
 - `--loop asyncio:SelectorEventLoop` is required on Windows: psycopg's async driver (checkpointer/store) fails on the default Proactor loop. Any standalone async script must do the same (see `scripts/reindex.py`).
-- Tests that need Postgres use the `requires_db` marker from `tests/conftest.py` and are skipped when the DB is unreachable. `pytest-asyncio` runs in `auto` mode.
+- Tests that need Postgres use the `requires_db` marker from `tests/conftest.py` and are skipped when the DB is unreachable. Skipped DB tests are not a pass: run `scripts\dev_db.ps1` and rerun. `pytest-asyncio` runs in `auto` mode.
 - No linter/formatter is configured.
 
 ## Architecture

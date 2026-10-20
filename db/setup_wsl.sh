@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
+# Legacy: local development now runs Postgres in Docker inside WSL (README, "Setup").
 # Install Postgres + pgvector inside WSL Ubuntu and load db/init/*.sql.
-# The non-Docker equivalent of `docker compose up -d`. Safe to re-run.
+# The non-Docker equivalent of `docker compose up -d db`. Safe to re-run.
 # Uses the distro's Postgres version (16 on Ubuntu 24.04, 18 on 26.04).
 #
 # Run from WSL:  bash "/mnt/c/Users/<you>/projects/smallie/db/setup_wsl.sh"

@@ -14,6 +14,8 @@ All LLM and embedding calls go through OpenRouter (OpenAI-compatible API, see `a
 
 Layout of `app/`: `core/` (config, llm, db, memory, auth, accounts, conversations, shared prompts; knows nothing about specific agents), `agents/` (one package per agent: `agent.py` with build + `SPEC`, `tools.py`, `prompts.py`; listed in `agents/registry.py`), `features/` (data an agent uses plus its API, ingestion and background jobs: `documents/`, `market/`; listed in `features/registry.py`), `orchestration/` (router + assistant graph), `api/` (shared routes and `main.py`).
 
+`ARCHITECTURE.md` is the overview for people (the team lead, customers). When a change alters a part, flow, table, tool or deployment step it describes, update it in the same branch. Its section 10 tracks the 0.4.0 remote-agents phases; the design is `docs/superpowers/specs/2026-10-20-remote-agents-design.md`.
+
 ## Commands
 
 Development is on Windows with `uv`. Postgres (pgvector) runs on **port 5433** directly in WSL (`db/setup_wsl.sh`; start it with `wsl -d Ubuntu -u root service postgresql start`; it stops when WSL idles, so start it again before running DB tests). Local development doesn't use Docker; `docker compose up -d` is only an alternative setup, and no local `docker build` is needed before deploying.

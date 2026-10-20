@@ -1,6 +1,6 @@
 # Remote agents (spec 1 of 2)
 
-Date: 2026-10-20. Branch: `0.3.5/remote-agents`. Status: design approved in chat, spec waiting for review.
+Date: 2026-10-20. Version: `0.4.0` (an architecture change; the image agent follows as `0.5.0`). Branches: `0.4.0/<slug>`. Status: approved; phases 0–2 done.
 
 ## Goal
 
@@ -99,7 +99,7 @@ Spec 2's chat room keeps the hub: a moderator holds the transcript and passes it
 
 ### `RemoteAgent` (`app/agents/remote.py`, new)
 
-It wraps `RemoteGraph(spec.route, url=<ROUTE>_AGENT_URL, distributed_tracing=True)` and behaves like the compiled graph it replaces. It works both as a graph node and through `.ainvoke(input, context=...)`, which `make_ask_tool` uses. On each call it:
+It wraps `RemoteGraph(spec.route, url=AGENT_URLS[spec.route], distributed_tracing=True)` and behaves like the compiled graph it replaces. It works both as a graph node and through `.ainvoke(input, context=...)`, which `make_ask_tool` uses. On each call it:
 
 1. sends only the input the specialist's state needs: `messages`, plus `findings` for research
 2. passes `context=asdict(runtime.context)` and the headers `x-service-token`, `x-smallie-user-id` and, on Cloud Run, `Authorization: Bearer <ID token>`
@@ -115,14 +115,33 @@ It wraps `RemoteGraph(spec.route, url=<ROUTE>_AGENT_URL, distributed_tracing=Tru
 - Router, fallback (`gave_up` reads the returned messages on the main app's thread), handoff, `make_ask_tool`, research → orchestrator: no logic changes.
 - `route_info` (file names, tickers) stays in the main app, because it only reads app tables.
 - MCP: the research server runs `prepare` itself. The main app still loads Tavily/Wikipedia for the orchestrator's web search.
-- New settings in `app/core/config.py` and `.env.example`: `DOCS_AGENT_URL`, `SQL_AGENT_URL`, `CHART_AGENT_URL`, `RESEARCH_AGENT_URL`, `SERVICE_TOKEN`, `DB_POOL_SIZE` (SQLAlchemy pool size, default 5).
+- New settings in `app/core/config.py` and `.env.example`:
+  - `AGENT_URLS`: one JSON object, route → URL (e.g. `{"sql": "http://localhost:2102", ...}`). At startup the main app fails with a clear error naming any registered route without a URL.
+  - `SERVICE_TOKEN`
+  - `DB_POOL_SIZE` (SQLAlchemy pool size, default 5)
 
-### Agent server entrypoints
+### Agent server (one generic entry point)
 
-- `app/agents/<route>/server.py`: `graph` = `spec.build()` (research also runs `prepare` first).
-- One `Dockerfile.agent` with `ARG ROUTE`, based on `langchain/langgraph-api:3.12`. It installs dependencies with `uv sync --frozen` and sets `LANGSERVE_GRAPHS` to that module. A hand-written Dockerfile is needed because `pyproject.toml` has no `build-system` (so `langgraph build`'s `dependencies: ["."]` may not install) and because Cloud Build needs a Dockerfile.
-- `auth.py`: custom auth that accepts only `x-service-token == SERVICE_TOKEN`.
-- `langgraph.json`: `http.configurable_headers.includes = ["x-smallie-*"]`.
+- `app/agents/server.py`: `async def make_graph()` reads `AGENT_ROUTE`, looks the spec up in the registry, awaits `prepare` when the spec has one, and returns `spec.build()`. Spike 2 showed async factories work. No per-agent server file.
+- `app/agents/server_auth.py`: custom auth that accepts only `x-service-token == SERVICE_TOKEN`.
+- `langgraph.json` (one file for every agent): the graph points at `app/agents/server.py:make_graph`, auth at `server_auth.py`, and `http.configurable_headers.includes = ["x-smallie-*"]`.
+- One `Dockerfile.agent`, based on `langchain/langgraph-api:3.12`, installing dependencies with `uv sync --frozen`. The route is runtime config (`AGENT_ROUTE`), so every agent uses the **same image**. A hand-written Dockerfile is needed because `pyproject.toml` has no `build-system` (so `langgraph build`'s `dependencies: ["."]` may not install) and because Cloud Build needs a Dockerfile.
+
+### Adding an agent server (the seamless path)
+
+After writing the agent itself (the existing "Adding an agent" steps in `CLAUDE.md`):
+
+1. `docker-compose.yml`: add one service that extends the `x-agent` template:
+   ```yaml
+   web:
+     <<: *agent
+     environment: { <<: *agent-env, AGENT_ROUTE: web }
+     ports: ["127.0.0.1:2105:8000"]
+   ```
+2. `AGENT_URLS`: add `"web": "http://localhost:2105"` (`.env`) or the Cloud Run URL (`cloudrun.env.yaml`).
+3. Cloud Run: deploy the shared image once more with `AGENT_ROUTE=web` (the same `cloudbuild.yaml`/deploy command as the others, a different service name).
+
+No changes to the router, orchestrator, `RemoteAgent`, Dockerfile, `langgraph.json` or auth. A test checks that every registered route has a compose service and an entry in `.env.example`'s `AGENT_URLS`.
 
 ## Data flow
 
@@ -168,7 +187,7 @@ It wraps `RemoteGraph(spec.route, url=<ROUTE>_AGENT_URL, distributed_tracing=Tru
 
 1. Docker Engine and the compose plugin inside WSL Ubuntu (`systemd=true` in `/etc/wsl.conf`).
 2. Migration: `pg_dump` the WSL database → the compose `db` (`pgvector/pgvector:pg18`, the same major version as Neon) → `pg_restore` → disable the WSL Postgres service. Port 5433 stays, so `.env` doesn't change.
-3. `docker compose up` starts `db`, `redis`, `docs`, `sql`, `chart` and `research`. The main app runs on Windows with `uvicorn` as today, with `<ROUTE>_AGENT_URL=http://localhost:210x`. An optional `app` service (compose profile `full`) runs everything in containers.
+3. `docker compose up` starts `db`, `redis`, `docs`, `sql`, `chart` and `research`. The main app runs on Windows with `uvicorn` as today, with `AGENT_URLS` pointing at `http://localhost:2101-2104`. An optional `app` service (compose profile `full`) runs everything in containers.
 4. After changing code in a specialist: `docker compose up --build <route>`.
 
 ## Testing
@@ -185,7 +204,7 @@ It wraps `RemoteGraph(spec.route, url=<ROUTE>_AGENT_URL, distributed_tracing=Tru
 
 ## Deployment (Cloud Run)
 
-- Four new services `smallie-<route>`: `--no-allow-unauthenticated --min-instances 0 --max-instances 1`, built through one `cloudbuild.yaml` with a `ROUTE` substitution.
+- Four new services `smallie-<route>`: `--no-allow-unauthenticated --min-instances 0 --max-instances 1`, all from the one shared image, each with its own `AGENT_ROUTE`.
 - Specialists use request-based CPU billing (the default, no `--no-cpu-throttling`): runs happen inside the open request, and always-on CPU would bill every woken service until it shuts down. The main app keeps `--no-cpu-throttling` for its background tasks.
 - Main app env: the four URLs and `SERVICE_TOKEN`. Specialist env: `DATABASE_URI` (its agent database), `REDIS_URI`, `LANGSMITH_API_KEY`, `SERVICE_TOKEN`, the OpenRouter keys, and the app/readonly database URLs for its role.
 - Neon: create the four agent databases and the `agent_reader` role.
@@ -196,8 +215,8 @@ It wraps `RemoteGraph(spec.route, url=<ROUTE>_AGENT_URL, distributed_tracing=Tru
 Each phase ends with green tests and can merge on its own:
 
 0. **Spike 2** (done, see "Spike 2 findings"). The Agent Server with CPU throttled between requests is still to check during the Cloud Run phase.
-1. Docker migration.
-2. LangSmith tracing: approved separately, branch `0.3.5/langsmith-tracing`, off by default. It goes first because `distributed_tracing` uses it.
+1. Docker migration (branch `0.4.0/docker-postgres`, done).
+2. LangSmith tracing: approved separately, branch `0.4.0/langsmith-tracing`, off by default. It goes first because `distributed_tracing` uses it.
 3. Agent server entrypoints, `Dockerfile.agent`, compose stack.
 4. `RemoteAgent` and the switch in `build_assistant`.
 5. Security: custom auth, ID tokens, `agent_reader`.

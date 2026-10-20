@@ -107,3 +107,9 @@ Versions are `major.minor.patch`: the major version stays 0 for now, each minor 
   - The `save_memory` description gave "User's name is Alex" and "User works as a data analyst" as examples, which weak models could store as facts about you (same cause as the 0.3.1 fix)
   - The description first got a placeholder instead; the tool is now gone, since facts are extracted after replies
 - `uv run python -m scripts.reindex` now also re-embeds the graph's names
+
+## 0.3.5 - Fixes
+- **Fix: replies streamed slowly with paid models**
+  - With `OPENROUTER_QUANTIZATIONS=bf16,fp8`, OpenRouter picked the cheapest allowed provider, which was also one of the slowest: about 14 tokens/s for `google/gemma-4-31b-it`
+  - New setting `OPENROUTER_PROVIDER_SORT` (`throughput`, `latency` or `price`; empty keeps OpenRouter's default). With `throughput` the same filter served 33 and 130 tokens/s in testing, at the same or lower cost per call
+  - Provider speeds change over the day, so the numbers are a snapshot; free models are not affected

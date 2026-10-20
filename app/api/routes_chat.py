@@ -71,7 +71,7 @@ async def chat(
             )
             stream = assistant.astream(
                 {"messages": [{"role": "user", "content": body.message}]},
-                config={**config, "callbacks": [usage]},
+                config={**config, "callbacks": [usage], "metadata": {"user_id": user_id}},  # filter traces per user
                 context=AgentContext(user_id=user_id, user=user, memories=memories,
                                      recent_chats=recent_chats, agent=kind),
                 stream_mode=["messages", "updates"],

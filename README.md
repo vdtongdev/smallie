@@ -17,20 +17,43 @@ All agents understand and reply in **English and Vietnamese**. They remember eac
 |---|---|
 | Python 3.12+ | https://www.python.org/downloads/ (tick "Add to PATH") |
 | uv | `winget install --id=astral-sh.uv -e` |
-| Postgres: **WSL2** (or Docker Desktop) | WSL: `wsl --install -d Ubuntu` in an admin PowerShell, then reboot. Docker Desktop needs Windows 10 build 19045 or newer. |
+| WSL2 + Docker Engine (runs Postgres) | `wsl --install -d Ubuntu` in an admin PowerShell, reboot, then see Setup step 1. No Docker Desktop needed. |
 | OpenRouter API key | https://openrouter.ai/keys |
 
 ## Setup
 
-**1. Database.** Pick one.
+**1. Database.** Postgres 18 + pgvector runs in Docker inside WSL Ubuntu (Docker Engine from Ubuntu's packages, no Docker Desktop). Once, from Windows:
+```powershell
+wsl -d Ubuntu -u root -- sh -c "apt-get update && apt-get install -y docker.io docker-compose-v2 && systemctl enable --now docker"
+wsl -d Ubuntu -u root --cd "/mnt/c/Users/Asus ROG/projects/smallie" -- docker compose up -d db
+```
+The first start loads `db/init/*.sql`. The container listens on port 5433 and restarts by itself whenever WSL starts (`restart: unless-stopped`; WSL needs `systemd=true` in `/etc/wsl.conf`, the default on new installs).
 
-- **WSL (no Docker).** Open Ubuntu and run the script below. It installs Postgres (the distro's version: 16 on 24.04, 18 on 26.04) + pgvector, listens on port 5433, and loads `db/init/*.sql`. It's safe to re-run.
-  ```bash
-  bash "/mnt/c/Users/Asus ROG/projects/smallie/db/setup_wsl.sh"
-  ```
-  WSL stops Postgres when the distro shuts down. Before working on the app, start it from Windows with:
-  `wsl -d Ubuntu -u root service postgresql start`
-- **Docker.** Run `docker compose up -d`. This is the alternative to WSL; the current local setup uses WSL, and Docker isn't needed for anything else locally (the Cloud Run image is built by Cloud Build).
+**Each time you work on the app**, start the database with:
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\dev_db.ps1
+```
+WSL shuts down about 25 seconds after the last `wsl` command, even with Docker running, and the database goes with it (tests then get skipped or freeze). The script keeps WSL running in the background until the PC shuts down (or `wsl --shutdown`), starts the container and waits until it's ready. Running it twice is harmless.
+
+Or work from a WSL terminal yourself. WSL stays up as long as that terminal is open:
+```bash
+cd "/mnt/c/Users/Asus ROG/projects/smallie"
+docker compose up -d db          # start (no sudo: your user is in the docker group)
+docker compose ps                # status, should say (healthy)
+docker logs -f smallie-db        # live Postgres log; Ctrl+C stops watching, not the database
+docker exec -it smallie-db psql -U smallie -d smallie   # SQL shell
+```
+Keep running `uv run ...` (tests, the app) in a Windows terminal: the `.venv` is a Windows one.
+
+Moving from the old WSL-installed Postgres (`db/setup_wsl.sh`, now legacy): dump it, stop it, restore into the container.
+```powershell
+wsl -d Ubuntu -u root -- sh -c "PGPASSWORD=smallie pg_dump -h localhost -p 5433 -U smallie -Fc smallie -f /root/smallie.dump && systemctl disable --now postgresql"
+wsl -d Ubuntu -u root --cd "/mnt/c/Users/Asus ROG/projects/smallie" -- docker compose up -d db
+wsl -d Ubuntu -u root -- docker cp /root/smallie.dump smallie-db:/tmp/smallie.dump
+wsl -d Ubuntu -u root -- docker exec smallie-db psql -U smallie -d postgres -c "DROP DATABASE smallie" -c "CREATE DATABASE smallie OWNER smallie" -c "GRANT CONNECT ON DATABASE smallie TO agent_readonly"
+wsl -d Ubuntu -u root -- docker exec smallie-db pg_restore -U smallie -d smallie --exit-on-error /tmp/smallie.dump
+```
+The old data stays in `/var/lib/postgresql` inside WSL until you remove the `postgresql` package.
 
 **2. App.** Run these on Windows:
 ```powershell
@@ -87,6 +110,7 @@ These are set in `.env`; all calls go through OpenRouter.
 - `OPENROUTER_CHAT_MODEL`: defaults to a free model with tool calling. Free models come and go, so see the list at https://openrouter.ai/models?supported_parameters=tools&max_price=0. `OPENROUTER_FALLBACK_MODEL` (comma-separated, tried in order) is used automatically when the main one fails or is rate-limited; pick models that write good Vietnamese, since weaker ones slip Chinese, Korean or Thai words into Vietnamese answers. With a paid model, `OPENROUTER_QUANTIZATIONS=bf16,fp8` keeps OpenRouter off the cheapest fp4 providers, which slip more.
 - `OPENROUTER_ORCHESTRATOR_MODEL`: the model of the orchestrator. It is skipped when the message clearly points to one agent (a ticker, "stock", a file name, "research", "latest news"…). Empty means it uses `OPENROUTER_CHAT_MODEL`. `ORCHESTRATOR_MAX_MODEL_CALLS` (4) caps its own calls per message.
 - `TAVILY_API_KEY`: web search for the research agent (free 1,000 credits/month at https://app.tavily.com). Without it, research uses the other sources. `MCP_SERVERS` adds more remote MCP servers, and `EXTERNAL_DATABASE_URL` lets the researcher read another Postgres (see `.env.example`).
+- `LANGSMITH_TRACING` + `LANGSMITH_API_KEY` (free account at https://smith.langchain.com): records every model call, tool call and routing step of each chat as a trace you can click through, for debugging. Off by default. Traces contain the full prompts, including users' messages and file passages, so only turn it on in production if you accept that.
 - `OPENROUTER_EMBED_MODEL`: defaults to `baai/bge-m3`, which is multilingual and costs about $0.01 per 1M tokens. A $1 top-up covers thousands of documents. The fully free option is `liquid/lfm-2.5-embedding-350m:free`, but the provider may keep and train on your data.
 - **Free-tier limits:** about 20 requests/min, and 50 requests/day unless you have bought at least $10 of credits (then 1000/day). A general question takes 1 model call, plus 1 after the reply to learn facts about you. Each uploaded file takes 1 (its document card). A database or documents question takes 2–5, plus 1 when the orchestrator has to hand it over. A question that combines agents takes 1 + each agent's calls + 1 to write the answer. A research question takes up to `RESEARCH_MAX_MODEL_CALLS` (8) for the researcher plus 1 for the write-up. `uv run python -m scripts.bench_chat` measures the calls and latency of typical questions on your models.
 - **Changing the embedding model or `EMBED_DIM`:** stop the app, then run `uv run python -m scripts.reindex` (it also re-embeds the knowledge graph's names).
@@ -110,7 +134,7 @@ app/
     formats/      answer formats the orchestrator follows when it writes up results (summary, list, report...)
   api/            FastAPI app and shared routes: chat (SSE streaming), conversations, memories, agents, admin
   static/         plain HTML/JS UI with an EN/VI toggle
-db/init/          extension, read-only role, market schema (loaded by db/setup_wsl.sh or on first `docker compose up`)
+db/init/          extension, read-only role, market schema (loaded on the first `docker compose up`; db/setup_wsl.sh is the legacy non-Docker setup)
 Dockerfile        container image for Cloud Run (.gcloudignore / .dockerignore keep secrets out)
 scripts/          load_stocks.py (fill/refresh stock data), reindex.py (after changing the embedding model),
                   bench_chat.py (latency and model calls per scenario)
@@ -217,9 +241,9 @@ Point `READONLY_DATABASE_URL` at a read-only role on your database and set `SCHE
 
 ## Troubleshooting
 
-- **Port 5433 already in use:** change `PORT` in `db/setup_wsl.sh` (or `ports` in `docker-compose.yml`) and update both URLs in `.env`.
-- **Can't connect from Windows to Postgres in WSL:** make sure it's running (`wsl -d Ubuntu -u root service postgresql status`). Also check that `localhostForwarding` isn't set to false in `%UserProfile%\.wslconfig`.
-- **Recreating the read-only role:** in WSL, run `PGPASSWORD=smallie psql -h localhost -p 5433 -U smallie -d smallie -c "DROP OWNED BY agent_readonly; DROP ROLE agent_readonly;"`, re-run the setup script, then `uv run python -m scripts.load_stocks` (it re-grants the `market` schema). With Docker, run `docker compose down -v; docker compose up -d`.
+- **Port 5433 already in use:** the old WSL Postgres may still be running (`wsl -d Ubuntu -u root -- systemctl disable --now postgresql`). Otherwise change `ports` in `docker-compose.yml` and update both URLs in `.env`.
+- **Can't connect from Windows to Postgres:** check the container is up (`wsl -d Ubuntu -u root -- docker ps`). Also check that `localhostForwarding` isn't set to false in `%UserProfile%\.wslconfig`.
+- **Recreating the database from scratch:** `docker compose down -v` then `docker compose up -d db` (run both via `wsl -d Ubuntu -u root --cd "<project path in /mnt/c>" --`; `-v` deletes all local data), then `uv run python -m scripts.load_stocks --full`.
 - **Chat errors with "the connection is closed", or old chats won't open:** Postgres was restarted while the app was running. Current versions reconnect automatically. If you still see this, make sure Postgres is running and restart the app.
 - **Stock questions return nothing / "relation market.stocks does not exist":** run `uv run python -m scripts.load_stocks`, then restart the app (the SQL agent reads the schema at startup). If it reports tickers with no price data, those companies were delisted or renamed; replace them in `app/features/market/tickers.py`.
 - **Cloud Run build fails:** `gcloud builds list --region asia-southeast1 --limit 1`, then `gcloud builds log <id> --region asia-southeast1`. `PERMISSION_DENIED` before the build starts means the `roles/run.builder` grant in *Deploying* is missing.

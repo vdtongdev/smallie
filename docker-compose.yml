@@ -1,7 +1,8 @@
 services:
   db:
-    image: pgvector/pgvector:pg16
+    image: pgvector/pgvector:pg18  # same major version as Neon
     container_name: smallie-db
+    restart: unless-stopped  # comes back whenever WSL (and dockerd) starts
     environment:
       POSTGRES_USER: smallie
       POSTGRES_PASSWORD: smallie
@@ -10,7 +11,7 @@ services:
       # Host port 5433 avoids clashing with a locally installed Postgres on 5432.
       - "5433:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql  # PG 18+ images keep versioned data dirs under here
       - ./db/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U smallie -d smallie"]

@@ -17,20 +17,27 @@ All agents understand and reply in **English and Vietnamese**. They remember eac
 |---|---|
 | Python 3.12+ | https://www.python.org/downloads/ (tick "Add to PATH") |
 | uv | `winget install --id=astral-sh.uv -e` |
-| Postgres: **WSL2** (or Docker Desktop) | WSL: `wsl --install -d Ubuntu` in an admin PowerShell, then reboot. Docker Desktop needs Windows 10 build 19045 or newer. |
+| WSL2 + Docker Engine (runs Postgres) | `wsl --install -d Ubuntu` in an admin PowerShell, reboot, then see Setup step 1. No Docker Desktop needed. |
 | OpenRouter API key | https://openrouter.ai/keys |
 
 ## Setup
 
-**1. Database.** Pick one.
+**1. Database.** Postgres 18 + pgvector runs in Docker inside WSL Ubuntu (Docker Engine from Ubuntu's packages, no Docker Desktop). Once, from Windows:
+```powershell
+wsl -d Ubuntu -u root -- sh -c "apt-get update && apt-get install -y docker.io docker-compose-v2 && systemctl enable --now docker"
+wsl -d Ubuntu -u root --cd "/mnt/c/Users/Asus ROG/projects/smallie" -- docker compose up -d db
+```
+The first start loads `db/init/*.sql`. The container listens on port 5433 and restarts by itself whenever WSL starts (`restart: unless-stopped`; WSL needs `systemd=true` in `/etc/wsl.conf`, the default on new installs). If WSL has shut down, any `wsl` command brings it back, e.g. `wsl -d Ubuntu -u root -- docker ps`.
 
-- **WSL (no Docker).** Open Ubuntu and run the script below. It installs Postgres (the distro's version: 16 on 24.04, 18 on 26.04) + pgvector, listens on port 5433, and loads `db/init/*.sql`. It's safe to re-run.
-  ```bash
-  bash "/mnt/c/Users/Asus ROG/projects/smallie/db/setup_wsl.sh"
-  ```
-  WSL stops Postgres when the distro shuts down. Before working on the app, start it from Windows with:
-  `wsl -d Ubuntu -u root service postgresql start`
-- **Docker.** Run `docker compose up -d`. This is the alternative to WSL; the current local setup uses WSL, and Docker isn't needed for anything else locally (the Cloud Run image is built by Cloud Build).
+Moving from the old WSL-installed Postgres (`db/setup_wsl.sh`, now legacy): dump it, stop it, restore into the container.
+```powershell
+wsl -d Ubuntu -u root -- sh -c "PGPASSWORD=smallie pg_dump -h localhost -p 5433 -U smallie -Fc smallie -f /root/smallie.dump && systemctl disable --now postgresql"
+wsl -d Ubuntu -u root --cd "/mnt/c/Users/Asus ROG/projects/smallie" -- docker compose up -d db
+wsl -d Ubuntu -u root -- docker cp /root/smallie.dump smallie-db:/tmp/smallie.dump
+wsl -d Ubuntu -u root -- docker exec smallie-db psql -U smallie -d postgres -c "DROP DATABASE smallie" -c "CREATE DATABASE smallie OWNER smallie" -c "GRANT CONNECT ON DATABASE smallie TO agent_readonly"
+wsl -d Ubuntu -u root -- docker exec smallie-db pg_restore -U smallie -d smallie --exit-on-error /tmp/smallie.dump
+```
+The old data stays in `/var/lib/postgresql` inside WSL until you remove the `postgresql` package.
 
 **2. App.** Run these on Windows:
 ```powershell
@@ -110,7 +117,7 @@ app/
     formats/      answer formats the orchestrator follows when it writes up results (summary, list, report...)
   api/            FastAPI app and shared routes: chat (SSE streaming), conversations, memories, agents, admin
   static/         plain HTML/JS UI with an EN/VI toggle
-db/init/          extension, read-only role, market schema (loaded by db/setup_wsl.sh or on first `docker compose up`)
+db/init/          extension, read-only role, market schema (loaded on the first `docker compose up`; db/setup_wsl.sh is the legacy non-Docker setup)
 Dockerfile        container image for Cloud Run (.gcloudignore / .dockerignore keep secrets out)
 scripts/          load_stocks.py (fill/refresh stock data), reindex.py (after changing the embedding model),
                   bench_chat.py (latency and model calls per scenario)
@@ -217,9 +224,9 @@ Point `READONLY_DATABASE_URL` at a read-only role on your database and set `SCHE
 
 ## Troubleshooting
 
-- **Port 5433 already in use:** change `PORT` in `db/setup_wsl.sh` (or `ports` in `docker-compose.yml`) and update both URLs in `.env`.
-- **Can't connect from Windows to Postgres in WSL:** make sure it's running (`wsl -d Ubuntu -u root service postgresql status`). Also check that `localhostForwarding` isn't set to false in `%UserProfile%\.wslconfig`.
-- **Recreating the read-only role:** in WSL, run `PGPASSWORD=smallie psql -h localhost -p 5433 -U smallie -d smallie -c "DROP OWNED BY agent_readonly; DROP ROLE agent_readonly;"`, re-run the setup script, then `uv run python -m scripts.load_stocks` (it re-grants the `market` schema). With Docker, run `docker compose down -v; docker compose up -d`.
+- **Port 5433 already in use:** the old WSL Postgres may still be running (`wsl -d Ubuntu -u root -- systemctl disable --now postgresql`). Otherwise change `ports` in `docker-compose.yml` and update both URLs in `.env`.
+- **Can't connect from Windows to Postgres:** check the container is up (`wsl -d Ubuntu -u root -- docker ps`). Also check that `localhostForwarding` isn't set to false in `%UserProfile%\.wslconfig`.
+- **Recreating the database from scratch:** `docker compose down -v` then `docker compose up -d db` (run both via `wsl -d Ubuntu -u root --cd "<project path in /mnt/c>" --`; `-v` deletes all local data), then `uv run python -m scripts.load_stocks --full`.
 - **Chat errors with "the connection is closed", or old chats won't open:** Postgres was restarted while the app was running. Current versions reconnect automatically. If you still see this, make sure Postgres is running and restart the app.
 - **Stock questions return nothing / "relation market.stocks does not exist":** run `uv run python -m scripts.load_stocks`, then restart the app (the SQL agent reads the schema at startup). If it reports tickers with no price data, those companies were delisted or renamed; replace them in `app/features/market/tickers.py`.
 - **Cloud Run build fails:** `gcloud builds list --region asia-southeast1 --limit 1`, then `gcloud builds log <id> --region asia-southeast1`. `PERMISSION_DENIED` before the build starts means the `roles/run.builder` grant in *Deploying* is missing.

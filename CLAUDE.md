@@ -16,7 +16,7 @@ Layout of `app/`: `core/` (config, llm, db, memory, auth, accounts, conversation
 
 ## Commands
 
-Development is on Windows with `uv`. Postgres (pgvector) runs on **port 5433** directly in WSL (`db/setup_wsl.sh`; start it with `wsl -d Ubuntu -u root service postgresql start`; it stops when WSL idles, so start it again before running DB tests). Local development doesn't use Docker; `docker compose up -d` is only an alternative setup, and no local `docker build` is needed before deploying.
+Development is on Windows with `uv`. Postgres 18 (pgvector) runs on **port 5433** in the compose `db` container (`smallie-db`), on Docker Engine inside WSL Ubuntu (no Docker Desktop). Run Docker commands through WSL: `wsl -d Ubuntu -u root --cd "/mnt/c/Users/Asus ROG/projects/smallie" -- docker compose up -d db`. The container restarts whenever WSL starts (`restart: unless-stopped`); when WSL has idled out, any `wsl` command (e.g. `wsl -d Ubuntu -u root -- docker ps`) brings it back before DB tests. The WSL-installed Postgres (`db/setup_wsl.sh`) is legacy and disabled. No local `docker build` is needed before deploying the main app.
 
 ```powershell
 uv sync                                            # install deps into .venv

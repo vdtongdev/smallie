@@ -11,7 +11,7 @@ from app.core import auth
 from app.core.accounts import ensure_admin
 from app.api import routes_admin, routes_agents, routes_chat, routes_conversations, routes_memories, routes_usage
 from app.agents.registry import AGENTS
-from app.core.config import get_settings
+from app.core.config import export_tracing, get_settings
 from app.core.db import init_db
 from app.features.registry import FEATURES
 from app.core.memory import open_persistence
@@ -25,6 +25,7 @@ SESSION_MAX_AGE = 60 * 60 * 24 * 30  # stay logged in for 30 days
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
+    export_tracing(settings)
     if not settings.openrouter_api_key:
         logging.warning("OPENROUTER_API_KEY is not set; chat and document indexing will fail.")
     settings.upload_dir.mkdir(parents=True, exist_ok=True)

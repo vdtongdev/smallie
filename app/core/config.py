@@ -1,9 +1,14 @@
+import logging
+import os
 from functools import lru_cache
 from pathlib import Path
 
+from langsmith import utils as ls_utils
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
+log = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -48,6 +53,11 @@ class Settings(BaseSettings):
     # Model calls of the orchestrator per message: decide, then write up results (specialists' own calls not included).
     orchestrator_max_model_calls: int = 4
 
+    # LangSmith tracing (debugging): every model and tool call of a chat, sent to smith.langchain.com.
+    langsmith_tracing: bool = False
+    langsmith_api_key: str = ""
+    langsmith_project: str = "smallie"
+
     @property
     def sqlalchemy_url(self) -> str:
         """Same database, but with the psycopg3 driver prefix SQLAlchemy needs."""
@@ -65,3 +75,16 @@ def _with_psycopg_driver(url: str) -> str:
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def export_tracing(settings: Settings) -> None:
+    """Turn on LangSmith tracing when the settings say so. The SDK reads os.environ, while .env
+    only fills Settings, so the values are copied over."""
+    if not settings.langsmith_tracing:
+        return
+    if not settings.langsmith_api_key:
+        log.warning("LANGSMITH_TRACING is on but LANGSMITH_API_KEY is empty; tracing stays off.")
+        return
+    os.environ.update(LANGSMITH_TRACING="true", LANGSMITH_API_KEY=settings.langsmith_api_key,
+                      LANGSMITH_PROJECT=settings.langsmith_project)
+    ls_utils.get_env_var.cache_clear()  # the SDK caches what it read before

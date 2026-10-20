@@ -87,6 +87,7 @@ A multi-step workflow is one entry (research is a one-step example that leaves t
 ## Notes
 
 - Config is `pydantic-settings` reading `.env` (`app/core/config.py`, cached via `get_settings()`); `.env.example` documents every variable. SQLAlchemy URLs get the `postgresql+psycopg://` prefix via `sqlalchemy_url` properties, while psycopg/LangGraph use the raw `DATABASE_URL`.
+- LangSmith tracing is off by default (`LANGSMITH_TRACING`, `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT`). `export_tracing` (`app/core/config.py`, first step of the lifespan) copies them from `Settings` into `os.environ` and clears the SDK's cached env reads, because `.env` never reaches `os.environ`. Scripts don't call it; set the variables in the shell to trace them. Chat runs carry `metadata.user_id`. Traces hold full prompts (users' messages, file passages, memories).
 - Sync DB/vector work is wrapped in `asyncio.to_thread` from async routes and tools.
 - Every DB connection must survive a Postgres restart (WSL stops Postgres when the distro shuts down): SQLAlchemy engines (including PGVector's, via `engine_args`) use `pool_pre_ping=True`, and the LangGraph pool uses `check=AsyncConnectionPool.check_connection` plus TCP keepalives. Don't go back to `from_conn_string`, which holds one connection that never reconnects.
 - Deployment: Google Cloud Run (project `smallie-review`, region `asia-southeast1`, https://smallie-976519788978.asia-southeast1.run.app) + Neon Postgres 18 (Singapore). Steps are in README "Deploying".

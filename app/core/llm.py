@@ -30,6 +30,9 @@ def get_chat_model(model: str | None = None, *, streaming: bool = True) -> ChatO
     quantizations = [q.strip() for q in s.openrouter_quantizations.split(",") if q.strip()]
     if quantizations:
         extra_body["provider"] = {"quantizations": quantizations}
+    # Within that filter the cheapest provider is often the slowest (14 vs 130 tok/s measured).
+    if s.openrouter_provider_sort:
+        extra_body.setdefault("provider", {})["sort"] = s.openrouter_provider_sort
     return OpenRouterChat(
         model=model,
         api_key=s.openrouter_api_key,

@@ -97,7 +97,7 @@ graph_edges = Table(
 
 @lru_cache
 def get_engine() -> Engine:
-    return create_engine(get_settings().sqlalchemy_url, pool_pre_ping=True)
+    return create_engine(get_settings().sqlalchemy_url, **pool_args())
 
 
 @lru_cache
@@ -111,9 +111,15 @@ def readonly_engine(sqlalchemy_url: str) -> Engine:
     """An engine whose transactions are read-only and time out after 10s."""
     return create_engine(
         sqlalchemy_url,
-        pool_pre_ping=True,
+        **pool_args(),
         connect_args={"options": "-c default_transaction_read_only=on -c statement_timeout=10000"},
     )
+
+
+def pool_args() -> dict:
+    """Engine pool settings: survive a Postgres restart (AP-002), and stay small so several
+    processes (the app plus the agent servers) fit under Neon's connection cap."""
+    return {"pool_pre_ping": True, "pool_size": get_settings().db_pool_size, "max_overflow": 0}
 
 
 def init_db() -> None:

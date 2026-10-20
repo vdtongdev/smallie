@@ -4,6 +4,7 @@ Embedding calls (memories, chat history, documents) are not counted.
 """
 
 from langchain_core.callbacks import AsyncCallbackHandler
+from langchain_core.messages import BaseMessage
 from langchain_core.outputs import LLMResult
 from langgraph.store.base import BaseStore
 
@@ -27,12 +28,16 @@ class UsageCounter(AsyncCallbackHandler):
         for generations in response.generations:
             for generation in generations:
                 message = getattr(generation, "message", None)
-                if message is None:
-                    continue
-                usage = message.usage_metadata or {}
-                self.input_tokens += usage.get("input_tokens", 0)
-                self.output_tokens += usage.get("output_tokens", 0)
-                self.cost += message.response_metadata.get("cost") or 0.0
+                if message is not None:
+                    self.count(message)
+
+    def count(self, message: BaseMessage) -> None:
+        """Add one model reply; also used for replies of remote agents, whose calls this
+        counter never sees (app/agents/remote.py)."""
+        usage = getattr(message, "usage_metadata", None) or {}
+        self.input_tokens += usage.get("input_tokens", 0)
+        self.output_tokens += usage.get("output_tokens", 0)
+        self.cost += message.response_metadata.get("cost") or 0.0
 
 
 async def get_usage(store: BaseStore, user_id: str) -> dict:

@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 from functools import lru_cache
@@ -57,6 +58,24 @@ class Settings(BaseSettings):
     langsmith_tracing: bool = False
     langsmith_api_key: str = ""
     langsmith_project: str = "smallie"
+
+    # Remote agents: each specialist runs as its own Agent Server (app/agents/remote.py).
+    agent_urls: str = ""  # JSON object route -> URL, e.g. {"sql": "http://localhost:2102"}
+    service_token: str = ""  # shared secret the agent servers require (x-service-token)
+    agent_timeout_s: float = 300  # read timeout of one specialist call; generous for cold starts
+    db_pool_size: int = 5  # connections per SQLAlchemy engine; the agent services use 2
+
+    @property
+    def agent_url_map(self) -> dict[str, str]:
+        if not self.agent_urls.strip():
+            return {}
+        try:
+            urls = json.loads(self.agent_urls)
+        except ValueError as exc:
+            raise ValueError(f"AGENT_URLS is not valid JSON: {exc}") from exc
+        if not isinstance(urls, dict):
+            raise ValueError("AGENT_URLS must be a JSON object of route -> URL")
+        return urls
 
     @property
     def sqlalchemy_url(self) -> str:

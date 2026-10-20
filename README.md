@@ -35,6 +35,16 @@ powershell -ExecutionPolicy Bypass -File scripts\dev_db.ps1
 ```
 WSL shuts down about 25 seconds after the last `wsl` command, even with Docker running, and the database goes with it (tests then get skipped or freeze). The script keeps WSL running in the background until the PC shuts down (or `wsl --shutdown`), starts the container and waits until it's ready. Running it twice is harmless.
 
+Or work from a WSL terminal yourself. WSL stays up as long as that terminal is open:
+```bash
+cd "/mnt/c/Users/Asus ROG/projects/smallie"
+docker compose up -d db          # start (no sudo: your user is in the docker group)
+docker compose ps                # status, should say (healthy)
+docker logs -f smallie-db        # live Postgres log; Ctrl+C stops watching, not the database
+docker exec -it smallie-db psql -U smallie -d smallie   # SQL shell
+```
+Keep running `uv run ...` (tests, the app) in a Windows terminal: the `.venv` is a Windows one.
+
 Moving from the old WSL-installed Postgres (`db/setup_wsl.sh`, now legacy): dump it, stop it, restore into the container.
 ```powershell
 wsl -d Ubuntu -u root -- sh -c "PGPASSWORD=smallie pg_dump -h localhost -p 5433 -U smallie -Fc smallie -f /root/smallie.dump && systemctl disable --now postgresql"

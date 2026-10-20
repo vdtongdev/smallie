@@ -27,7 +27,13 @@ All agents understand and reply in **English and Vietnamese**. They remember eac
 wsl -d Ubuntu -u root -- sh -c "apt-get update && apt-get install -y docker.io docker-compose-v2 && systemctl enable --now docker"
 wsl -d Ubuntu -u root --cd "/mnt/c/Users/Asus ROG/projects/smallie" -- docker compose up -d db
 ```
-The first start loads `db/init/*.sql`. The container listens on port 5433 and restarts by itself whenever WSL starts (`restart: unless-stopped`; WSL needs `systemd=true` in `/etc/wsl.conf`, the default on new installs). If WSL has shut down, any `wsl` command brings it back, e.g. `wsl -d Ubuntu -u root -- docker ps`.
+The first start loads `db/init/*.sql`. The container listens on port 5433 and restarts by itself whenever WSL starts (`restart: unless-stopped`; WSL needs `systemd=true` in `/etc/wsl.conf`, the default on new installs).
+
+**Each time you work on the app**, start the database with:
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\dev_db.ps1
+```
+WSL shuts down about 25 seconds after the last `wsl` command, even with Docker running, and the database goes with it (tests then get skipped or freeze). The script keeps WSL running in the background until the PC shuts down (or `wsl --shutdown`), starts the container and waits until it's ready. Running it twice is harmless.
 
 Moving from the old WSL-installed Postgres (`db/setup_wsl.sh`, now legacy): dump it, stop it, restore into the container.
 ```powershell

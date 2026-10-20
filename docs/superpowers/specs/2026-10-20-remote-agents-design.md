@@ -40,6 +40,42 @@ The spike used `langgraph-api` 0.16.2 under `langgraph dev`, and the project's i
 | Custom auth (`auth.py`, `@auth.authenticate`) without the token | Rejected: `AuthenticationError: bad service token`. With the token, the identity was set from `x-smallie-user-id`. This was tested in dev mode only. |
 | Windows | `langgraph dev` needs `colorama` (only for the dev tool). |
 
+## Spike 2 findings (throwaway, 2026-10-20)
+
+The setup was the same as spike 1, with a remote graph that streams, returns a `ToolMessage` with an artifact, sets `additional_kwargs` and `usage_metadata`, and raises `openai.RateLimitError`. The wrapper passed the node's config with `thread_id` removed.
+
+| Check | Result | Consequence |
+|---|---|---|
+| Streaming through the wrapper | Chunks reach the parent stream with the parent's namespace prefixed (`('sql:<task id>',)`), but as **dicts**, not message objects | `RemoteAgent` converts streamed dicts to message objects before `_to_events` sees them (it checks `isinstance(message, AIMessageChunk)`). |
+| Output state | Messages come back as dicts. `ToolMessage.artifact`, `additional_kwargs` (`tables`) and `findings` survive. | Tables and charts keep working. |
+| `usage_metadata` | The parent's default dict → message conversion (`add_messages`) moved `usage_metadata` and `invalid_tool_calls` into `additional_kwargs`, and `usage_metadata` became `None` | `RemoteAgent` builds the message objects itself (by `type`: `ai`, `human`, `tool`, `system`) instead of relying on `add_messages`. |
+| Remote error | `RemoteException({'error': 'RateLimitError', 'message': 'An internal error occurred'})`: the type name survives, the message doesn't | `RemoteAgent` raises a remote `RateLimitError` / `AuthenticationError` again as the matching `openai` exception. |
+| Async graph factory (`async def make_graph()` in `langgraph.json`) | Works | Research's `prepare` (MCP loading) can run inside the factory. |
+| CPU throttled between requests | Not testable locally | Checked during the Cloud Run phase. |
+
+## Agent communication
+
+In this spec agents never talk to each other directly. This is a deliberate choice, so the main app keeps control of agent behaviour and limits. Every message goes through the main app (router and orchestrator), in a hub-and-spoke shape:
+
+| Pattern | Example |
+|---|---|
+| Router → one specialist | "AAPL price last week" → sql |
+| Orchestrator asks several in parallel, then combines | `ask_sql` + `ask_docs` for "compare AAPL's P/E with my resume" |
+| Handoff | the orchestrator returns `Command(goto="sql")` |
+| Research → orchestrator | research returns `findings`, the orchestrator writes the answer |
+| Fallback | the main app sees `gave_up` and the orchestrator tries something else |
+
+- Specialists have no URLs for each other and no `RemoteGraph` to another specialist.
+- Data between agents (a sql table that chart should draw) goes back through the main app's thread and is sent on with the next call.
+- The research agent's `search_documents` and `run_sql` are tool functions imported as code, not calls to the docs and sql agents.
+
+Why:
+- **Limits:** `MAX_ASKS` and `no_repeats` in the orchestrator cap repeated calls only because the hub sees every call. Direct calls could loop between servers and burn free-tier model calls.
+- **Security:** only the main app passes `user_id` on.
+- **Tracing:** one LangSmith trace has one root.
+
+Spec 2's chat room keeps the hub: a moderator holds the transcript and passes it to the next speaker, so agents only seem to talk to each other.
+
 ## Architecture
 
 ```
@@ -159,7 +195,7 @@ It wraps `RemoteGraph(spec.route, url=<ROUTE>_AGENT_URL, distributed_tracing=Tru
 
 Each phase ends with green tests and can merge on its own:
 
-0. **Spike 2** (throwaway): streaming through `RemoteAgent` (message objects or dicts, namespaces, `tools` segment), `ToolMessage.artifact` and `additional_kwargs` surviving JSON, the shape of remote error payloads, an async graph factory for research's `prepare`, and the Agent Server with CPU throttled between requests.
+0. **Spike 2** (done, see "Spike 2 findings"). The Agent Server with CPU throttled between requests is still to check during the Cloud Run phase.
 1. Docker migration.
 2. LangSmith tracing: approved separately, branch `0.3.5/langsmith-tracing`, off by default. It goes first because `distributed_tracing` uses it.
 3. Agent server entrypoints, `Dockerfile.agent`, compose stack.

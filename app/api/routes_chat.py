@@ -13,6 +13,7 @@ from starlette.background import BackgroundTask
 from app.core.accounts import get_profile
 from app.agents.artifacts import artifacts_from
 from app.agents.registry import ROUTES, SILENT_STEPS, STEPS
+from app.agents.remote import RUN_NODE, as_message
 from app.orchestration.orchestrator import HANDOFF
 from app.orchestration.router import ORCHESTRATOR
 from app.core.auth import get_current_user
@@ -170,17 +171,28 @@ async def _events_from(stream) -> AsyncIterator[dict]:
 
 def _step(namespace: tuple[str, ...]) -> tuple[str, str] | None:
     """(route, step) for chunks from inside a workflow step listed in its spec's `steps`."""
-    if len(namespace) < 2:
+    # An agent server's wrapper node sits between the route and its steps.
+    names = [name for name in (segment.split(":", 1)[0] for segment in namespace) if name != RUN_NODE]
+    if len(names) < 2:
         return None
-    route, step = (segment.split(":", 1)[0] for segment in namespace[:2])
+    route, step = names[:2]
     return (route, step) if step in STEPS.get(route, ()) else None
+
+
+def _message(value):
+    """A message object; a remote agent's chunks are JSON dicts. None for a type the UI doesn't
+    show (a remote RemoveMessage, say), so one odd message can't end the whole reply."""
+    try:
+        return as_message(value)
+    except ValueError:
+        return None
 
 
 def _to_events(mode: str, chunk, namespace: tuple[str, ...] = ()) -> list[dict]:
     """SSE events for one stream chunk. `namespace` is () for the assistant graph itself and
     non-empty for chunks from inside an agent subgraph."""
     if mode == "messages":
-        message, metadata = chunk
+        message, metadata = _message(chunk[0]), chunk[1]
         if isinstance(message, AIMessageChunk) and metadata.get("langgraph_node") == "model" and message.text:
             nodes = [segment.split(":", 1)[0] for segment in namespace]
             # A researcher's notes, or an agent the orchestrator called as a tool: the
@@ -193,7 +205,7 @@ def _to_events(mode: str, chunk, namespace: tuple[str, ...] = ()) -> list[dict]:
     # mode == "updates": {node_name: state_update}
     events = []
     for node, update in chunk.items():
-        if not isinstance(update, dict):
+        if not isinstance(update, dict) or (namespace and node == RUN_NODE):
             continue
         if not namespace:
             # Top level: only the router's choice or the orchestrator's handoff is new. The
@@ -204,7 +216,8 @@ def _to_events(mode: str, chunk, namespace: tuple[str, ...] = ()) -> list[dict]:
             if update.get("route"):
                 events.append({"type": "agent", "name": update["route"]})
             continue
-        for message in update.get("messages", []):
+        messages = update.get("messages", [])
+        for message in map(_message, messages if isinstance(messages, list) else [messages]):
             if isinstance(message, AIMessage):
                 events += [{"type": "tool_call", "name": c["name"], "args": c["args"]}
                            for c in message.tool_calls if c["name"] != HANDOFF]  # shown as the agent badge

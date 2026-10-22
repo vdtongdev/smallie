@@ -7,7 +7,8 @@
 Runs the assistant in-process exactly like `POST /api/chat/auto` (same graph, memories and
 SSE events), as BENCH_USER (default: the admin, who owns the uploaded test documents). Reports
 per scenario: time to the first visible event and first answer token, total time, model calls
-and their latency. Every call spends free-tier quota (one scenario: 1-10 requests), so
+(the agent servers' reported calls included) and the latency of the calls made in this process
+(the orchestrator's; the agent servers' calls run elsewhere). Every call spends free-tier quota (one scenario: 1-10 requests), so
 scenarios are spaced out to stay under ~20 requests/min. Threads and memories it creates are
 deleted afterwards. The app may keep running.
 """
@@ -30,6 +31,7 @@ from app.api.routes_chat import _events_from
 from app.core.db import init_db
 from app.core.graph import recall_facts
 from app.core.memory import AgentContext, open_persistence
+from app.core.usage import UsageCounter
 from app.orchestration.graph import build_assistant
 
 SCENARIOS = {
@@ -80,7 +82,8 @@ class Result:
     first_tool: float | None = None
     first_token: float | None = None
     total: float = 0.0
-    calls: list[Call] = field(default_factory=list)
+    model_calls: int = 0  # every call of the message, the agent servers' included
+    calls: list[Call] = field(default_factory=list)  # timed calls made in this process
     answer: str = ""
     charts: list[str] = field(default_factory=list)  # charts drawn: "type: title (series x points)"
     error: str = ""
@@ -132,8 +135,8 @@ class Timing(AsyncCallbackHandler):
 
 async def run_scenario(assistant, store, user_id: str, name: str, run: int) -> Result:
     *before, message = messages_of(name)
-    result, timing = Result(scenario=name, run=run), Timing()
-    config = {"configurable": {"thread_id": f"bench-{uuid.uuid4()}"}, "callbacks": [timing]}
+    result, timing, usage = Result(scenario=name, run=run), Timing(), UsageCounter()
+    config = {"configurable": {"thread_id": f"bench-{uuid.uuid4()}"}, "callbacks": [timing, usage]}
     try:
         for earlier in before:  # setup turns, not measured
             await assistant.ainvoke({"messages": [{"role": "user", "content": earlier}]},
@@ -168,7 +171,7 @@ async def run_scenario(assistant, store, user_id: str, name: str, run: int) -> R
     except Exception as exc:  # noqa: BLE001 - a failed scenario is a result too
         result.error = f"{type(exc).__name__}: {str(exc)[:200]}"
     result.total = elapsed()
-    result.calls = timing.order
+    result.calls, result.model_calls = timing.order, usage.model_calls
     await assistant.checkpointer.adelete_thread(config["configurable"]["thread_id"])
     return result
 
@@ -188,11 +191,12 @@ def report(results: list[Result]) -> None:
         calls = " ".join(f"{c.seconds:.1f}{'!' if c.error else ''}({c.agent[:4]}{f' {c.out_chars}ch' if c.out_chars else ''})"
                          for c in r.calls)
         route = "->".join(r.route) or "?"
-        print(f"{r.scenario:<16} {route[:26]:<26} {len(r.calls):>5} {fmt(r.first_event):>7} "
+        print(f"{r.scenario:<16} {route[:26]:<26} {r.model_calls:>5} {fmt(r.first_event):>7} "
               f"{fmt(r.first_token):>7} {r.total:>6.1f}  {calls}{'  ERROR ' + r.error if r.error else ''}")
+    print(f"\nmodel calls: {sum(r.model_calls for r in results)}")
     seconds = [c.seconds for r in results for c in r.calls if not c.error]
     if seconds:
-        print(f"\nmodel calls: {len(seconds)} ok, median {statistics.median(seconds):.1f}s, "
+        print(f"timed in this process: {len(seconds)} ok, median {statistics.median(seconds):.1f}s, "
               f"max {max(seconds):.1f}s; errors: {sum(1 for r in results for c in r.calls if c.error)}")
 
 
@@ -215,7 +219,7 @@ async def main(args) -> None:
                 print(f"[run {run}] {name}: {' / '.join(messages_of(name))}", flush=True)
                 results.append(await run_scenario(assistant, store, user_id, name, run))
                 r = results[-1]
-                print(f"  {'->'.join(r.route)}  {len(r.calls)} calls  {r.total:.1f}s  {r.error}", flush=True)
+                print(f"  {'->'.join(r.route)}  {r.model_calls} calls  {r.total:.1f}s  {r.error}", flush=True)
     report(results)
     if args.out:
         with open(args.out, "w", encoding="utf-8") as f:

@@ -9,3 +9,11 @@ uploads/*
 __pycache__/
 *.pyc
 tests/
+cloudrun.agent*.yaml
+.langgraph_api/
+# Local tooling, not part of the app
+.claude/
+.codegraph/
+.superpowers/
+.antipatterns/
+CLAUDE.local.md

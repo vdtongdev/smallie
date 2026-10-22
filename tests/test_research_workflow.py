@@ -13,6 +13,7 @@ from app.api.routes_chat import _events_from
 from app.core.memory import AgentContext
 from app.core.prompts import reply_language
 from app.orchestration.graph import build_assistant
+from tests.conftest import local_agents
 from tests.scripted import scripted as _turn
 
 NOTES = "FINDINGS:\n- LangGraph is a library for agent graphs [source: https://example.com/lg]\nGAPS: none"
@@ -23,7 +24,7 @@ def _assistant(monkeypatch, model):
     monkeypatch.setattr(sql_agent, "describe_schema", lambda: "")
     monkeypatch.setattr(research_agent, "describe_schema", lambda: "")
     monkeypatch.setattr("app.agents.docs.agent.document_names", lambda user_id: [])
-    return build_assistant(InMemorySaver(), InMemoryStore())
+    return build_assistant(InMemorySaver(), InMemoryStore(), agents=local_agents())
 
 
 async def _run(assistant, message: str, thread: str = "t1") -> list[dict]:

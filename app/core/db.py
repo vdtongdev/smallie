@@ -97,7 +97,7 @@ graph_edges = Table(
 
 @lru_cache
 def get_engine() -> Engine:
-    return create_engine(get_settings().sqlalchemy_url, pool_pre_ping=True)
+    return create_engine(get_settings().sqlalchemy_url, **pool_args())
 
 
 @lru_cache
@@ -111,9 +111,32 @@ def readonly_engine(sqlalchemy_url: str) -> Engine:
     """An engine whose transactions are read-only and time out after 10s."""
     return create_engine(
         sqlalchemy_url,
-        pool_pre_ping=True,
+        **pool_args(),
         connect_args={"options": "-c default_transaction_read_only=on -c statement_timeout=10000"},
     )
+
+
+def pool_args() -> dict:
+    """Engine pool settings: survive a Postgres restart (AP-002), and stay small so several
+    processes (the app plus the agent servers) fit under Neon's connection cap."""
+    return {"pool_pre_ping": True, "pool_size": get_settings().db_pool_size, "max_overflow": 0}
+
+
+# What the agent servers' agent_reader role (db/init/06_agent_reader.sql) may read: document
+# passages, the graph and the store's chat history. Never users, conversations or checkpoints.
+READER_TABLES = ("documents", "graph_nodes", "graph_edges", "langchain_pg_collection", "langchain_pg_embedding",
+                 "store", "store_vectors", "store_migrations", "vector_migrations")
+
+
+def grant_reader() -> None:
+    """Let agent_reader read READER_TABLES, if that role exists. The app runs this at startup,
+    once its tables exist; they appear after the init scripts on a fresh database."""
+    with get_engine().begin() as conn:
+        if not conn.execute(text("SELECT 1 FROM pg_roles WHERE rolname = 'agent_reader'")).first():
+            return
+        for table in READER_TABLES:
+            if conn.execute(text("SELECT to_regclass(:t)"), {"t": f"public.{table}"}).scalar():
+                conn.execute(text(f'GRANT SELECT ON public."{table}" TO agent_reader'))
 
 
 def init_db() -> None:

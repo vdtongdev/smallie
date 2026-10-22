@@ -8,3 +8,11 @@ tests/
 .git/
 cloudrun.env.yaml
 .gcloudignore
+.langgraph_api/
+cloudrun.agent*.yaml
+# Local tooling, not part of the app
+.claude/
+.codegraph/
+.superpowers/
+.antipatterns/
+CLAUDE.local.md

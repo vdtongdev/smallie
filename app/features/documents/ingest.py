@@ -12,7 +12,7 @@ from pypdf import PdfReader
 from sqlalchemy import update
 
 from app.core.config import get_settings
-from app.core.db import documents, get_engine
+from app.core.db import documents, get_engine, pool_args
 from app.core.llm import get_embeddings
 
 log = logging.getLogger(__name__)
@@ -31,7 +31,9 @@ def get_vector_store() -> PGVector:
         connection=get_settings().sqlalchemy_url,
         collection_name=COLLECTION,
         use_jsonb=True,
-        engine_args={"pool_pre_ping": True},
+        engine_args=pool_args(),
+        # init_db creates it; the agent servers' agent_reader role can't (read-only transactions).
+        create_extension=False,
     )
 
 

@@ -22,7 +22,16 @@ if ($running) {
 wsl -d $distro -u root --cd $project -- docker compose up -d db
 for ($i = 0; $i -lt 30; $i++) {
     $health = (wsl -d $distro -u root -- docker inspect -f "{{.State.Health.Status}}" smallie-db) -join ""
-    if ($health -eq "healthy") { Write-Host "Postgres is ready on localhost:5433."; exit 0 }
+    if ($health -eq "healthy") {
+        # Init scripts only run on a fresh volume; these are idempotent (the agent servers' databases
+        # and their read-only role, for volumes created before they existed).
+        wsl -d $distro -u root -- docker exec smallie-db psql -U smallie -d postgres -q -v ON_ERROR_STOP=1 -f /docker-entrypoint-initdb.d/05_agent_databases.sql
+        if ($LASTEXITCODE -ne 0) { Write-Error "Creating the agent databases failed (05_agent_databases.sql)." }
+        wsl -d $distro -u root -- docker exec smallie-db psql -U smallie -d smallie -q -v ON_ERROR_STOP=1 -f /docker-entrypoint-initdb.d/06_agent_reader.sql
+        if ($LASTEXITCODE -ne 0) { Write-Error "Setting up agent_reader failed (06_agent_reader.sql)." }
+        Write-Host "Postgres is ready on localhost:5433."
+        exit 0
+    }
     Start-Sleep -Seconds 1
 }
 Write-Error "smallie-db did not become healthy in 30 s; check: wsl -d $distro -u root -- docker logs smallie-db"

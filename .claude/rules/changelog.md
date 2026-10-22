@@ -5,12 +5,14 @@
 ## Version numbers: `major.minor.patch`
 
 - **Major** stays `0` until the user says otherwise.
-- **Minor** goes up by one for each release that adds agents. Agents released together share one minor version:
+- **Minor** goes up by one for each release that adds agents or changes the architecture (how the parts run and talk to each other). Work released together shares one minor version:
   - `0.1.0`: docs agent and SQL agent
   - `0.2.0`: research agent and writer agent
   - `0.3.0`: orchestrator and chart agent
-  - The next agent(s) get `0.4.0`.
-- **Patch** is for bug fixes and small features (anything that isn't a new agent), and restarts at `.1` after each new minor (`0.4.0` → `0.4.1`).
+  - `0.4.0`: remote agents (each specialist its own Agent Server), with its foundation: local Postgres in Docker and LangSmith tracing
+  - `0.5.0`: image agent
+  - Later agents or architecture changes get `0.6.0`.
+- **Patch** is for bug fixes and small features (anything that isn't a new agent or an architecture change), and restarts at `.1` after each new minor (`0.4.0` → `0.4.1`).
   - Group 3–5 bug fixes or small features into one patch. Don't make a patch per item.
   - A single urgent fix may be its own patch if nothing else is waiting.
 - Refactors and tooling (e.g. the project restructure, the benchmark script) don't count toward the 3–5. List them under the version they shipped with.
@@ -18,13 +20,13 @@
 ## Finding what goes in
 
 1. Find the last released version in `CHANGELOG.md`, then read every commit since it: `git log --reverse --format="%h %s%n%b"` (merge commits only matter for their branch's commits).
-2. Classify each commit: **new agent** (new minor), **bug fix** or **small feature** (patch), or **other** (listed under the version it shipped with). Read the commit body; one commit can hold several fixes (e.g. "also includes earlier pending work").
+2. Classify each commit: **new agent** or **architecture change** (new minor), **bug fix** or **small feature** (patch), or **other** (listed under the version it shipped with). Read the commit body; one commit can hold several fixes (e.g. "also includes earlier pending work").
 3. A bug fix is something that behaved wrongly for the user or the operator: wrong output, wrong language, wasted calls, something slow enough to be a problem, a crash. Docs-only commits (README, CLAUDE.md) aren't listed.
 
 ## Format
 
 - Oldest version first. The file starts with `# Changelog` and one line explaining the version scheme.
-- Minor headings name the agents: `## 0.4.0 - <Name> agent and <name> agent` (one agent: `## 0.4.0 - <Name> agent`).
+- Minor headings name the agents: `## 0.5.0 - <Name> agent and <name> agent` (one agent: `## 0.5.0 - <Name> agent`), or the architecture change: `## 0.4.0 - Remote agents`.
 - Patch headings are `## 0.4.1 - Fixes`, or `## 0.4.1 - <Feature> and fixes` when the patch holds a small feature. Each fix is one bold bullet named after what the user saw, not the code change:
   ```
   - **Fix: <symptom, e.g. English research questions answered in Vietnamese>**

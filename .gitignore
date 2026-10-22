@@ -11,3 +11,5 @@ cloudrun.env.yaml
 .claude/skills/
 .antipatterns/
 CLAUDE.local.md
+.langgraph_api/
+cloudrun.agent*.yaml

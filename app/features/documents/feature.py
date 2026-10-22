@@ -7,7 +7,7 @@ from app.core.config import get_settings
 from app.core.db import documents, get_engine
 from app.features.base import Feature
 from app.features.documents import routes
-from app.features.documents.ingest import delete_document_chunks
+from app.features.documents.ingest import delete_document_chunks, get_vector_store
 
 
 def _delete_documents(user_id: str) -> None:
@@ -25,4 +25,10 @@ async def delete_user_data(user_id: str) -> None:
     await asyncio.to_thread(_delete_documents, user_id)
 
 
-FEATURE = Feature(name="documents", routers=(routes.router,), delete_user_data=delete_user_data)
+def start(stack) -> None:
+    """Create the vector tables and collection now, not at the first upload: the agent servers'
+    read-only role can't create them, and grant_reader needs them."""
+    get_vector_store()
+
+
+FEATURE = Feature(name="documents", routers=(routes.router,), start=start, delete_user_data=delete_user_data)

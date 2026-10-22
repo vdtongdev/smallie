@@ -1,0 +1,30 @@
+# One image for every agent server; AGENT_ROUTE picks the agent (app/agents/server.py).
+# A LangGraph Agent Server in "lite" mode: needs LANGSMITH_API_KEY, DATABASE_URI (its own run
+# queue) and REDIS_URI. Based on what `langgraph dockerfile -c langgraph.json` generates; written by
+# hand because pyproject.toml has no build-system (so `pip install -e .` can't work) and Cloud Build
+# needs a Dockerfile.
+# Pinned by digest (langgraph-api 0.16.4): the tag is rebuilt almost daily, and a new
+# /api/constraints.txt or run behaviour must be a deliberate upgrade, not a surprise in Cloud Build.
+FROM langchain/langgraph-api:3.12@sha256:6bee4e26019e5ddda90e5cd37b8d76bb828b6a1238991c9e1604f4437f0bac4d
+
+WORKDIR /deps/smallie
+COPY pyproject.toml uv.lock ./
+# The base image's constraints keep its langgraph-api working alongside our pinned dependencies.
+# Two pins clash with it and are dropped here only (the main app keeps them):
+# - protobuf: the server needs <7; ours comes only from yfinance (any >=3.19), unused on agent servers.
+# - fastapi + opentelemetry-api: the server pins otel 1.42.1, our fastapi needs >=1.44; agent
+#   servers never import fastapi (tests/test_agent_server.py checks), so it isn't installed.
+RUN uv export --frozen --no-dev --no-hashes --no-emit-project -o /tmp/requirements.txt \
+    && sed -i -E '/^(protobuf|fastapi|opentelemetry-api)==/d' /tmp/requirements.txt \
+    && PYTHONDONTWRITEBYTECODE=1 uv pip install --system --no-cache-dir -r /tmp/requirements.txt -c /api/constraints.txt
+COPY app ./app
+
+ENV PYTHONPATH=/deps/smallie \
+    LANGSERVE_GRAPHS='{"agent": "/deps/smallie/app/agents/server.py:make_graph"}' \
+    LANGGRAPH_AUTH='{"path": "/deps/smallie/app/agents/server_auth.py:auth", "disable_studio_auth": true}' \
+    LANGGRAPH_HTTP='{"configurable_headers": {"includes": ["x-smallie-*"]}}'
+
+# Our dependencies must not have replaced the server's own packages.
+RUN mkdir -p /api/langgraph_api /api/langgraph_runtime /api/langgraph_license \
+    && touch /api/langgraph_api/__init__.py /api/langgraph_runtime/__init__.py /api/langgraph_license/__init__.py \
+    && PYTHONDONTWRITEBYTECODE=1 uv pip install --system --no-cache-dir --no-deps -e /api

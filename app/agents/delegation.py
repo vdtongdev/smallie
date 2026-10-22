@@ -29,7 +29,8 @@ def ask_tool_name(spec: AgentSpec) -> str:
 def make_ask_tool(spec: AgentSpec, agent: Runnable) -> BaseTool:
     async def ask(question: str, runtime: ToolRuntime[AgentContext]) -> tuple[str, dict]:
         try:
-            state = await agent.ainvoke({"messages": [HumanMessage(question)]}, context=runtime.context)
+            # The tool's config carries the stream hook, so a remote agent's tool calls still show.
+            state = await agent.ainvoke({"messages": [HumanMessage(question)]}, runtime.config, context=runtime.context)
         except (openai.RateLimitError, openai.AuthenticationError):
             raise  # the chat route reports these to the user
         except Exception as exc:  # noqa: BLE001 - the caller can still answer without it

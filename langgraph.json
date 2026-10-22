@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {"agent": "./app/agents/server.py:make_graph"},
+  "auth": {"path": "./app/agents/server_auth.py:auth", "disable_studio_auth": true},
+  "http": {"configurable_headers": {"includes": ["x-smallie-*"]}},
+  "python_version": "3.12"
+}

@@ -12,6 +12,7 @@ from app.api.routes_chat import _events_from
 from app.core.memory import AgentContext
 from app.orchestration import orchestrator as orchestrator_module
 from app.orchestration.graph import build_assistant
+from tests.conftest import local_agents
 from tests.scripted import per_agent
 
 CONFIG = {"configurable": {"thread_id": "t1"}}
@@ -21,13 +22,13 @@ def _call(name: str, args: dict, id: str = "c1") -> AIMessage:
     return AIMessage("", tool_calls=[{"name": name, "args": args, "id": id}])
 
 
-def _assistant(monkeypatch, model, documents=("handbook.pdf",)):
+def _assistant(monkeypatch, model, documents=("handbook.pdf",), **agents):
     monkeypatch.setattr(factory, "get_chat_model", lambda *a, **k: model)
     monkeypatch.setattr(sql_agent, "describe_schema", lambda: "")
     monkeypatch.setattr(research_agent, "describe_schema", lambda: "")
     monkeypatch.setattr(sql_agent, "stock_tickers", lambda: frozenset({"AAPL"}))
     monkeypatch.setattr(docs_agent, "document_names", lambda user_id: [(name, None) for name in documents])
-    return build_assistant(InMemorySaver(), InMemoryStore())
+    return build_assistant(InMemorySaver(), InMemoryStore(), agents=local_agents(**agents))
 
 
 async def _run(assistant, message: str) -> list[dict]:
@@ -292,3 +293,20 @@ async def test_the_orchestrator_charts_a_specialist_table_and_keeps_it_on_its_an
     assert [type(m) for m in messages] == [HumanMessage, AIMessage] and answer.name == "orchestrator"
     assert [c["id"] for c in answer.additional_kwargs["charts"]] == [_charts(events)[0]["id"]]
     assert [t["id"] for t in answer.additional_kwargs["tables"]] == ["tabcdef"]
+
+
+async def test_max_asks_still_caps_remote_calls(monkeypatch):
+    """An orchestrator that keeps asking a remote specialist is stopped by MAX_ASKS (no loop)."""
+    from app.agents.remote import RemoteAgent
+    from tests.test_remote import FakeRemote
+
+    remote = FakeRemote(output={"messages": [{"type": "human", "content": "q", "id": "q"},
+                                             {"type": "ai", "content": "AAPL's P/E is 30.", "name": "sql_agent", "id": "a"}]})
+    sql = RemoteAgent(sql_agent.SPEC, "http://sql:8000", service_token="t", timeout_s=5, remote=remote)
+    asks = [_call("ask_sql", {"question": f"What is AAPL's P/E? Try {i}."}, id=f"c{i}") for i in range(3)]
+    model = per_agent(orchestrator=[*asks, AIMessage("AAPL's P/E is 30.")])
+    # Two specialists mentioned, so the first ask isn't turned into a handoff.
+    events = await _run(_assistant(monkeypatch, model, sql=sql), "Compare AAPL's P/E with what handbook.pdf says")
+
+    assert len(remote.calls) == orchestrator_module.MAX_ASKS
+    assert _streamed(events) == "AAPL's P/E is 30."

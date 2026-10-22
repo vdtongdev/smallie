@@ -12,7 +12,7 @@ from app.core.accounts import ensure_admin
 from app.api import routes_admin, routes_agents, routes_chat, routes_conversations, routes_memories, routes_usage
 from app.agents.registry import AGENTS
 from app.core.config import export_tracing, get_settings
-from app.core.db import init_db
+from app.core.db import grant_reader, init_db
 from app.features.registry import FEATURES
 from app.core.memory import open_persistence
 from app.orchestration.graph import build_assistant
@@ -42,6 +42,7 @@ async def lifespan(app: FastAPI):
         for feature in FEATURES:
             if feature.start:
                 feature.start(stack)
+        grant_reader()  # after every table exists (store, vector tables)
         yield
 
 

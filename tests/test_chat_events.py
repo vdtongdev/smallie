@@ -84,10 +84,12 @@ async def test_step_events_only_when_a_workflow_changes_step(monkeypatch):
         yield ("research:1", "gather:2", "model:3"), "messages", chunk
         yield ("research:1", "write:4"), "messages", chunk
         yield ("sql:5",), "messages", chunk  # single agents have no steps
+        yield ("research:6", "run:7", "gather:8", "model:9"), "messages", chunk  # an agent server's wrapper node
 
     steps = [e for e in [e async for e in _events_from(stream())] if e["type"] == "step"]
     assert steps == [{"type": "step", "agent": "research", "name": "gather"},
-                     {"type": "step", "agent": "research", "name": "write"}]
+                     {"type": "step", "agent": "research", "name": "write"},
+                     {"type": "step", "agent": "research", "name": "gather"}]
 
 
 CHART = {"id": "c1", "type": "bar", "title": "t", "labels": ["a"], "series": [{"name": "s", "values": [1.0]}]}
@@ -117,3 +119,24 @@ def test_a_fallback_drops_the_reply_before_the_orchestrator_takes_over():
     update = {"fallback": {"route": "orchestrator", "failed": "docs", "attempt": "...", "messages": []}}
     assert _to_events("updates", update) == [
         {"type": "fallback", "agent": "docs"}, {"type": "agent", "name": "orchestrator"}]
+
+
+def test_unknown_remote_messages_are_skipped_not_fatal():
+    """A remote message of a type the app doesn't know must not end the whole reply."""
+    assert _to_events("messages", ({"type": "remove", "id": "x"}, {"langgraph_node": "model"}), SUBGRAPH) == []
+    assert _to_events("messages", ({"type": "function", "content": "x"}, {"langgraph_node": "model"}), SUBGRAPH) == []
+    single = {"type": "ai", "content": "", "tool_calls": [{"name": "run_sql", "args": {}, "id": "c1"}]}
+    assert _to_events("updates", {"model": {"messages": single}}, SUBGRAPH) == [
+        {"type": "tool_call", "name": "run_sql", "args": {}}]
+
+
+def test_remote_dict_chunks_become_events():
+    """A remote agent's chunks arrive as JSON dicts; they give the same events as messages do."""
+    token = ({"type": "AIMessageChunk", "content": "Hi"}, {"langgraph_node": "model"})
+    assert _to_events("messages", token, SUBGRAPH) == [{"type": "token", "text": "Hi"}]
+    call = {"type": "ai", "content": "", "tool_calls": [{"name": "run_sql", "args": {"query": "SELECT 1"}, "id": "c1"}]}
+    result = {"type": "tool", "content": "| ?column? |", "name": "run_sql", "tool_call_id": "c1"}
+    assert _to_events("updates", {"model": {"messages": [call]}, "tools": {"messages": [result]}}, SUBGRAPH) == [
+        {"type": "tool_call", "name": "run_sql", "args": {"query": "SELECT 1"}},
+        {"type": "tool_result", "name": "run_sql", "content": "| ?column? |"},
+    ]

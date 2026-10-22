@@ -70,6 +70,17 @@ After that, the app keeps the data fresh on its own. While it runs, a background
 
 You can still run the script by hand. Later runs only fetch the last few days; add `--prices-only` to skip the profiles, or `--full` to re-download all history (for example after a stock split). The script and the background job share a database lock, so they never update at the same time. The ticker list is in `app/features/market/tickers.py`.
 
+**4. Agent servers.** The specialists (docs, sql, research, chart) each run as their own LangGraph Agent Server in Docker, next to the database. The main app calls them over HTTP (see `ARCHITECTURE.md`, section 10).
+1. In `.env`, set `LANGSMITH_API_KEY` (the Agent Server's free "lite" licence needs it), a `SERVICE_TOKEN` (any long random string), and `AGENT_URLS` (copy the local line from `.env.example`).
+2. **Turn off Cloudflare WARP and other VPN clients (e.g. SoftEther) first.** They corrupt downloads inside WSL ("bad record MAC"), and the agent servers' calls to OpenRouter go through the same network.
+3. Build and start the stack:
+   ```powershell
+   wsl -d Ubuntu -u root --cd "/mnt/c/Users/Asus ROG/projects/smallie" -- docker compose up -d --build
+   wsl -d Ubuntu -u root --cd "/mnt/c/Users/Asus ROG/projects/smallie" -- docker compose ps   # all agents "(healthy)"
+   ```
+
+The first build downloads about 1 GB. After changing agent code, run the same `up -d --build` again. The main app won't start without `AGENT_URLS`.
+
 ## Run
 
 ```powershell

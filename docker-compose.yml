@@ -1,3 +1,23 @@
+x-agent: &agent
+  build: {context: ., dockerfile: Dockerfile.agent}
+  image: smallie-agent
+  env_file: .env  # OpenRouter, LangSmith (the lite licence needs LANGSMITH_API_KEY), SERVICE_TOKEN ...
+  restart: unless-stopped
+  depends_on:
+    db: {condition: service_healthy}
+    redis: {condition: service_started}
+
+# Inside the compose network the database is db:5432, not localhost:5433 as in .env.
+x-agent-env: &agent-env
+  DATABASE_URL: "postgresql://smallie:smallie@db:5432/smallie"
+  READONLY_DATABASE_URL: "postgresql://agent_readonly:readonly@db:5432/smallie"
+  DB_POOL_SIZE: "2"
+  # Agent Server settings. A run cut off by a restart is not run again (it would spend tokens
+  # twice; the main app already reported the error): despite the name this counts attempts, so
+  # 1 = run once (0 never runs). Its own pool stays small (default 150).
+  BG_JOB_MAX_RETRIES: "1"
+  LANGGRAPH_POSTGRES_POOL_MAX_SIZE: "5"
+
 services:
   db:
     image: pgvector/pgvector:pg18  # same major version as Neon
@@ -18,6 +38,31 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  # The Agent Servers' streaming pipe (their run output goes from worker to HTTP through it).
+  redis:
+    image: redis:7-alpine
+    container_name: smallie-redis
+    restart: unless-stopped
+
+  # One service per agent, all from the same image (Dockerfile.agent); AGENT_ROUTE picks the agent.
+  # Adding an agent: copy one block, pick the next port and Redis database, add it to AGENT_URLS.
+  docs:
+    <<: *agent
+    environment: {<<: *agent-env, AGENT_ROUTE: docs, DATABASE_URI: "postgres://smallie:smallie@db:5432/agent_docs", REDIS_URI: "redis://redis:6379/1"}
+    ports: ["127.0.0.1:2101:8000"]
+  sql:
+    <<: *agent
+    environment: {<<: *agent-env, AGENT_ROUTE: sql, DATABASE_URI: "postgres://smallie:smallie@db:5432/agent_sql", REDIS_URI: "redis://redis:6379/2"}
+    ports: ["127.0.0.1:2102:8000"]
+  research:
+    <<: *agent
+    environment: {<<: *agent-env, AGENT_ROUTE: research, DATABASE_URI: "postgres://smallie:smallie@db:5432/agent_research", REDIS_URI: "redis://redis:6379/3"}
+    ports: ["127.0.0.1:2103:8000"]
+  chart:
+    <<: *agent
+    environment: {<<: *agent-env, AGENT_ROUTE: chart, DATABASE_URI: "postgres://smallie:smallie@db:5432/agent_chart", REDIS_URI: "redis://redis:6379/4"}
+    ports: ["127.0.0.1:2104:8000"]
 
 volumes:
   pgdata:

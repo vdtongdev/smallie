@@ -187,6 +187,9 @@ No changes to the router, orchestrator, `RemoteAgent`, Dockerfile, `langgraph.js
 | main app | everything | owner |
 
 - Every Agent Server gets its own database (`agent_docs`, `agent_sql`, `agent_chart`, `agent_research`) for its own tables, so they don't clash with our `checkpoints`/`store` tables.
+  - Measured 2026-10-22 (langgraph-api 0.16.4), `agent_sql` holds `assistant`, `assistant_versions`, `checkpoint_blobs`, `checkpoint_delete_queue`, `checkpoint_writes`, `checkpoints`, `cron`, `run`, `schema_migrations`, `store`, `thread`, `thread_ttl`. All of it is the server's own bookkeeping.
+  - Run retries: `BG_JOB_MAX_RETRIES` counts attempts, not retries (`0` never runs a run: "exceeded max attempts (0)"). It is set to `1`, so a run cut off by a container restart is not run again.
+  - Pools: the Python side, `LANGGRAPH_POSTGRES_POOL_MAX_SIZE`, defaults to 150 and is set to 5. The Go core logs `ConnPool MaxOpenConns: 50`; no env var for it was found.
 - Redis: locally one container with database numbers 1–4. In production Upstash free, or a shared database 0 if the free tier only offers one (to verify).
 - Connections: one user with several agents answering at once means 5 processes holding pools. Specialists use `DB_POOL_SIZE=2` plus the Agent Server's pool-size setting. The implementation plan holds a table that adds up the maximum connections and compares them with Neon's cap for its smallest compute.
 
@@ -230,6 +233,8 @@ Each phase ends with green tests and can merge on its own:
 6. Cloud Run deployment, README, CLAUDE.md, CHANGELOG.
 
 ## Open items to verify
+
+- The Agent Server's Go core pool (`MaxOpenConns: 50` per server): find its setting before Neon (4 servers × 50 could exceed the cap under load; at 2 users it stays far lower).
 
 - Upstash free tier: limits and whether more than database 0 is allowed.
 - Agent Server pool-size environment variable name.

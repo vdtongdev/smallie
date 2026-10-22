@@ -165,3 +165,12 @@ async def test_budget_on_the_ask_path_still_lets_the_orchestrator_answer(monkeyp
     ask = make_ask_tool(registry.get("sql"), agent(remote))
     answer, _ = await ask.coroutine("AAPL P/E?", SimpleNamespace(context=CTX, config={"callbacks": [counter]}))
     assert answer == "The sql agent failed (CallBudgetExceeded); it has no answer." and remote.calls == []
+
+
+def test_agent_server_does_not_import_fastapi():
+    """Dockerfile.agent doesn't install fastapi (its otel pin clashes with the Agent Server's)."""
+    import subprocess
+    import sys
+    code = "import sys, app.agents.server; print('fastapi' in sys.modules)"
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
+    assert out.stdout.strip() == "False"

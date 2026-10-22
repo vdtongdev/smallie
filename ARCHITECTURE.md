@@ -613,7 +613,7 @@ adds the new messages to the conversation (the only copy)
 | 0. Spikes (feasibility) | done |
 | 1. Local Postgres in Docker | done |
 | 2. LangSmith tracing | done |
-| 3. Agent server image + compose stack | next (plan Tasks 4–5: server entry point, then image + compose) |
+| 3. Agent server image + compose stack | done (plan Tasks 4–5: one image, 4 servers in compose, end-to-end checked) |
 | 4. `RemoteAgent` wrapper in the main app | done (plan Tasks 1–3: `RemoteAgent`, the main app calls every specialist through it) |
 | 5. Security (service token, IAM, read-only roles) | planned |
 | 6. Cloud Run deployment | planned |

@@ -22,7 +22,12 @@ if ($running) {
 wsl -d $distro -u root --cd $project -- docker compose up -d db
 for ($i = 0; $i -lt 30; $i++) {
     $health = (wsl -d $distro -u root -- docker inspect -f "{{.State.Health.Status}}" smallie-db) -join ""
-    if ($health -eq "healthy") { Write-Host "Postgres is ready on localhost:5433."; exit 0 }
+    if ($health -eq "healthy") {
+        # Init scripts only run on a fresh volume; this one is idempotent (the agent servers' databases).
+        wsl -d $distro -u root -- docker exec smallie-db psql -U smallie -d postgres -q -f /docker-entrypoint-initdb.d/05_agent_databases.sql
+        Write-Host "Postgres is ready on localhost:5433."
+        exit 0
+    }
     Start-Sleep -Seconds 1
 }
 Write-Error "smallie-db did not become healthy in 30 s; check: wsl -d $distro -u root -- docker logs smallie-db"

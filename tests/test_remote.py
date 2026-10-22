@@ -21,7 +21,8 @@ from app.agents import registry
 from app.agents.artifacts import collect
 from app.agents.delegation import make_ask_tool
 from app.agents.registry import AGENTS, ROUTES
-from app.agents.remote import RemoteAgent, as_message, make_client, remote_agents
+from app.agents import remote as remote_module
+from app.agents.remote import RemoteAgent, as_message, id_token, make_client, remote_agents
 from app.core import db
 from app.core.config import Settings, get_settings
 from app.core.memory import AgentContext
@@ -219,6 +220,46 @@ async def test_real_remote_graph_as_a_node_is_stateless_and_streams_into_the_par
     assert any(ns and ns[0].startswith("sql:") and mode == "messages" for ns, mode, _ in chunks)
     saved = (await app.aget_state(config)).values["messages"]
     assert [m.id for m in saved] == ["h1", "m1"] and saved[1].usage_metadata["output_tokens"] == 7
+
+
+@pytest.fixture
+def tokens(monkeypatch):
+    """An empty ID-token cache, and a metadata server that counts its requests."""
+    monkeypatch.setattr(remote_module, "_tokens", {})
+    requests = []
+
+    def metadata(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, text=f"tok-{len(requests)}")
+
+    return requests, httpx.MockTransport(metadata)
+
+
+async def test_no_id_token_off_cloud_run(monkeypatch, tokens):
+    requests, transport = tokens
+    monkeypatch.delenv("K_SERVICE", raising=False)
+    assert await id_token("https://sql.run.app", transport=transport) is None
+    assert requests == []
+
+
+async def test_id_token_is_fetched_once_and_cached(monkeypatch, tokens):
+    requests, transport = tokens
+    monkeypatch.setenv("K_SERVICE", "smallie")
+    assert await id_token("https://sql.run.app", transport=transport) == "tok-1"
+    assert await id_token("https://sql.run.app", transport=transport) == "tok-1"
+    [request] = requests
+    assert request.headers["Metadata-Flavor"] == "Google"
+    assert request.url.params["audience"] == "https://sql.run.app"
+
+
+async def test_remote_call_carries_bearer_on_cloud_run(monkeypatch):
+    async def fake_id_token(audience, **_):
+        return f"tok-for-{audience}"
+
+    monkeypatch.setattr(remote_module, "id_token", fake_id_token)
+    remote = FakeRemote(output={"messages": [HUMAN]})
+    await agent(remote).node({"messages": [as_message(HUMAN)]}, {}, SimpleNamespace(context=CTX))
+    assert remote.calls[0]["headers"] == {"x-smallie-user-id": "u-7", "Authorization": "Bearer tok-for-http://sql:8000"}
 
 
 def test_missing_agent_url_names_the_routes(monkeypatch):

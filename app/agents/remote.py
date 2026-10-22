@@ -8,6 +8,8 @@ token counts.
 
 import asyncio
 import logging
+import os
+import time
 from dataclasses import asdict
 from typing import Any
 
@@ -66,6 +68,29 @@ def make_client(url: str, *, service_token: str, timeout_s: float,
     ))
 
 
+_METADATA_IDENTITY = ("http://metadata.google.internal/computeMetadata/v1/instance/"
+                      "service-accounts/default/identity")
+_TOKEN_TTL_S = 50 * 60  # Google ID tokens last an hour
+_tokens: dict[str, tuple[str, float]] = {}  # audience -> (token, expiry on the monotonic clock)
+
+
+async def id_token(audience: str, *, transport: httpx.AsyncBaseTransport | None = None) -> str | None:
+    """A Google ID token for calling the Cloud Run service at `audience` (its URL), from the metadata
+    server; the agent services only accept callers with roles/run.invoker. None off Cloud Run
+    (K_SERVICE unset), e.g. against the local compose stack."""
+    if not os.environ.get("K_SERVICE"):
+        return None
+    token, expires = _tokens.get(audience, ("", 0.0))
+    if time.monotonic() < expires:
+        return token
+    async with httpx.AsyncClient(transport=transport, timeout=10) as client:
+        response = await client.get(_METADATA_IDENTITY, params={"audience": audience},
+                                    headers={"Metadata-Flavor": "Google"})
+        response.raise_for_status()
+    _tokens[audience] = (response.text, time.monotonic() + _TOKEN_TTL_S)
+    return response.text
+
+
 class CallBudgetExceeded(RuntimeError):
     """A chat message reached MAX_MESSAGE_MODEL_CALLS: no further specialist is called."""
 
@@ -96,14 +121,16 @@ class RemoteAgent:
                                      f"the {self.spec.route} agent was not called.")
         # checkpoint_ns stays: RemoteGraph drops it from the request and prefixes streamed chunks with it.
         config["configurable"] = {k: v for k, v in config.get("configurable", {}).items() if k != "thread_id"}
+        headers = {"x-smallie-user-id": context.user_id}
+        if token := await id_token(self.url):
+            headers["Authorization"] = f"Bearer {token}"
         try:
             # The client's timeout is per read; keep-alives from a stuck run would never trip it.
             async with asyncio.timeout(self.timeout_s):
                 # cancel: a run the main app stopped waiting for (timeout, chat closed) stops spending
                 # tokens; the server default "continue" would finish it uncounted.
                 output = await self.remote.ainvoke(input, config, context=asdict(context),
-                                                   headers={"x-smallie-user-id": context.user_id},
-                                                   on_disconnect="cancel")
+                                                   headers=headers, on_disconnect="cancel")
         except RemoteException as exc:
             raise _openai_error(exc, self.url) from exc
         if output is None:  # the run ended without sending its final state

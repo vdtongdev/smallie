@@ -78,11 +78,25 @@ async def open_persistence(stack: AsyncExitStack) -> tuple[AsyncPostgresSaver, A
     Both share a connection pool that health-checks connections before handing them
     out, so a Postgres restart doesn't leave the app stuck on a dead connection.
     """
-    s = get_settings()
+    pool = await _open_pool(stack, max_size=10)
+    checkpointer = AsyncPostgresSaver(pool)
+    store = AsyncPostgresStore(pool, index=store_index_config())
+    await checkpointer.setup()
+    await store.setup()
+    return checkpointer, store
+
+
+async def open_history_store(stack: AsyncExitStack) -> AsyncPostgresStore:
+    """The app's store, read by an agent server's `search_chat_history`: its own Agent Server
+    store is empty. No `setup()`: the main app creates the tables, and this role may be read-only."""
+    return AsyncPostgresStore(await _open_pool(stack, max_size=2), index=store_index_config())
+
+
+async def _open_pool(stack: AsyncExitStack, max_size: int) -> AsyncConnectionPool:
     pool = AsyncConnectionPool(
-        s.database_url,
+        get_settings().database_url,
         min_size=1,
-        max_size=10,
+        max_size=max_size,
         open=False,
         check=AsyncConnectionPool.check_connection,
         timeout=15,
@@ -98,11 +112,7 @@ async def open_persistence(stack: AsyncExitStack) -> tuple[AsyncPostgresSaver, A
         },
     )
     await stack.enter_async_context(pool)
-    checkpointer = AsyncPostgresSaver(pool)
-    store = AsyncPostgresStore(pool, index=store_index_config())
-    await checkpointer.setup()
-    await store.setup()
-    return checkpointer, store
+    return pool
 
 
 def turns(messages: list[BaseMessage]) -> list[tuple[str, str]]:
@@ -173,6 +183,14 @@ async def forget_user(store: BaseStore, user_id: str) -> None:
                 await store.adelete(namespace, item.key)
 
 
+_history_store: BaseStore | None = None  # set on an agent server (app/agents/server.py)
+
+
+def set_history_store(store: BaseStore) -> None:
+    global _history_store
+    _history_store = store
+
+
 @tool
 async def search_memory(query: str, runtime: ToolRuntime[AgentContext]) -> str:
     """Search what you know about the user from earlier chats and their files, beyond the facts
@@ -193,7 +211,8 @@ async def search_chat_history(query: str, runtime: ToolRuntime[AgentContext]) ->
     Args:
         query: What to look for, e.g. "Apple stock price" or "contract renewal date".
     """
-    items = await runtime.store.asearch(history_namespace(runtime.context.user_id), query=query, limit=5)
+    store = _history_store or runtime.store
+    items = await store.asearch(history_namespace(runtime.context.user_id), query=query, limit=5)
     if not items:
         return "No earlier chats found."
     return "\n\n".join(

@@ -20,6 +20,7 @@ class UsageCounter(AsyncCallbackHandler):
     agents running inside other agents (the orchestrator's `ask_<route>` tools, the researcher)."""
 
     def __init__(self):
+        self.model_calls = 0
         self.input_tokens = 0
         self.output_tokens = 0
         self.cost = 0.0
@@ -32,12 +33,22 @@ class UsageCounter(AsyncCallbackHandler):
                     self.count(message)
 
     def count(self, message: BaseMessage) -> None:
-        """Add one model reply; also used for replies of remote agents, whose calls this
-        counter never sees (app/agents/remote.py)."""
+        """Add one model reply."""
         usage = getattr(message, "usage_metadata", None) or {}
+        self.model_calls += 1
         self.input_tokens += usage.get("input_tokens", 0)
         self.output_tokens += usage.get("output_tokens", 0)
         self.cost += message.response_metadata.get("cost") or 0.0
+
+    def totals(self) -> dict:
+        return {"model_calls": self.model_calls, "input_tokens": self.input_tokens,
+                "output_tokens": self.output_tokens, "cost": self.cost}
+
+    def add(self, totals: dict) -> None:
+        """Add another counter's totals: what an agent server reports for its run, whose model
+        calls this process never sees (app/agents/remote.py)."""
+        for key in ("model_calls", "input_tokens", "output_tokens", "cost"):
+            setattr(self, key, getattr(self, key) + (totals.get(key) or 0))
 
 
 async def get_usage(store: BaseStore, user_id: str) -> dict:

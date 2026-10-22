@@ -124,12 +124,14 @@ async def test_keeps_table_artifact_for_plot_that():
 
 
 @pytest.mark.parametrize("wrap", [lambda c: [c], lambda c: AsyncCallbackManager(handlers=[c])])
-async def test_counts_usage_of_returned_ai_messages(wrap):
+async def test_counts_the_usage_the_server_reports(wrap):
+    """The server's report, not the returned messages: research keeps its calls' messages out."""
     counter = UsageCounter()
-    remote = FakeRemote(output={"messages": [HUMAN, AI_DICT, TOOL_DICT]})
+    usage = {"model_calls": 2, "input_tokens": 11, "output_tokens": 7, "cost": 0.0001}
+    remote = FakeRemote(output={"messages": [HUMAN, AI_DICT, TOOL_DICT], "usage": usage})
     await agent(remote).node({"messages": [as_message(HUMAN)]}, {"callbacks": wrap(counter)},
                              SimpleNamespace(context=CTX))
-    assert (counter.input_tokens, counter.output_tokens, counter.cost) == (11, 7, 0.0001)
+    assert counter.totals() == usage
 
 
 @pytest.mark.parametrize("name, expected", [

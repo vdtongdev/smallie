@@ -60,6 +60,10 @@ def make_client(url: str, *, service_token: str, timeout_s: float,
     ))
 
 
+class CallBudgetExceeded(RuntimeError):
+    """A chat message reached MAX_MESSAGE_MODEL_CALLS: no further specialist is called."""
+
+
 class RemoteAgent:
     """A specialist on its own Agent Server, in place of its compiled graph: `node` is the
     assistant's graph node, `ainvoke` what `ask_<route>` calls (app/agents/delegation.py).
@@ -79,6 +83,11 @@ class RemoteAgent:
 
     async def ainvoke(self, input: dict, config: RunnableConfig | None = None, *, context: AgentContext) -> dict:
         config = dict(config or {})
+        counters = _usage_counters(config)
+        budget = get_settings().max_message_model_calls
+        if any(counter.model_calls >= budget for counter in counters):
+            raise CallBudgetExceeded(f"This message used its {budget} model calls (MAX_MESSAGE_MODEL_CALLS); "
+                                     f"the {self.spec.route} agent was not called.")
         # checkpoint_ns stays: RemoteGraph drops it from the request and prefixes streamed chunks with it.
         config["configurable"] = {k: v for k, v in config.get("configurable", {}).items() if k != "thread_id"}
         try:
@@ -90,11 +99,11 @@ class RemoteAgent:
             raise _openai_error(exc, self.url) from exc
         if output is None:  # the run ended without sending its final state
             raise RuntimeError(f"The {self.spec.route} agent at {self.url} returned no result.")
-        new =[as_message(m) for m in output.get("messages", [])][len(input.get("messages", [])):]
-        for counter in _usage_counters(config):
-            for message in new:
-                if isinstance(message, AIMessage):
-                    counter.count(message)
+        # The server counts its run's model calls (this process can't see them): the loop guard
+        # above and the usage box both need them.
+        for counter in counters:
+            counter.add(output.get("usage") or {})
+        new = [as_message(m) for m in output.get("messages", [])][len(input.get("messages", [])):]
         # Only these keys: anything else (route, direct, failed) could steer the parent graph.
         result = {"messages": new}
         if "findings" in output:

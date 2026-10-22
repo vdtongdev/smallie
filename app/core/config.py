@@ -64,6 +64,9 @@ class Settings(BaseSettings):
     service_token: str = ""  # shared secret the agent servers require (x-service-token)
     agent_timeout_s: float = 300  # read timeout of one specialist call; generous for cold starts
     db_pool_size: int = 5  # connections per SQLAlchemy engine; the agent services use 2
+    # Loop guard: model calls one chat message may use across the orchestrator and every agent
+    # server (they report theirs); past it, no further specialist is called.
+    max_message_model_calls: int = 30
 
     @property
     def agent_url_map(self) -> dict[str, str]:

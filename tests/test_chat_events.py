@@ -84,10 +84,12 @@ async def test_step_events_only_when_a_workflow_changes_step(monkeypatch):
         yield ("research:1", "gather:2", "model:3"), "messages", chunk
         yield ("research:1", "write:4"), "messages", chunk
         yield ("sql:5",), "messages", chunk  # single agents have no steps
+        yield ("research:6", "run:7", "gather:8", "model:9"), "messages", chunk  # an agent server's wrapper node
 
     steps = [e for e in [e async for e in _events_from(stream())] if e["type"] == "step"]
     assert steps == [{"type": "step", "agent": "research", "name": "gather"},
-                     {"type": "step", "agent": "research", "name": "write"}]
+                     {"type": "step", "agent": "research", "name": "write"},
+                     {"type": "step", "agent": "research", "name": "gather"}]
 
 
 CHART = {"id": "c1", "type": "bar", "title": "t", "labels": ["a"], "series": [{"name": "s", "values": [1.0]}]}

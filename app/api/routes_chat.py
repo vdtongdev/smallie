@@ -171,9 +171,11 @@ async def _events_from(stream) -> AsyncIterator[dict]:
 
 def _step(namespace: tuple[str, ...]) -> tuple[str, str] | None:
     """(route, step) for chunks from inside a workflow step listed in its spec's `steps`."""
-    if len(namespace) < 2:
+    # An agent server's wrapper node sits between the route and its steps.
+    names = [name for name in (segment.split(":", 1)[0] for segment in namespace) if name != RUN_NODE]
+    if len(names) < 2:
         return None
-    route, step = (segment.split(":", 1)[0] for segment in namespace[:2])
+    route, step = names[:2]
     return (route, step) if step in STEPS.get(route, ()) else None
 
 

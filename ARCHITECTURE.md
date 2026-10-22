@@ -601,8 +601,8 @@ main app                                         sql server (private)
   │   body: messages + AgentContext                 │
   │ ───────────────────────────────────────────────►│ token check → run graph
   │ ◄─────────── SSE: tokens, tool calls, results ──│
-  │ ◄─────────── final state: new messages + tables │ keeps nothing
-  ▼
+  │ ◄─────────── final state: new messages + tables │ keeps only run records,
+  ▼                                                 not the conversation
 adds the new messages to the conversation (the only copy)
 ```
 

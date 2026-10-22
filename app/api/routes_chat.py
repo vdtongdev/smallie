@@ -177,11 +177,20 @@ def _step(namespace: tuple[str, ...]) -> tuple[str, str] | None:
     return (route, step) if step in STEPS.get(route, ()) else None
 
 
+def _message(value):
+    """A message object; a remote agent's chunks are JSON dicts. None for a type the UI doesn't
+    show (a remote RemoveMessage, say), so one odd message can't end the whole reply."""
+    try:
+        return as_message(value)
+    except ValueError:
+        return None
+
+
 def _to_events(mode: str, chunk, namespace: tuple[str, ...] = ()) -> list[dict]:
     """SSE events for one stream chunk. `namespace` is () for the assistant graph itself and
     non-empty for chunks from inside an agent subgraph."""
     if mode == "messages":
-        message, metadata = as_message(chunk[0]), chunk[1]  # remote agents' chunks are JSON dicts
+        message, metadata = _message(chunk[0]), chunk[1]
         if isinstance(message, AIMessageChunk) and metadata.get("langgraph_node") == "model" and message.text:
             nodes = [segment.split(":", 1)[0] for segment in namespace]
             # A researcher's notes, or an agent the orchestrator called as a tool: the
@@ -205,7 +214,8 @@ def _to_events(mode: str, chunk, namespace: tuple[str, ...] = ()) -> list[dict]:
             if update.get("route"):
                 events.append({"type": "agent", "name": update["route"]})
             continue
-        for message in map(as_message, update.get("messages", [])):
+        messages = update.get("messages", [])
+        for message in map(_message, messages if isinstance(messages, list) else [messages]):
             if isinstance(message, AIMessage):
                 events += [{"type": "tool_call", "name": c["name"], "args": c["args"]}
                            for c in message.tool_calls if c["name"] != HANDOFF]  # shown as the agent badge

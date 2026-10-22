@@ -40,7 +40,9 @@ def as_message(value: BaseMessage | dict) -> BaseMessage:
     """A message object, from a remote agent's JSON or as it is."""
     if isinstance(value, BaseMessage):
         return value
-    cls = _MESSAGE_TYPES[value["type"]]
+    cls = _MESSAGE_TYPES.get(value.get("type"))
+    if cls is None:
+        raise ValueError(f"unknown message type {value.get('type')!r}")
     fields = {key: item for key, item in value.items() if key in cls.model_fields}
     return cls.model_validate(fields)
 
@@ -106,7 +108,8 @@ def remote_agents(specs) -> dict[str, RemoteAgent]:
     s = get_settings()
     urls = s.agent_url_map
     if missing := [spec.route for spec in specs if not urls.get(spec.route)]:
-        raise RuntimeError(f"AGENT_URLS has no URL for: {', '.join(missing)}")
+        raise RuntimeError(f"AGENT_URLS has no URL for: {', '.join(missing)}. Set AGENT_URLS "
+                           "(see .env.example) and start the agent servers.")
     return {spec.route: RemoteAgent(spec, urls[spec.route], service_token=s.service_token,
                                     timeout_s=s.agent_timeout_s) for spec in specs}
 

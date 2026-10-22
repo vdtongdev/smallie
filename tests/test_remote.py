@@ -11,6 +11,9 @@ from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, Sys
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.pregel.remote import RemoteException, RemoteGraph
+from langgraph.store.memory import InMemoryStore
+
+from app.orchestration.graph import build_assistant
 
 from pathlib import Path
 
@@ -220,7 +223,20 @@ def test_missing_agent_url_names_the_routes(monkeypatch):
     with pytest.raises(RuntimeError) as error:
         remote_agents(AGENTS)
     assert all(route in str(error.value) for route in ("docs", "chart", "research"))
-    assert "sql" not in str(error.value).split(":", 1)[1]
+    assert "sql" not in str(error.value).split(":", 1)[1].split(".")[0]
+    assert "start the agent servers" in str(error.value)
+
+
+def test_production_wiring_builds_every_agent_as_remote(monkeypatch):
+    """What main.py runs: no `agents`, so every route is a RemoteAgent from AGENT_URLS."""
+    monkeypatch.setattr(get_settings(), "agent_urls", json.dumps({r: f"http://{r}:8000" for r in ROUTES}))
+    assistant = build_assistant(InMemorySaver(), InMemoryStore())
+    assert set(ROUTES) <= set(assistant.nodes)
+
+
+def test_as_message_names_an_unknown_type():
+    with pytest.raises(ValueError, match="'function'"):
+        as_message({"type": "function", "content": "x"})
 
 
 async def test_ask_tool_failure_still_answers():
@@ -236,7 +252,9 @@ def test_specialists_cannot_import_remote_graph():
     for route in ROUTES:
         for path in (root / route).rglob("*.py"):
             text = path.read_text(encoding="utf-8")
-            assert not any(name in text for name in ("RemoteGraph", "langgraph.pregel.remote", "app.agents.remote")), path
+            assert not any(name in text for name in (
+                "RemoteGraph", "langgraph.pregel.remote", "langgraph_sdk", "app.agents.remote", "import remote",
+                "app.orchestration")), path
 
 
 def test_engines_use_the_pool_size(monkeypatch):

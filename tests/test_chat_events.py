@@ -119,6 +119,15 @@ def test_a_fallback_drops_the_reply_before_the_orchestrator_takes_over():
         {"type": "fallback", "agent": "docs"}, {"type": "agent", "name": "orchestrator"}]
 
 
+def test_unknown_remote_messages_are_skipped_not_fatal():
+    """A remote message of a type the app doesn't know must not end the whole reply."""
+    assert _to_events("messages", ({"type": "remove", "id": "x"}, {"langgraph_node": "model"}), SUBGRAPH) == []
+    assert _to_events("messages", ({"type": "function", "content": "x"}, {"langgraph_node": "model"}), SUBGRAPH) == []
+    single = {"type": "ai", "content": "", "tool_calls": [{"name": "run_sql", "args": {}, "id": "c1"}]}
+    assert _to_events("updates", {"model": {"messages": single}}, SUBGRAPH) == [
+        {"type": "tool_call", "name": "run_sql", "args": {}}]
+
+
 def test_remote_dict_chunks_become_events():
     """A remote agent's chunks arrive as JSON dicts; they give the same events as messages do."""
     token = ({"type": "AIMessageChunk", "content": "Hi"}, {"langgraph_node": "model"})

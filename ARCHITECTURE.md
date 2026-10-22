@@ -41,7 +41,7 @@ This file describes `main` plus the 0.4.0 work in progress (remote agents, secti
 - Neon Postgres: direct URL (not the pooler, because of advisory locks)
 - Artifact Registry for container images
 
-### Architecture Diagram (today: one service)
+### Architecture Diagram (logical parts; section 10 shows the services)
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -606,6 +606,110 @@ main app                                         sql server (private)
 adds the new messages to the conversation (the only copy)
 ```
 
+### Inside an Agent Server
+
+All four servers run **one image**, `smallie-agent` (`Dockerfile.agent`, built on the `langchain/langgraph-api` base image in "lite" mode). The environment variable `AGENT_ROUTE` (`docs`, `sql`, `chart` or `research`) decides which specialist a container serves. No per-agent server file exists.
+
+**Entry point.** `langgraph.json` lists one graph, `agent`, which points at `make_graph` in `app/agents/server.py`. The Agent Server calls that factory on every run, so `make_graph` builds the graph only once, under an `asyncio.Lock`, and keeps it for the life of the process. The build does three things (`server.py:_build`):
+
+1. Looks up the spec for `AGENT_ROUTE` in `agents/registry.py` (an unknown route fails with a clear error).
+2. Awaits the spec's `prepare` if it has one (research loads its MCP tools there).
+3. Opens the memory store (see below) and wraps `spec.build()` in the `run` graph.
+
+**The `run` node.** `reporting_graph` compiles a one-node graph named `run` (`RUN_NODE`, shared with the main app) around the specialist. The node does this:
+
+1. Starts a fresh `UsageCounter` and adds it to the run's callbacks next to the stream handlers, so tokens and tool events still flow to the caller.
+2. Invokes the specialist on the messages it received, with the same `AgentContext`.
+3. Returns only the **new** messages (the result minus the input length), the `usage` totals (model calls, tokens, cost, including nested agents such as research's researcher) and, if present, `findings`.
+
+Only the new messages go back, because the Agent Server would otherwise stream the whole thread a second time as tool events.
+
+| A server holds | A server does not hold |
+|---|---|
+| Its own database `agent_<route>` (owned by `agent_server`) with the Agent Server's tables: the run queue and run records | The user's conversation: the main app's thread is the only copy |
+| Redis (one database per server locally, one `REDIS_KEY_PREFIX` per server on Cloud Run), the pipe that carries a run's output from worker to HTTP stream | Checkpoints of the user's thread: calls carry no `thread_id` |
+| The specialist graph, its tools and, for research, its MCP sessions | Write access to app data (see "Database roles") |
+| A read-only handle on the app's memory store | The user's identity: the main app sends it with every call |
+
+**Memory store.** `search_chat_history` needs the app's chat history, but a server's own Agent Server store is empty. So `_build` calls `open_history_store` (`core/memory.py`), which opens a small pool (max 2 connections) on the app's database with `agent_reader` and registers it with `set_history_store`. It never calls `setup()` (the main app creates the tables, and this role cannot write), and the search passes `refresh_ttl=False` because the TTL refresh is an UPDATE.
+
+**Job settings.** Set in `docker-compose.yml` (`x-agent-env`):
+
+| Setting | Value | Why |
+|---|---|---|
+| `BG_JOB_MAX_RETRIES` | `1` | Despite the name it counts attempts: `1` runs once, `0` never runs. A run cut off by a restart is not repeated, because that would spend model calls twice. |
+| `BG_JOB_TIMEOUT_SECS` | `360` | Backstop for a run whose cancel never arrived. The main app gives up after `AGENT_TIMEOUT_S` (300 s). |
+| `LANGGRAPH_POSTGRES_POOL_MAX_SIZE` / `DB_POOL_SIZE` | `5` / `2` | Small pools, so several processes fit under Neon's connection cap. |
+| `on_disconnect="cancel"` | sent by `RemoteAgent` | A call the main app stopped waiting for (timeout, chat closed) stops on the server instead of finishing uncounted. |
+
+**Secrets that only research gets.** `TAVILY_API_KEY`, `MCP_SERVERS` and `EXTERNAL_DATABASE_URL` are blanked for docs, sql and chart in `docker-compose.yml`, and only the research service reads them from `.env`. In production, only research's Cloud Run env file holds them.
+
+### Authentication
+
+A call to a specialist passes two independent checks.
+
+| Layer | What it checks | Where |
+|---|---|---|
+| Service token | The header `x-service-token` must equal the server's `SERVICE_TOKEN`. Compared as bytes with `hmac.compare_digest`, so an odd header value gives 401, never a crash. An unset `SERVICE_TOKEN` refuses everyone (fails closed). | `agents/server_auth.py` (`langgraph.json` → `auth`); the client side is `make_client` in `remote.py` |
+| Cloud Run IAM | On Cloud Run (`K_SERVICE` set), `RemoteAgent` adds `Authorization: Bearer <Google ID token>`. The token comes from the metadata server for the service's URL, is cached per URL until its `exp` minus 5 minutes (at most 50 minutes), and only callers with `roles/run.invoker` pass. Off Cloud Run, `id_token` returns `None` and no header is sent. | `remote.py:id_token`, `_token_ttl` |
+
+**Who decides identity.** Only the main app: `get_current_user` (the session cookie) fixes the `user_id`. The servers trust the main app after the token check: `authenticate` returns the `x-smallie-user-id` header as the caller's identity (or `main-app` when it is missing), and tools read the same id from `AgentContext.user_id` in the request body. A leaked token would let a caller claim any user id, so the token is a secret of the main app and the servers only. The header `x-smallie-*` reaches the graph through `http.configurable_headers` in `langgraph.json`.
+
+### Database roles
+
+The servers never write app data. Every login below has only what its job needs:
+
+| Login | Used by | Can | Cannot |
+|---|---|---|---|
+| Owner (`DATABASE_URL` of the main app) | The main app only | Everything: creates tables, writes accounts, chats, documents, the graph, stock data | Never given to a server |
+| `agent_reader` (`DATABASE_URL` of a server) | docs and research searches, the memory store, graph and chat-history tools | `SELECT` on `READER_TABLES` (`documents`, `graph_nodes`, `graph_edges`, the pgvector tables, the store tables), in read-only transactions with a 10 s timeout. `grant_reader` (`core/db.py`) grants them at the end of every app start, because on a fresh database the tables exist only after the app creates them. | Read accounts, conversations or checkpoints; any write or DDL |
+| `agent_readonly` (`READONLY_DATABASE_URL`) | sql and chart stock queries | `SELECT` on the `market` schema; read-only transactions, 10 s timeout, search path `market` | Read any app table |
+| `agent_server` (`DATABASE_URI` of a server) | The Agent Server's own tables | Own the four `agent_<route>` databases (`05_agent_databases.sql`) | Open the app's database: `06_agent_reader.sql` revokes `CONNECT` from `PUBLIC` and grants it only to named roles |
+
+Why: a bug or a prompt injection in a specialist can then read at most what it already searches, and cannot change or delete user data. Code on a server must not write: no DDL, no TTL refresh, PGVector with `create_extension=False` (the documents feature's `start` creates its tables).
+
+### Messages and context: before and after
+
+Before 0.4.0 every specialist was a compiled graph inside the main app's process. Now each is a `RemoteAgent` (`app/agents/remote.py`) that calls a server. The graph in `orchestration/graph.py` is the same; what a node does and what travels differ.
+
+| Topic | Before (in-process, 0.3.x) | After (remote) |
+|---|---|---|
+| The agent node | `add_node(route, compiled_graph)`: the specialist is a subgraph | `add_node(route, RemoteAgent.node)` (`build_assistant`). `node` sends `state["messages"]` and `runtime.context` through `RemoteAgent.ainvoke` |
+| How the specialist sees the conversation | Shares the `messages` state of the parent graph | Gets the thread's messages in the request body on each call (a direct route) or only a self-contained question (`ask_<route>`). The main app's thread stays the only copy |
+| Per-request context (`AgentContext`) | Passed as the runtime context; tools read it with `ToolRuntime` | Sent as `asdict(context)` in the body; the server rebuilds the dataclass and tools read it the same way. The user id also goes in the header `x-smallie-user-id` |
+| Thread and state | The parent's `thread_id` and checkpointer | `thread_id` is removed from the config, so the run is stateless and leaves no thread behind. `checkpoint_ns` is kept: `RemoteGraph` uses it to prefix streamed chunks with the parent's namespace, which `_to_events` relies on |
+| What comes back | Message objects in the parent state | JSON. `as_message` turns each dict back into a message object (LangGraph's own conversion would move `usage_metadata` into `additional_kwargs`). The server returns only new messages, and `ainvoke` also slices the result by the input length. Only the keys `messages` and `findings` reach the parent state, so a remote answer cannot steer routing (`route`, `direct`, `failed`) |
+| Artifacts (tables, charts) | `ToolMessage.artifact` and `additional_kwargs` in the shared state | They survive the JSON round trip (`artifact`, `additional_kwargs`), so a later "plot that" still finds the table in the thread (spike 2) |
+| Streaming | Subgraph events arrive directly in the parent stream | Remote chunks arrive as dicts with the parent namespace in front and the server's `run:` segment inside. `_to_events` converts them with `_message` and skips the `run` node's update; `_step` ignores the `run` segment when it finds a workflow step |
+| Model calls and limits | One `UsageCounter` in the request's callbacks sees every call | The main app can't see server-side calls, so each server reports `usage` and `RemoteAgent` adds it to the `UsageCounter`s in the config (`UsageCounter.add`). Before each call, `CallBudgetExceeded` is raised once a counter reaches `MAX_MESSAGE_MODEL_CALLS` (30): a soft backstop, since parallel asks in one step can overshoot. Per-agent caps are unchanged |
+| Errors | The exception itself | The server reports an error by name only (`RemoteException`). `_openai_error` raises `RateLimitError` and `AuthenticationError` again as `openai` exceptions, so the chat route's messages still work. `asyncio.timeout(AGENT_TIMEOUT_S)` limits a call (the client's own timeout is per read). `RuntimeError` when a run ends without a final state. Other errors reach the caller as they are; `ask_<route>` turns them into "the agent failed" text |
+| `ask_<route>` vs. a direct route | `ask` called `agent.ainvoke(...)` on the compiled graph | Both go through `RemoteAgent.ainvoke`: `ask` (`delegation.py:make_ask_tool`) passes `runtime.config` so the stream hook and the usage counter reach the call. Only a direct route sends the whole thread |
+
+A routed sql message (router picks sql, no model call) end to end:
+
+```mermaid
+sequenceDiagram
+    participant UI as Browser
+    participant App as Main app (chat route, assistant graph)
+    participant RA as RemoteAgent (sql)
+    participant Srv as sql server (run node)
+    UI->>App: POST /api/chat/auto
+    App->>App: router chooses sql, history stays in the checkpointer
+    App->>RA: node(state messages, runtime context)
+    RA->>RA: budget check, drop thread_id, add headers and ID token
+    RA->>Srv: run (messages, asdict of context), on_disconnect cancel
+    Srv->>Srv: token check, run node counts calls, agent answers
+    Srv-->>RA: streamed chunks as JSON dicts (namespace prefixed)
+    RA-->>App: chunks reach the chat route stream
+    App->>App: _message turns dicts into messages, _to_events skips run
+    App-->>UI: SSE token, tool_call, tool_result
+    Srv-->>RA: final state (new messages and usage)
+    RA->>RA: as_message, slice by input length, add usage to counter
+    RA-->>App: messages (and findings) only
+    App->>App: thread updated in the checkpointer
+    App-->>UI: SSE done
+```
+
 ### Status
 
 | Phase | State |
@@ -617,14 +721,7 @@ adds the new messages to the conversation (the only copy)
 | 4. `RemoteAgent` wrapper in the main app | done (plan Tasks 1–3: `RemoteAgent`, the main app calls every specialist through it) |
 | 5. Security (service token, IAM, read-only roles) | done (plan Tasks 6–7: Cloud Run ID tokens; `agent_reader` for the app's data, `agent_server` for the servers' own databases; calls the main app gave up on are cancelled) |
 | 6. Cloud Run deployment | config and steps written (plan Task 8: `cloudbuild.agent.yaml`, README "Deploying"); first deploy pending |
-
-**Database roles.** Each agent server uses three logins, none of which can touch accounts or chats:
-
-| Login | Used for | Can |
-|---|---|---|
-| `agent_reader` (`DATABASE_URL`) | the agents' searches | read documents, the knowledge graph and chat history; the main app grants these tables at every start |
-| `agent_readonly` (`READONLY_DATABASE_URL`) | SQL and chart queries | read the `market` schema |
-| `agent_server` (`DATABASE_URI`) | the Agent Server's own run queue | own the four `agent_<route>` databases; can't open the app's database |
+| Loop audit (plan Task 9) | done: on a subset of 6 `bench_chat` scenarios, `main` and this branch used the same number of model calls (17 vs 17), and the worst case was 6 calls for one message against `MAX_MESSAGE_MODEL_CALLS` = 30 |
 
 ---
 

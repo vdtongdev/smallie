@@ -24,7 +24,7 @@ for ($i = 0; $i -lt 30; $i++) {
     $health = (wsl -d $distro -u root -- docker inspect -f "{{.State.Health.Status}}" smallie-db) -join ""
     if ($health -eq "healthy") {
         # Init scripts only run on a fresh volume; these are idempotent (the agent servers' databases
-        # and their read-only role, whose grants need the tables the app creates at its first start).
+        # and their read-only role, for volumes created before they existed).
         wsl -d $distro -u root -- docker exec smallie-db psql -U smallie -d postgres -q -v ON_ERROR_STOP=1 -f /docker-entrypoint-initdb.d/05_agent_databases.sql
         if ($LASTEXITCODE -ne 0) { Write-Error "Creating the agent databases failed (05_agent_databases.sql)." }
         wsl -d $distro -u root -- docker exec smallie-db psql -U smallie -d smallie -q -v ON_ERROR_STOP=1 -f /docker-entrypoint-initdb.d/06_agent_reader.sql

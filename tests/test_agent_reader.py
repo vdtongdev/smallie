@@ -13,7 +13,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 
 from app.agents.docs import tools as docs_tools
-from app.core import graph, memory
+from app.core import db, graph, memory
 from app.core.config import get_settings
 from app.core.db import pool_args
 from app.core.memory import AgentContext
@@ -55,16 +55,28 @@ async def test_reader_can_search_documents_facts_and_history(reader, monkeypatch
         await memory.search_chat_history.coroutine("stocks", runtime)
 
 
-@pytest.mark.parametrize("statement", [
-    "DELETE FROM graph_edges WHERE false",
-    "INSERT INTO documents (id) VALUES ('x')",
-    "UPDATE store SET value = value WHERE false",
-])
-def test_reader_cannot_write_even_in_a_read_write_transaction(reader, statement):
+def test_app_start_grants_the_reader_its_tables():
+    """On a fresh database the tables appear at the app's first start, after the init scripts:
+    the app grants them (grant_reader in the lifespan). Not the `reader` fixture: get_engine is
+    cached and must stay the owner's."""
+    grant = db.grant_reader
+    with db.get_engine().begin() as conn:
+        conn.execute(text("REVOKE SELECT ON graph_nodes FROM agent_reader"))
+    grant()
+    engine = create_engine(reader_url(), **pool_args())
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1 FROM graph_nodes LIMIT 1"))
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("table", db.READER_TABLES)
+def test_reader_cannot_write_even_in_a_read_write_transaction(reader, table):
     with reader.connect() as conn:
         conn.execute(text("SET TRANSACTION READ WRITE"))  # the role's read-only default is not the guard
         with pytest.raises(DBAPIError, match="permission denied"):
-            conn.execute(text(statement))
+            conn.execute(text(f"DELETE FROM {table} WHERE false"))
 
 
 @pytest.mark.parametrize("table", ["users", "checkpoints", "conversations"])

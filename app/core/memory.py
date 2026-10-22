@@ -212,7 +212,8 @@ async def search_chat_history(query: str, runtime: ToolRuntime[AgentContext]) ->
         query: What to look for, e.g. "Apple stock price" or "contract renewal date".
     """
     store = _history_store or runtime.store
-    items = await store.asearch(history_namespace(runtime.context.user_id), query=query, limit=5)
+    # No TTLs here; the TTL refresh is an UPDATE, which the agent servers' agent_reader can't run.
+    items = await store.asearch(history_namespace(runtime.context.user_id), query=query, limit=5, refresh_ttl=False)
     if not items:
         return "No earlier chats found."
     return "\n\n".join(

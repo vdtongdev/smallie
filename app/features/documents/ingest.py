@@ -32,6 +32,8 @@ def get_vector_store() -> PGVector:
         collection_name=COLLECTION,
         use_jsonb=True,
         engine_args=pool_args(),
+        # init_db creates it; the agent servers' agent_reader role can't (read-only transactions).
+        create_extension=False,
     )
 
 

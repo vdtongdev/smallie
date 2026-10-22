@@ -9,7 +9,8 @@ x-agent: &agent
 
 # Inside the compose network the database is db:5432, not localhost:5433 as in .env.
 x-agent-env: &agent-env
-  DATABASE_URL: "postgresql://smallie:smallie@db:5432/smallie"
+  # The app's data, read-only (06_agent_reader.sql): agents only search it; the main app writes.
+  DATABASE_URL: "postgresql://agent_reader:reader@db:5432/smallie"
   READONLY_DATABASE_URL: "postgresql://agent_readonly:readonly@db:5432/smallie"
   DB_POOL_SIZE: "2"
   # Agent Server settings. A run cut off by a restart is not run again (it would spend tokens

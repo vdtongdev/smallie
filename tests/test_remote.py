@@ -82,7 +82,7 @@ class FakeRemote:
     def __init__(self, output=None, error=None, delay=0.0):
         self.output, self.error, self.delay, self.calls = output, error, delay, []
 
-    async def ainvoke(self, input, config=None, *, context=None, headers=None):
+    async def ainvoke(self, input, config=None, *, context=None, headers=None, **kwargs):
         self.calls.append({"input": input, "config": config, "context": context, "headers": headers})
         await asyncio.sleep(self.delay)
         if self.error:
@@ -215,6 +215,7 @@ async def test_real_remote_graph_as_a_node_is_stateless_and_streams_into_the_par
     assert request.url.path == "/runs/stream"  # no /threads/<id>/: stateless
     assert not any(key.startswith(("thread_id", "checkpoint", "__pregel")) for key in sent["config"]["configurable"])
     assert request.headers["x-smallie-user-id"] == "u-7"
+    assert sent["on_disconnect"] == "cancel"  # a call the main app gave up on stops spending tokens
     assert any(ns and ns[0].startswith("sql:") and mode == "messages" for ns, mode, _ in chunks)
     saved = (await app.aget_state(config)).values["messages"]
     assert [m.id for m in saved] == ["h1", "m1"] and saved[1].usage_metadata["output_tokens"] == 7

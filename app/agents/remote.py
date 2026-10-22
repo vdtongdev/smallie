@@ -99,8 +99,11 @@ class RemoteAgent:
         try:
             # The client's timeout is per read; keep-alives from a stuck run would never trip it.
             async with asyncio.timeout(self.timeout_s):
+                # cancel: a run the main app stopped waiting for (timeout, chat closed) stops spending
+                # tokens; the server default "continue" would finish it uncounted.
                 output = await self.remote.ainvoke(input, config, context=asdict(context),
-                                                   headers={"x-smallie-user-id": context.user_id})
+                                                   headers={"x-smallie-user-id": context.user_id},
+                                                   on_disconnect="cancel")
         except RemoteException as exc:
             raise _openai_error(exc, self.url) from exc
         if output is None:  # the run ended without sending its final state

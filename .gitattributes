@@ -1,2 +1,4 @@
 # Shell scripts run inside WSL/Linux and must keep LF line endings.
 *.sh text eol=lf
+# SQL init files run in psql inside Linux containers (backslash commands such as \gexec need LF).
+*.sql text eol=lf

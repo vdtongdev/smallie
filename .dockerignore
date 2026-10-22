@@ -8,3 +8,4 @@ tests/
 .git/
 cloudrun.env.yaml
 .gcloudignore
+.langgraph_api/

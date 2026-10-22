@@ -14,6 +14,7 @@
 
 - Branch: `0.4.0/remote-agents`. Version `0.4.0`; CHANGELOG and `pyproject.toml` change only in the release task (Task 11).
 - Agents never call each other: no `RemoteGraph` inside a specialist, and none pointing at its own server.
+- Production loop guard (user's decision, 2026-10-22): every agent server reports its run's `usage` (`model_calls`, `input_tokens`, `output_tokens`, `cost`). The main app adds it to the per-request `UsageCounter`, and `RemoteAgent` refuses a call once that message used `MAX_MESSAGE_MODEL_CALLS` (default 30) model calls. The reported counts also feed the usage box (research included) and the Task 9 audit. LangSmith stays optional.
 - No loops or runaway calls. Every model call stays under a cap that exists today: the orchestrator's `no_repeats` / `MAX_ASKS` and `ORCHESTRATOR_MAX_MODEL_CALLS`, and each agent's `MAX_MODEL_CALLS` / `RESEARCH_MAX_MODEL_CALLS`. Going remote must add no retry of a run (AP-010) and no path back into routing. One chat message makes the same number of model calls before and after this change (Task 9 measures it).
 - Specialists are stateless: never send `thread_id`. Every `user_id`-scoped query stays scoped.
 - Free tiers only: Cloud Run `--min-instances 0`; cold starts are accepted.
@@ -130,6 +131,16 @@
 - Test: `tests/test_agent_server.py`
 
 **Interfaces:**
+- Produces (call reporting, the loop guard): `make_graph()` returns a one-node wrapper graph (node name `run`: not a route or `tools`, AP-004). The node runs the spec's graph with a fresh `UsageCounter` added to its callbacks (`merge_configs`, so the stream handlers stay), and returns `{"messages": ..., "findings": ... (when present), "usage": counter.totals()}`.
+  - `UsageCounter` gains `model_calls`, counted in `on_llm_end`, plus `totals() -> dict` and `add(totals: dict)`.
+  - `RemoteAgent` replaces its message-based counting with `counter.add(output["usage"])`.
+  - Before each call, `RemoteAgent` raises `CallBudgetExceeded` (a `RuntimeError` naming the budget) when any counter in the config has `model_calls >= settings.max_message_model_calls`. That surfaces as an error on the node path, and as "The <route> agent failed (CallBudgetExceeded) …" on the ask path, so the orchestrator still answers.
+  - New setting `max_message_model_calls: int = 30` (`MAX_MESSAGE_MODEL_CALLS`).
+  - Tests:
+    - `test_server_reports_usage_of_every_call` (research workflow with a scripted model: the researcher's calls are counted although `gather` keeps no messages)
+    - `test_reported_usage_reaches_the_counter`
+    - `test_budget_stops_further_specialist_calls`
+    - `test_wrapper_keeps_tokens_and_tool_events_streaming` (namespace with `run:` still yields token and tool events)
 - Produces: `async def make_graph()` in `app/agents/server.py`. It reads `AGENT_ROUTE`, looks the spec up with `registry.get` (unknown or empty → `ValueError` naming the value), and awaits `spec.prepare(_STACK)` when set. `_STACK` is a module-level `AsyncExitStack`, kept open for the process; mark it with `# shortcut: never closed; the process lifetime is the server's`. It opens the app store with `set_history_store(...)` and returns `spec.build()`. The result is cached, so the graph is built once per process.
 - Produces: `set_history_store(store: BaseStore) -> None` in `app/core/memory.py`. When set, `search_chat_history` searches that store instead of `runtime.store`, because an Agent Server's own store is empty. The server's store is an `AsyncPostgresStore` on `DATABASE_URL` with a pool like `open_persistence`'s (`max_size=2`, `check=`, keepalives) and `index=store_index_config()`. It never calls `setup()`, because the role may be read-only.
 - Produces: `auth = Auth()` in `app/agents/server_auth.py`, with `@auth.authenticate async def authenticate(headers: dict) -> dict`. It accepts only when `SERVICE_TOKEN` is non-empty and `hmac.compare_digest` matches the `x-service-token` header (bytes or str keys). Identity = `x-smallie-user-id`. Everything else raises `Auth.exceptions.HTTPException(401)`.
@@ -244,9 +255,9 @@
 
 - [ ] **Step 1:** run `uv run pytest -rs` (all pass, no DB skips), then the antipattern `select` with every changed path.
 - [ ] **Step 2: Loop audit** (Review Focus 6; spends free quota, so ask the user first).
-  1. Run `uv run python -m scripts.bench_chat` on `main` (in-process agents), then on this branch with the compose stack up.
+  1. Run `uv run python -m scripts.bench_chat` on `main` (in-process agents), then on this branch with the compose stack up. On this branch, `bench_chat` takes call counts from the `UsageCounter`'s `model_calls`, which holds the counts the agent servers report; its local `Timing` callback can't see remote calls.
   2. Model calls per scenario must be equal. Record both tables and the latency difference in the PR description.
-  3. With LangSmith tracing on, open the trace of the composed-answer scenario and check that each specialist ran once per `ask_<route>` call and no run appears twice.
+  3. Check that no scenario comes near `MAX_MESSAGE_MODEL_CALLS`. If one does, raise the default and record the measured worst case.
   4. A higher count on this branch is a bug to fix before the PR, not a note.
 - [ ] **Step 3:** run a fresh reviewer on the whole branch diff against `main`, with the spec and this plan as context; tell it to check Review Focus 6 explicitly. Fix the confirmed findings and commit.
 - [ ] **Step 4:** ask the user to approve; then push and `gh pr create` to `main`. Merge only when the user asks.

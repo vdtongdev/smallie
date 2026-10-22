@@ -76,6 +76,13 @@ Why:
 
 Spec 2's chat room keeps the hub: a moderator holds the transcript and passes it to the next speaker, so agents only seem to talk to each other.
 
+## Call reporting and the loop guard (added 2026-10-22)
+
+The main app can't see model calls made on an agent server: callbacks only run in their own process. So every agent server counts its own run's calls, tokens and cost, and returns them as `usage` with the result. The main app adds them to the per-message `UsageCounter`, next to the orchestrator's own calls. That makes the guard work in production, with no LangSmith:
+- **Budget:** once a chat message has used `MAX_MESSAGE_MODEL_CALLS` (default 30) model calls, `RemoteAgent` refuses further specialist calls. The per-agent caps (`MAX_MODEL_CALLS`, `RESEARCH_MAX_MODEL_CALLS`, `ORCHESTRATOR_MAX_MODEL_CALLS`) still stop a single run.
+- **Usage box:** research's internal calls are counted too.
+- **Loop audit (plan Task 9):** `bench_chat` compares the reported counts with `main`'s.
+
 ## Architecture
 
 ```

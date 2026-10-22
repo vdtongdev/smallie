@@ -7,6 +7,8 @@ token counts.
 """
 
 import asyncio
+import base64
+import json
 import logging
 import os
 import time
@@ -71,7 +73,20 @@ def make_client(url: str, *, service_token: str, timeout_s: float,
 _METADATA_IDENTITY = ("http://metadata.google.internal/computeMetadata/v1/instance/"
                       "service-accounts/default/identity")
 _TOKEN_TTL_S = 50 * 60  # Google ID tokens last an hour
+_TOKEN_MARGIN_S = 5 * 60  # fetch a new one this long before the token's exp
 _tokens: dict[str, tuple[str, float]] = {}  # audience -> (token, expiry on the monotonic clock)
+
+
+def _token_ttl(token: str) -> float:
+    """Seconds to keep `token`: until its exp claim minus the margin (the metadata server may hand
+    back a cached token with minutes left), at most _TOKEN_TTL_S. No signature check: we only
+    read our own token's lifetime."""
+    try:
+        payload = token.split(".")[1]
+        exp = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))["exp"]
+        return min(exp - time.time() - _TOKEN_MARGIN_S, _TOKEN_TTL_S)
+    except (IndexError, ValueError, KeyError, TypeError):
+        return _TOKEN_TTL_S
 
 
 async def id_token(audience: str, *, transport: httpx.AsyncBaseTransport | None = None) -> str | None:
@@ -80,6 +95,7 @@ async def id_token(audience: str, *, transport: httpx.AsyncBaseTransport | None 
     (K_SERVICE unset), e.g. against the local compose stack."""
     if not os.environ.get("K_SERVICE"):
         return None
+    audience = audience.rstrip("/")  # Cloud Run checks it against the bare service URL
     token, expires = _tokens.get(audience, ("", 0.0))
     if time.monotonic() < expires:
         return token
@@ -87,7 +103,7 @@ async def id_token(audience: str, *, transport: httpx.AsyncBaseTransport | None 
         response = await client.get(_METADATA_IDENTITY, params={"audience": audience},
                                     headers={"Metadata-Flavor": "Google"})
         response.raise_for_status()
-    _tokens[audience] = (response.text, time.monotonic() + _TOKEN_TTL_S)
+    _tokens[audience] = (response.text, time.monotonic() + _token_ttl(response.text))
     return response.text
 
 

@@ -1,5 +1,7 @@
 import asyncio
+import base64
 import json
+import time
 from dataclasses import asdict
 from types import SimpleNamespace
 
@@ -250,6 +252,28 @@ async def test_id_token_is_fetched_once_and_cached(monkeypatch, tokens):
     [request] = requests
     assert request.headers["Metadata-Flavor"] == "Google"
     assert request.url.params["audience"] == "https://sql.run.app"
+
+
+def _jwt(exp: float) -> str:
+    payload = base64.urlsafe_b64encode(json.dumps({"exp": exp}).encode()).decode().rstrip("=")
+    return f"e30.{payload}.sig"
+
+
+async def test_id_token_near_its_expiry_is_fetched_again(monkeypatch):
+    """The metadata server may hand back a cached token with minutes left: the cache follows its exp."""
+    monkeypatch.setattr(remote_module, "_tokens", {})
+    monkeypatch.setenv("K_SERVICE", "smallie")
+    requests = []
+
+    def metadata(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, text=_jwt(time.time() + 120))  # inside the refresh margin
+
+    transport = httpx.MockTransport(metadata)
+    await id_token("https://sql.run.app/", transport=transport)
+    await id_token("https://sql.run.app/", transport=transport)
+    assert len(requests) == 2
+    assert requests[0].url.params["audience"] == "https://sql.run.app"  # Cloud Run's audience has no slash
 
 
 async def test_remote_call_carries_bearer_on_cloud_run(monkeypatch):

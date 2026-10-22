@@ -13,7 +13,7 @@ from starlette.background import BackgroundTask
 from app.core.accounts import get_profile
 from app.agents.artifacts import artifacts_from
 from app.agents.registry import ROUTES, SILENT_STEPS, STEPS
-from app.agents.remote import as_message
+from app.agents.remote import RUN_NODE, as_message
 from app.orchestration.orchestrator import HANDOFF
 from app.orchestration.router import ORCHESTRATOR
 from app.core.auth import get_current_user
@@ -203,7 +203,7 @@ def _to_events(mode: str, chunk, namespace: tuple[str, ...] = ()) -> list[dict]:
     # mode == "updates": {node_name: state_update}
     events = []
     for node, update in chunk.items():
-        if not isinstance(update, dict):
+        if not isinstance(update, dict) or (namespace and node == RUN_NODE):
             continue
         if not namespace:
             # Top level: only the router's choice or the orchestrator's handoff is new. The

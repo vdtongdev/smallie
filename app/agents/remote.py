@@ -7,6 +7,7 @@ token counts.
 """
 
 import asyncio
+import logging
 from dataclasses import asdict
 from typing import Any
 
@@ -24,7 +25,12 @@ from app.core.config import get_settings
 from app.core.memory import AgentContext
 from app.core.usage import UsageCounter
 
+log = logging.getLogger(__name__)
+
 GRAPH = "agent"  # the graph name in langgraph.json; every agent server serves one
+# The agent server's wrapper node (app/agents/server.py). Its update repeats what the agent's own
+# steps already streamed, so the chat events skip it.
+RUN_NODE = "run"
 # Errors a remote specialist reports by name only, raised again as the exceptions the chat route
 # turns into its "rate limit" / "invalid key" messages.
 _OPENAI_ERRORS = {"RateLimitError": (openai.RateLimitError, 429),
@@ -101,6 +107,9 @@ class RemoteAgent:
             raise RuntimeError(f"The {self.spec.route} agent at {self.url} returned no result.")
         # The server counts its run's model calls (this process can't see them): the loop guard
         # above and the usage box both need them.
+        if "usage" not in output:
+            log.warning("The %s agent at %s reported no usage; its calls don't count toward the budget",
+                        self.spec.route, self.url)
         for counter in counters:
             counter.add(output.get("usage") or {})
         new = [as_message(m) for m in output.get("messages", [])][len(input.get("messages", [])):]

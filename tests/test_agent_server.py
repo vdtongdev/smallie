@@ -1,15 +1,17 @@
 """The agent server side: entry point, service-token auth, chat history store, call reporting."""
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.store.memory import InMemoryStore
 from langgraph_sdk import Auth
 
-from app.agents import factory, server, server_auth
+from app.agents import factory, registry, server, server_auth
+from app.agents.delegation import make_ask_tool
 from app.agents.research import agent as research_agent
 from app.agents.remote import CallBudgetExceeded
 from app.api.routes_chat import _events_from
@@ -111,9 +113,55 @@ async def test_wrapper_keeps_tokens_and_tool_events_streaming(monkeypatch):
     parent.add_node("sql", server.reporting_graph(inner))
     parent.add_edge(START, "sql")
     parent.add_edge("sql", END)
+    # An earlier turn in the thread: its tool call must not be shown again.
+    earlier = [HumanMessage("AAPL?", id="u0"),
+               AIMessage("", tool_calls=[{"name": "run_sql", "args": {"query": "select 1"}, "id": "old"}], id="a0"),
+               ToolMessage("| 1 |", tool_call_id="old", name="run_sql", id="t0"), AIMessage("AAPL is 1.", id="a1")]
     stream = parent.compile(checkpointer=InMemorySaver()).astream(
-        {"messages": [HumanMessage("hi")]}, {"configurable": {"thread_id": "t"}}, context=CTX,
+        {"messages": [*earlier, HumanMessage("hi", id="u1")]}, {"configurable": {"thread_id": "t"}}, context=CTX,
         stream_mode=["messages", "updates"], subgraphs=True)
     events = [event async for event in _events_from(stream)]
-    assert {"type": "tool_call", "name": "search_memory", "args": {"query": "job"}} in events
+    tools = [(e["type"], e["name"]) for e in events if e["type"] in ("tool_call", "tool_result")]
+    assert tools == [("tool_call", "search_memory"), ("tool_result", "search_memory")]  # once, no replay
     assert "".join(e["text"] for e in events if e["type"] == "token") == "Hello there"
+
+
+async def test_run_returns_only_the_new_messages(monkeypatch):
+    model = scripted(AIMessage("Hello there"))
+    monkeypatch.setattr(factory, "get_chat_model", lambda *a, **k: model)
+    run = server.reporting_graph(factory.build_agent(name="sql_agent", system_prompt="x", tools=[]))
+    updates = [chunk async for chunk in run.astream({"messages": [HumanMessage("hi", id="u1")]}, context=CTX,
+                                                    stream_mode="updates")]
+    assert [m.text for m in updates[-1]["run"]["messages"]] == ["Hello there"]
+
+
+@pytest.mark.parametrize("value", [b"\xc3\xa9", b"\xff\xfe"])  # non-ASCII, and not even UTF-8
+async def test_auth_refuses_odd_header_bytes_with_401(monkeypatch, value):
+    monkeypatch.setattr(get_settings(), "service_token", "s3cret")
+    with pytest.raises(Auth.exceptions.HTTPException) as refused:
+        await server_auth.authenticate({b"x-service-token": value})
+    assert refused.value.status_code == 401
+
+
+async def test_parallel_first_runs_build_the_graph_once(monkeypatch):
+    builds = []
+
+    async def build():
+        builds.append(1)
+        await asyncio.sleep(0.01)
+        return "graph"
+
+    monkeypatch.setattr(server, "_GRAPH", None)
+    monkeypatch.setattr(server, "_build", build)
+    assert await asyncio.gather(server.make_graph(), server.make_graph()) == ["graph", "graph"]
+    assert builds == [1]
+
+
+async def test_budget_on_the_ask_path_still_lets_the_orchestrator_answer(monkeypatch):
+    monkeypatch.setattr(get_settings(), "max_message_model_calls", 3)
+    counter = UsageCounter()
+    counter.add({"model_calls": 3})
+    remote = FakeRemote(output={"messages": []})
+    ask = make_ask_tool(registry.get("sql"), agent(remote))
+    answer, _ = await ask.coroutine("AAPL P/E?", SimpleNamespace(context=CTX, config={"callbacks": [counter]}))
+    assert answer == "The sql agent failed (CallBudgetExceeded); it has no answer." and remote.calls == []

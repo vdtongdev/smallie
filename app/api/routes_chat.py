@@ -13,6 +13,7 @@ from starlette.background import BackgroundTask
 from app.core.accounts import get_profile
 from app.agents.artifacts import artifacts_from
 from app.agents.registry import ROUTES, SILENT_STEPS, STEPS
+from app.agents.remote import as_message
 from app.orchestration.orchestrator import HANDOFF
 from app.orchestration.router import ORCHESTRATOR
 from app.core.auth import get_current_user
@@ -180,7 +181,7 @@ def _to_events(mode: str, chunk, namespace: tuple[str, ...] = ()) -> list[dict]:
     """SSE events for one stream chunk. `namespace` is () for the assistant graph itself and
     non-empty for chunks from inside an agent subgraph."""
     if mode == "messages":
-        message, metadata = chunk
+        message, metadata = as_message(chunk[0]), chunk[1]  # remote agents' chunks are JSON dicts
         if isinstance(message, AIMessageChunk) and metadata.get("langgraph_node") == "model" and message.text:
             nodes = [segment.split(":", 1)[0] for segment in namespace]
             # A researcher's notes, or an agent the orchestrator called as a tool: the
@@ -204,7 +205,7 @@ def _to_events(mode: str, chunk, namespace: tuple[str, ...] = ()) -> list[dict]:
             if update.get("route"):
                 events.append({"type": "agent", "name": update["route"]})
             continue
-        for message in update.get("messages", []):
+        for message in map(as_message, update.get("messages", [])):
             if isinstance(message, AIMessage):
                 events += [{"type": "tool_call", "name": c["name"], "args": c["args"]}
                            for c in message.tool_calls if c["name"] != HANDOFF]  # shown as the agent badge

@@ -20,6 +20,7 @@ from langgraph.pregel.remote import RemoteException, RemoteGraph
 from langgraph.runtime import Runtime
 from langgraph_sdk.client import LangGraphClient
 
+from app.core.config import get_settings
 from app.core.memory import AgentContext
 from app.core.usage import UsageCounter
 
@@ -97,6 +98,17 @@ class RemoteAgent:
         if "findings" in output:
             result["findings"] = output["findings"]
         return result
+
+
+def remote_agents(specs) -> dict[str, RemoteAgent]:
+    """A RemoteAgent per spec, from AGENT_URLS. Every registered agent needs a URL: a missing one
+    fails at startup, not at the first chat that routes to it."""
+    s = get_settings()
+    urls = s.agent_url_map
+    if missing := [spec.route for spec in specs if not urls.get(spec.route)]:
+        raise RuntimeError(f"AGENT_URLS has no URL for: {', '.join(missing)}")
+    return {spec.route: RemoteAgent(spec, urls[spec.route], service_token=s.service_token,
+                                    timeout_s=s.agent_timeout_s) for spec in specs}
 
 
 def _usage_counters(config: RunnableConfig) -> list[UsageCounter]:

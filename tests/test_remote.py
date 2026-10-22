@@ -12,8 +12,13 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.pregel.remote import RemoteException, RemoteGraph
 
+from pathlib import Path
+
+from app.agents import registry
 from app.agents.artifacts import collect
-from app.agents.remote import RemoteAgent, as_message, make_client
+from app.agents.delegation import make_ask_tool
+from app.agents.registry import AGENTS, ROUTES
+from app.agents.remote import RemoteAgent, as_message, make_client, remote_agents
 from app.core import db
 from app.core.config import Settings, get_settings
 from app.core.memory import AgentContext
@@ -208,6 +213,30 @@ async def test_real_remote_graph_as_a_node_is_stateless_and_streams_into_the_par
     assert any(ns and ns[0].startswith("sql:") and mode == "messages" for ns, mode, _ in chunks)
     saved = (await app.aget_state(config)).values["messages"]
     assert [m.id for m in saved] == ["h1", "m1"] and saved[1].usage_metadata["output_tokens"] == 7
+
+
+def test_missing_agent_url_names_the_routes(monkeypatch):
+    monkeypatch.setattr(get_settings(), "agent_urls", '{"sql": "http://x"}')
+    with pytest.raises(RuntimeError) as error:
+        remote_agents(AGENTS)
+    assert all(route in str(error.value) for route in ("docs", "chart", "research"))
+    assert "sql" not in str(error.value).split(":", 1)[1]
+
+
+async def test_ask_tool_failure_still_answers():
+    remote = agent(FakeRemote(error=httpx.ConnectError("connection refused")))
+    ask = make_ask_tool(registry.get("sql"), remote)
+    answer, artifact = await ask.coroutine("AAPL P/E?", SimpleNamespace(context=CTX, config={}))
+    assert answer == "The sql agent failed (ConnectError); it has no answer." and artifact == {}
+
+
+def test_specialists_cannot_import_remote_graph():
+    """Agents talk only through the main app (no agent-to-agent loops)."""
+    root = Path(__file__).resolve().parent.parent / "app" / "agents"
+    for route in ROUTES:
+        for path in (root / route).rglob("*.py"):
+            text = path.read_text(encoding="utf-8")
+            assert not any(name in text for name in ("RemoteGraph", "langgraph.pregel.remote", "app.agents.remote")), path
 
 
 def test_engines_use_the_pool_size(monkeypatch):

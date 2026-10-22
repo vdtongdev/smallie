@@ -117,3 +117,15 @@ def test_a_fallback_drops_the_reply_before_the_orchestrator_takes_over():
     update = {"fallback": {"route": "orchestrator", "failed": "docs", "attempt": "...", "messages": []}}
     assert _to_events("updates", update) == [
         {"type": "fallback", "agent": "docs"}, {"type": "agent", "name": "orchestrator"}]
+
+
+def test_remote_dict_chunks_become_events():
+    """A remote agent's chunks arrive as JSON dicts; they give the same events as messages do."""
+    token = ({"type": "AIMessageChunk", "content": "Hi"}, {"langgraph_node": "model"})
+    assert _to_events("messages", token, SUBGRAPH) == [{"type": "token", "text": "Hi"}]
+    call = {"type": "ai", "content": "", "tool_calls": [{"name": "run_sql", "args": {"query": "SELECT 1"}, "id": "c1"}]}
+    result = {"type": "tool", "content": "| ?column? |", "name": "run_sql", "tool_call_id": "c1"}
+    assert _to_events("updates", {"model": {"messages": [call]}, "tools": {"messages": [result]}}, SUBGRAPH) == [
+        {"type": "tool_call", "name": "run_sql", "args": {"query": "SELECT 1"}},
+        {"type": "tool_result", "name": "run_sql", "content": "| ?column? |"},
+    ]

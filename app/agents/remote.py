@@ -6,6 +6,7 @@ state. `as_message` turns them back into message objects. LangGraph's own conver
 token counts.
 """
 
+import asyncio
 from dataclasses import asdict
 from typing import Any
 
@@ -65,7 +66,7 @@ class RemoteAgent:
     """
 
     def __init__(self, spec, url: str, *, service_token: str, timeout_s: float, remote: Any = None):
-        self.spec, self.url = spec, url
+        self.spec, self.url, self.timeout_s = spec, url, timeout_s
         self.remote = remote or RemoteGraph(
             GRAPH, client=make_client(url, service_token=service_token, timeout_s=timeout_s),
             distributed_tracing=True)
@@ -78,11 +79,15 @@ class RemoteAgent:
         # checkpoint_ns stays: RemoteGraph drops it from the request and prefixes streamed chunks with it.
         config["configurable"] = {k: v for k, v in config.get("configurable", {}).items() if k != "thread_id"}
         try:
-            output = await self.remote.ainvoke(input, config, context=asdict(context),
-                                               headers={"x-smallie-user-id": context.user_id})
+            # The client's timeout is per read; keep-alives from a stuck run would never trip it.
+            async with asyncio.timeout(self.timeout_s):
+                output = await self.remote.ainvoke(input, config, context=asdict(context),
+                                                   headers={"x-smallie-user-id": context.user_id})
         except RemoteException as exc:
             raise _openai_error(exc, self.url) from exc
-        new = [as_message(m) for m in output.get("messages", [])][len(input.get("messages", [])):]
+        if output is None:  # the run ended without sending its final state
+            raise RuntimeError(f"The {self.spec.route} agent at {self.url} returned no result.")
+        new =[as_message(m) for m in output.get("messages", [])][len(input.get("messages", [])):]
         for counter in _usage_counters(config):
             for message in new:
                 if isinstance(message, AIMessage):

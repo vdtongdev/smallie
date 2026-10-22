@@ -1,3 +1,5 @@
+import asyncio
+import json
 from dataclasses import asdict
 from types import SimpleNamespace
 
@@ -6,6 +8,8 @@ import openai
 import pytest
 from langchain_core.callbacks import AsyncCallbackManager
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, SystemMessage, ToolMessage
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.pregel.remote import RemoteException, RemoteGraph
 
 from app.agents.artifacts import collect
@@ -67,11 +71,12 @@ def test_usage_counter_counts_one_message():
 class FakeRemote:
     """Stands in for RemoteGraph: records each call, returns `output` or raises `error`."""
 
-    def __init__(self, output=None, error=None):
-        self.output, self.error, self.calls = output, error, []
+    def __init__(self, output=None, error=None, delay=0.0):
+        self.output, self.error, self.delay, self.calls = output, error, delay, []
 
     async def ainvoke(self, input, config=None, *, context=None, headers=None):
         self.calls.append({"input": input, "config": config, "context": context, "headers": headers})
+        await asyncio.sleep(self.delay)
         if self.error:
             raise self.error
         return self.output
@@ -82,8 +87,8 @@ CTX = AgentContext(user_id="u-7", memories="- likes AAPL", mentioned=("sql",))
 HUMAN = {"type": "human", "content": "AAPL yield?", "id": "h1"}
 
 
-def agent(remote) -> RemoteAgent:
-    return RemoteAgent(SPEC, "http://sql:8000", service_token="t", timeout_s=5, remote=remote)
+def agent(remote, timeout_s: float = 5) -> RemoteAgent:
+    return RemoteAgent(SPEC, "http://sql:8000", service_token="t", timeout_s=timeout_s, remote=remote)
 
 
 async def test_sends_context_and_user_header_without_thread_id():
@@ -151,10 +156,58 @@ async def test_sdk_client_does_not_retry_runs():
         return httpx.Response(503, json={"detail": "starting"})
 
     client = make_client("http://sql:8000", service_token="t", timeout_s=5, transport=httpx.MockTransport(unavailable))
-    with pytest.raises(Exception):
+    with pytest.raises(httpx.HTTPStatusError):
         await RemoteGraph("agent", client=client).ainvoke({"messages": []}, context=asdict(CTX))
     assert len(requests) == 1
     assert requests[0].headers["x-service-token"] == "t" and "x-api-key" not in requests[0].headers
+
+
+async def test_no_final_state_is_a_clear_error():
+    with pytest.raises(RuntimeError, match="sql agent"):
+        await agent(FakeRemote(output=None)).ainvoke({"messages": []}, context=CTX)
+
+
+async def test_a_stuck_agent_call_times_out():
+    # The httpx timeout is per read: a server sending keep-alives could otherwise hold a call forever.
+    with pytest.raises(TimeoutError):
+        await agent(FakeRemote(output={"messages": []}, delay=1), timeout_s=0.05).ainvoke({"messages": []}, context=CTX)
+
+
+def _sse(event: str, data) -> str:
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+async def test_real_remote_graph_as_a_node_is_stateless_and_streams_into_the_parent():
+    """The real RemoteGraph inside a parent graph, as routes_chat runs it: guards what a LangGraph
+    upgrade could change (no thread on the agent server, chunks under the node's namespace)."""
+    requests = []
+
+    def server(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        body = (_sse("metadata", {"run_id": "r1"})
+                + _sse("messages", [{"type": "AIMessageChunk", "content": "ans", "id": "a1"}, {"langgraph_node": "model"}])
+                + _sse("values", {"messages": [HUMAN, AI_DICT]}))
+        return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=body.encode())
+
+    client = make_client("http://sql:8000", service_token="t", timeout_s=5, transport=httpx.MockTransport(server))
+    remote = agent(RemoteGraph("agent", client=client))
+    graph = StateGraph(MessagesState, context_schema=AgentContext)
+    graph.add_node("sql", remote.node)
+    graph.add_edge(START, "sql")
+    graph.add_edge("sql", END)
+    app = graph.compile(checkpointer=InMemorySaver())
+    config = {"configurable": {"thread_id": "c-42"}}
+    chunks = [chunk async for chunk in app.astream({"messages": [as_message(HUMAN)]}, config, context=CTX,
+                                                    stream_mode=["messages", "updates"], subgraphs=True)]
+
+    [request] = requests
+    sent = json.loads(request.content)
+    assert request.url.path == "/runs/stream"  # no /threads/<id>/: stateless
+    assert not any(key.startswith(("thread_id", "checkpoint", "__pregel")) for key in sent["config"]["configurable"])
+    assert request.headers["x-smallie-user-id"] == "u-7"
+    assert any(ns and ns[0].startswith("sql:") and mode == "messages" for ns, mode, _ in chunks)
+    saved = (await app.aget_state(config)).values["messages"]
+    assert [m.id for m in saved] == ["h1", "m1"] and saved[1].usage_metadata["output_tokens"] == 7
 
 
 def test_engines_use_the_pool_size(monkeypatch):

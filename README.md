@@ -145,8 +145,9 @@ app/
     formats/      answer formats the orchestrator follows when it writes up results (summary, list, report...)
   api/            FastAPI app and shared routes: chat (SSE streaming), conversations, memories, agents, admin
   static/         plain HTML/JS UI with an EN/VI toggle
-db/init/          extension, read-only role, market schema (loaded on the first `docker compose up`; db/setup_wsl.sh is the legacy non-Docker setup)
+db/init/          extension, read-only role, market schema, agent servers' databases (loaded on the first `docker compose up`; db/setup_wsl.sh is the legacy non-Docker setup)
 Dockerfile        container image for Cloud Run (.gcloudignore / .dockerignore keep secrets out)
+Dockerfile.agent  one image for every agent server (AGENT_ROUTE picks the agent; docker-compose.yml runs all four)
 scripts/          load_stocks.py (fill/refresh stock data), reindex.py (after changing the embedding model),
                   bench_chat.py (latency and model calls per scenario)
 ```

@@ -199,11 +199,13 @@
 - [ ] **Step 8: End-to-end check** (spends about 3 free-quota calls). Set `AGENT_URLS` to the four localhost ports and `SERVICE_TOKEN` in `.env`, start `uvicorn`, and ask "AAPL dividend yield?". The answer and the `run_sql` tool events stream, the reply is saved in the thread, and the usage box goes up. Then ask "plot that" and check that the chart draws.
 - [ ] **Step 9:** update README (running the stack, rebuilding after changes), CLAUDE.md (Commands + a **Remote agents** paragraph) and `ARCHITECTURE.md` section 10. **Commit** `Agent server image and compose stack`.
 
-### Task 6: Read-only database role for docs and research
+### Task 6: Read-only database role for the agent servers
+
+All four servers, not only docs and research: every server opens the app's store for `search_chat_history` through `DATABASE_URL` (Task 5 review).
 
 **Files:**
 - Create: `db/init/06_agent_reader.sql`
-- Modify: `docker-compose.yml` (docs and research `DATABASE_URL` → `agent_reader`), `scripts/dev_db.ps1` (also runs `06`), `app/features/documents/ingest.py` only if the test below shows `PGVector` writing on init
+- Modify: `docker-compose.yml` (the shared `x-agent-env` `DATABASE_URL` → `agent_reader`), `scripts/dev_db.ps1` (also runs `06`), `app/features/documents/ingest.py` only if the test below shows `PGVector` writing on init
 - Test: `tests/test_agent_reader.py` (`requires_db`)
 
 **Interfaces:**
@@ -243,11 +245,11 @@
 **Interfaces:**
 - Produces documented commands (the user runs them; no deploy in this task):
   1. Build the image once: `gcloud builds submit --config cloudbuild.agent.yaml`.
-  2. Deploy per route: `gcloud run deploy smallie-<route> --image <registry>/smallie-agent --region asia-southeast1 --no-allow-unauthenticated --min-instances 0 --max-instances 1 --memory 1Gi --cpu 1 --set-env-vars AGENT_ROUTE=<route> --env-vars-file cloudrun.agent.env.yaml`. Request-based CPU billing, no `--no-cpu-throttling`.
+  2. Deploy per route: `gcloud run deploy smallie-<route> --image <registry>/smallie-agent --region asia-southeast1 --no-allow-unauthenticated --min-instances 0 --max-instances 1 --memory 1Gi --cpu 1 --env-vars-file cloudrun.agent.<route>.env.yaml`. One env file per route, because gcloud rejects `--set-env-vars` next to `--env-vars-file` (verify), and each route needs its own `AGENT_ROUTE`, `DATABASE_URI` (`agent_<route>`), `REDIS_URI` and `REDIS_KEY_PREFIX` (`<route>:`; one shared Upstash database must not mix the four servers' run queues and sweep keys). The files list only what a server needs (model/embedding settings, `LANGSMITH_API_KEY`, `SERVICE_TOKEN`, research's `TAVILY_API_KEY`/`MCP_SERVERS`/`EXTERNAL_DATABASE_URL`, the reader `DATABASE_URL`, `READONLY_DATABASE_URL`, `BG_JOB_MAX_RETRIES`, the pool sizes), never `APP_PASSWORD` or `SESSION_SECRET`. Request-based CPU billing, no `--no-cpu-throttling`.
   3. Grant `roles/run.invoker` on each agent service to the main app's service account.
   4. Main app: add `AGENT_URLS` (the four `*.run.app` URLs) and `SERVICE_TOKEN` to `cloudrun.env.yaml`.
   5. Neon: create the four `agent_<route>` databases and `agent_reader` (run `05` and `06`, with a strong password for `agent_reader`). Redis: an Upstash free database; `REDIS_URI` in the agents' env file.
-- [ ] **Step 1:** write `cloudbuild.agent.yaml` and the docs. Add `cloudrun.agent.env.yaml` to `.gitignore`, `.gcloudignore` and `.dockerignore`.
+- [ ] **Step 1:** write `cloudbuild.agent.yaml` and the docs. Add `cloudrun.agent.*.env.yaml` to `.gitignore`, `.gcloudignore` and `.dockerignore`.
 - [ ] **Step 2: Verify:** `gcloud builds submit --config cloudbuild.agent.yaml --dry-run` is not available, so check by reading. Each command uses the real project, region and image names from CLAUDE.md, and every secret goes in a gitignored file.
 - [ ] **Step 3: Commit** `Cloud Run deployment config for the agent services`.
 

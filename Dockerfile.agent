@@ -3,7 +3,9 @@
 # queue) and REDIS_URI. Based on what `langgraph dockerfile -c langgraph.json` generates; written by
 # hand because pyproject.toml has no build-system (so `pip install -e .` can't work) and Cloud Build
 # needs a Dockerfile.
-FROM langchain/langgraph-api:3.12
+# Pinned by digest (langgraph-api 0.16.4): the tag is rebuilt almost daily, and a new
+# /api/constraints.txt or run behaviour must be a deliberate upgrade, not a surprise in Cloud Build.
+FROM langchain/langgraph-api:3.12@sha256:6bee4e26019e5ddda90e5cd37b8d76bb828b6a1238991c9e1604f4437f0bac4d
 
 WORKDIR /deps/smallie
 COPY pyproject.toml uv.lock ./

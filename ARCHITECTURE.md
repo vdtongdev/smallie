@@ -618,7 +618,7 @@ adds the new messages to the conversation (the only copy)
 | 5. Security (service token, IAM, read-only roles) | done (plan Tasks 6–7: Cloud Run ID tokens; `agent_reader` for the app's data, `agent_server` for the servers' own databases; calls the main app gave up on are cancelled) |
 | 6. Cloud Run deployment | config and steps written (plan Task 8: `cloudbuild.agent.yaml`, README "Deploying"); first deploy pending |
 
-**Database roles.** Each agent server logs in twice, with accounts that can't touch accounts or chats:
+**Database roles.** Each agent server uses three logins, none of which can touch accounts or chats:
 
 | Login | Used for | Can |
 |---|---|---|

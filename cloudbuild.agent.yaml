@@ -1,0 +1,8 @@
+# Builds the agent server image (Dockerfile.agent) once; every agent's Cloud Run service runs it
+# (README "Deploying", agent servers). Run from the project folder:
+#   gcloud builds submit --config cloudbuild.agent.yaml
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args: ["build", "-f", "Dockerfile.agent", "-t", "asia-southeast1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/smallie-agent", "."]
+images:
+  - asia-southeast1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/smallie-agent

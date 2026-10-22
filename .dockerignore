@@ -9,3 +9,4 @@ tests/
 cloudrun.env.yaml
 .gcloudignore
 .langgraph_api/
+cloudrun.agent*.yaml

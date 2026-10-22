@@ -9,3 +9,5 @@ uploads/*
 __pycache__/
 *.pyc
 tests/
+cloudrun.agent*.yaml
+.langgraph_api/

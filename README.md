@@ -231,6 +231,71 @@ The app runs as a container on **Cloud Run** (free tier, scales to zero). All da
    - `--allow-unauthenticated` only opens the URL; the app still requires a login.
 6. Share the printed `https://smallie-....run.app` URL. Run the same deploy command again after code or `cloudrun.env.yaml` changes; each deploy creates a new revision.
 
+**3. Agent servers (docs, sql, research, chart)**
+
+Each specialist runs as its own private Cloud Run service, all from one image (`Dockerfile.agent`). The main app calls them with the service token and a Google ID token. Since 0.4.0 the app doesn't start without `AGENT_URLS`, so on a first setup do this section before the app's deploy (2.5). Do these once, in this order, then repeat steps 4–5 after changing agent code.
+
+1. **Neon: two more roles and the agents' databases.** Create the roles yourself with strong passwords, because Neon rejects the weak ones in the files. Then run the two scripts with the `psql` inside the local `smallie-db` container (start it with `scripts\dev_db.ps1`):
+   ```powershell
+   $neon = "<neon owner url>"   # direct URL of smalliedb
+   $psql = { param($file) wsl -d Ubuntu -u root -- docker exec smallie-db psql $neon -v ON_ERROR_STOP=1 -f /docker-entrypoint-initdb.d/$file }
+   wsl -d Ubuntu -u root -- docker exec smallie-db psql $neon -c "CREATE ROLE agent_server LOGIN PASSWORD '<strong 1>'" -c "CREATE ROLE agent_reader LOGIN PASSWORD '<strong 2>'"
+   & $psql 05_agent_databases.sql   # agent_docs, agent_sql, agent_research, agent_chart, owned by agent_server
+   & $psql 06_agent_reader.sql      # agent_reader's settings; smalliedb stops accepting every login
+   ```
+   - `agent_server` holds only the agents' run queues and can't open `smalliedb`. `agent_reader` can only read documents, the knowledge graph and chat history, never accounts or chats. The main app grants its tables at every start.
+   - After `06`, check that the live app's stock questions still work (`06` grants `agent_readonly` access explicitly).
+   - If `05` fails at `CREATE DATABASE ... OWNER agent_server`, create the four databases in the Neon console with owner `agent_server`.
+2. **Upstash: a free Redis.** Create a database at https://upstash.com (region `ap-southeast-1`) and copy its `rediss://default:...@....upstash.io:6379` URL. The four servers share it; each uses its own key prefix.
+3. **`cloudrun.agent.env.yaml`** (gitignored). It holds only what an agent server needs, never `APP_PASSWORD` or `SESSION_SECRET`. All values are quoted strings:
+   ```yaml
+   OPENROUTER_API_KEY: "..."          # and the OPENROUTER_* / EMBED_DIM / MAX_MODEL_CALLS / RESEARCH_MAX_MODEL_CALLS / SQL_MAX_ROWS values you use in cloudrun.env.yaml
+   LANGSMITH_API_KEY: "..."           # required: the free Agent Server licence checks it
+   SERVICE_TOKEN: "..."               # the same value as in cloudrun.env.yaml
+   TAVILY_API_KEY: "..."              # research; also MCP_SERVERS / EXTERNAL_DATABASE_URL if you use them
+   DATABASE_URL: "postgresql://agent_reader:<strong 2>@<neon host>/smalliedb?sslmode=require"
+   READONLY_DATABASE_URL: "<the same value as in cloudrun.env.yaml>"
+   REDIS_URI: "rediss://default:...@....upstash.io:6379"
+   DB_POOL_SIZE: "2"
+   LANGGRAPH_POSTGRES_POOL_MAX_SIZE: "5"
+   BG_JOB_MAX_RETRIES: "1"            # counts attempts: a run cut off by a restart is not repeated
+   BG_JOB_TIMEOUT_SECS: "360"         # stops a run the main app gave up on (it waits 300 s)
+   ```
+4. **Build the image** (Cloud Build, about 5 minutes):
+   ```powershell
+   gcloud builds submit --config cloudbuild.agent.yaml
+   ```
+5. **Deploy the four services.** Each one gets its own env file with three route-specific lines (gcloud takes only one env file, and doesn't combine it with `--set-env-vars`). The files are deleted after each deploy:
+   ```powershell
+   $agentDb = "postgresql://agent_server:<strong 1>@<neon host>"
+   foreach ($r in "docs", "sql", "research", "chart") {
+     $file = "cloudrun.agent.$r.env.yaml"
+     $lines = @(Get-Content cloudrun.agent.env.yaml) + "AGENT_ROUTE: `"$r`"",
+       "DATABASE_URI: `"$agentDb/agent_${r}?sslmode=require`"", "REDIS_KEY_PREFIX: `"${r}:`""
+     [IO.File]::WriteAllLines("$PWD\$file", $lines)   # UTF-8 without BOM
+     gcloud run deploy "smallie-$r" --image asia-southeast1-docker.pkg.dev/smallie-review/cloud-run-source-deploy/smallie-agent `
+       --region asia-southeast1 --no-allow-unauthenticated --env-vars-file $file `
+       --memory 1Gi --cpu 1 --min-instances 0 --max-instances 1 --timeout 600
+     Remove-Item $file
+   }
+   ```
+   - `--no-allow-unauthenticated`: only callers with `roles/run.invoker` get through. Each server also checks the service token.
+   - No `--no-cpu-throttling`: an agent only works while the main app's request is open, so it is billed only then.
+6. **Let the main app call them**, then point it at their URLs:
+   ```powershell
+   $num = gcloud projects describe smallie-review --format="value(projectNumber)"
+   foreach ($r in "docs", "sql", "research", "chart") {
+     gcloud run services add-iam-policy-binding "smallie-$r" --region asia-southeast1 --role roles/run.invoker `
+       --member "serviceAccount:$num-compute@developer.gserviceaccount.com"
+     gcloud run services describe "smallie-$r" --region asia-southeast1 --format "value(status.url)"
+   }
+   ```
+   Add the printed URLs and the token to `cloudrun.env.yaml`, then redeploy the app (step 2.5). Use the URLs exactly as printed, because the ID token is issued for that URL:
+   ```yaml
+   AGENT_URLS: '{"docs": "https://smallie-docs-....run.app", "sql": "...", "research": "...", "chart": "..."}'
+   SERVICE_TOKEN: "..."
+   ```
+
 **Upgrading a database from before the knowledge graph** (once): the app creates the graph tables at startup, but old memories and files need converting.
 1. Back up first: in the Neon console create a branch (an instant copy), e.g. `pre-graph-<date>`. Delete it after a week or so.
 2. Deploy the new version.
@@ -245,7 +310,7 @@ The app runs as a container on **Cloud Run** (free tier, scales to zero). All da
 gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=smallie" --limit 50 --freshness 1h
 ```
 
-**Limits:** the first request after ~15 min idle cold-starts the container (10–20 s). The OpenRouter free quota is shared by everyone using the deployment. The image is stored in Artifact Registry as `asia-southeast1-docker.pkg.dev/smallie-review/cloud-run-source-deploy/smallie` (0.5 GB free; delete old images if you redeploy often). Neon only hosts the database; a deploy never touches it unless the schema changes.
+**Limits:** the first request after ~15 min idle cold-starts the container (10–20 s), and the first call to an idle agent server cold-starts that one too. The OpenRouter free quota is shared by everyone using the deployment. The image is stored in Artifact Registry as `asia-southeast1-docker.pkg.dev/smallie-review/cloud-run-source-deploy/smallie` (0.5 GB free; delete old images if you redeploy often). Neon only hosts the database; a deploy never touches it unless the schema changes.
 
 ## Using your own database
 

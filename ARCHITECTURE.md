@@ -595,7 +595,7 @@ flowchart LR
 
 ```
 main app                                         sql server (private)
-  │ POST /threads/runs/stream                       │
+  │ POST /runs/stream (no thread: stateless)        │
   │   headers: service token, user id,              │
   │            LangSmith trace headers              │
   │   body: messages + AgentContext                 │
@@ -615,8 +615,16 @@ adds the new messages to the conversation (the only copy)
 | 2. LangSmith tracing | done |
 | 3. Agent server image + compose stack | done (plan Tasks 4–5: one image, 4 servers in compose, end-to-end checked) |
 | 4. `RemoteAgent` wrapper in the main app | done (plan Tasks 1–3: `RemoteAgent`, the main app calls every specialist through it) |
-| 5. Security (service token, IAM, read-only roles) | planned |
-| 6. Cloud Run deployment | planned |
+| 5. Security (service token, IAM, read-only roles) | done (plan Tasks 6–7: Cloud Run ID tokens; `agent_reader` for the app's data, `agent_server` for the servers' own databases; calls the main app gave up on are cancelled) |
+| 6. Cloud Run deployment | config and steps written (plan Task 8: `cloudbuild.agent.yaml`, README "Deploying"); first deploy pending |
+
+**Database roles.** Each agent server logs in twice, with accounts that can't touch accounts or chats:
+
+| Login | Used for | Can |
+|---|---|---|
+| `agent_reader` (`DATABASE_URL`) | the agents' searches | read documents, the knowledge graph and chat history; the main app grants these tables at every start |
+| `agent_readonly` (`READONLY_DATABASE_URL`) | SQL and chart queries | read the `market` schema |
+| `agent_server` (`DATABASE_URI`) | the Agent Server's own run queue | own the four `agent_<route>` databases; can't open the app's database |
 
 ---
 
@@ -632,7 +640,7 @@ Traces contain full prompts (users' messages, file passages, memories), so traci
 
 **Local development**
 
-- Windows + WSL Ubuntu; Postgres 18 + pgvector in Docker inside WSL (`docker compose up -d db`)
+- Windows + WSL Ubuntu; Docker inside WSL runs Postgres 18 + pgvector, Redis and the four agent servers (`docker compose up -d`, ports 2101–2104)
 - `uv sync` installs the dependencies
 - `uv run uvicorn app.api.main:app --reload --loop asyncio:SelectorEventLoop`
 
@@ -640,13 +648,15 @@ Traces contain full prompts (users' messages, file passages, memories), so traci
 
 - Always from `main`
 - Update `CHANGELOG.md` + the version in `pyproject.toml` first
-- `gcloud run deploy smallie --source . --region asia-southeast1 ...`
-- Neon Postgres (direct URL, no pooler)
+- Main app: `gcloud run deploy smallie --source . --region asia-southeast1 ...` (public URL, login required)
+- Agent servers: one image built by `gcloud builds submit --config cloudbuild.agent.yaml`, then one private service per agent (`smallie-<route>`, `--no-allow-unauthenticated`, its own env file); the main app's service account has `roles/run.invoker` on each
+- Neon Postgres (direct URL, no pooler): the app's database plus one small database per agent server
 
 **Services**
 
-- Google Cloud Run (project `smallie-review`, region `asia-southeast1`)
+- Google Cloud Run (project `smallie-review`, region `asia-southeast1`): `smallie` plus `smallie-docs`, `smallie-sql`, `smallie-research`, `smallie-chart`
 - Neon Postgres 18 (Singapore)
+- Upstash Redis (free; the agent servers' streaming pipe, one key prefix per server)
 - OpenRouter (free tier or paid; chat and embedding models)
 - Tavily (optional, web search)
 - LangSmith (optional, tracing)

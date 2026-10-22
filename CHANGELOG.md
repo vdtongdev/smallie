@@ -113,3 +113,16 @@ Versions are `major.minor.patch`: the major version stays 0 for now, each minor 
   - With `OPENROUTER_QUANTIZATIONS=bf16,fp8`, OpenRouter picked the cheapest allowed provider, which was also one of the slowest: about 14 tokens/s for `google/gemma-4-31b-it`
   - New setting `OPENROUTER_PROVIDER_SORT` (`throughput`, `latency` or `price`; empty keeps OpenRouter's default). With `throughput` the same filter served 33 and 130 tokens/s in testing, at the same or lower cost per call
   - Provider speeds change over the day, so the numbers are a snapshot; free models are not affected
+
+## 0.4.0 - Remote agents
+- **Remote agents**: the docs, sql, chart and research agents each run as their own private LangGraph Agent Server; the main app keeps the router, orchestrator, chats and memory and calls them over HTTP
+  - One image (`Dockerfile.agent`) serves every agent; `AGENT_ROUTE` picks which. Locally `docker compose up -d` runs all four on ports 2101–2104 next to Postgres and Redis; on Cloud Run each is its own private service (`smallie-<route>`, built with `cloudbuild.agent.yaml`), steps in README "Deploying"
+  - New settings: `AGENT_URLS` (route → server URL; the app doesn't start without one for every agent), `SERVICE_TOKEN` (shared secret the servers check; a server with none refuses every call), `AGENT_TIMEOUT_S` (default 300), `MAX_MESSAGE_MODEL_CALLS` (default 30, a per-message backstop on top of the existing per-agent limits; parallel questions in one step can go one step over it)
+  - Calls carry no conversation id: the main app's chat stays the only copy, and a call the app stops waiting for (timeout, chat closed) is cancelled on the server instead of spending calls nobody sees
+  - On Cloud Run the services also require Google's ID token (`roles/run.invoker` for the main app's service account), so an agent URL can't be called from outside
+  - The servers read your files, the knowledge graph and chat history as `agent_reader` (read-only, no accounts or chats) and keep their run queues in their own databases as `agent_server`; stock questions keep using `agent_readonly`. Web search keys (`TAVILY_API_KEY`, `MCP_SERVERS`, `EXTERNAL_DATABASE_URL`) reach only the research server
+  - Same number of model calls per message as before: 17 vs 17 over 6 benchmark scenarios, worst case 6 for one message. No slowdown measurable locally; cold-start and warm latency on Cloud Run: measured after the first deploy
+  - Limits: in LangSmith a server's run is its own trace, not nested under the main app's; the usage box counts the servers' calls, as before
+- **LangSmith tracing** (`LANGSMITH_TRACING`, `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT`), off by default: traces chats, with the user id in their metadata. Traces hold full prompts (your messages, file passages, memories)
+- Local Postgres now runs in Docker inside WSL (`docker-compose.yml`, port 5433); `scripts\dev_db.ps1` starts it and keeps WSL running, so DB tests and the app no longer freeze when WSL stops
+- `scripts.bench_chat` counts the agent servers' model calls too

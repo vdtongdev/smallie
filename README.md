@@ -257,7 +257,6 @@ Each specialist runs as its own private Cloud Run service, all from one image (`
    OPENROUTER_API_KEY: "..."          # and the OPENROUTER_* / EMBED_DIM / MAX_MODEL_CALLS / RESEARCH_MAX_MODEL_CALLS / SQL_MAX_ROWS values you use in cloudrun.env.yaml
    LANGSMITH_API_KEY: "..."           # required: the free Agent Server licence checks it
    SERVICE_TOKEN: "..."               # the same value as in cloudrun.env.yaml
-   TAVILY_API_KEY: "..."              # research; also MCP_SERVERS / EXTERNAL_DATABASE_URL if you use them
    # LANGSMITH_TRACING: "true"        # optional, with LANGSMITH_PROJECT: records the servers' part of a traced chat
    DATABASE_URL: "postgresql://agent_reader:<strong 2>@<neon direct host>/smalliedb?sslmode=require"
    READONLY_DATABASE_URL: "<the same value as in cloudrun.env.yaml>"
@@ -267,6 +266,7 @@ Each specialist runs as its own private Cloud Run service, all from one image (`
    BG_JOB_MAX_RETRIES: "1"            # counts attempts: a run cut off by a restart is not repeated
    BG_JOB_TIMEOUT_SECS: "360"         # stops a run the main app gave up on (it waits 300 s)
    ```
+   Research's keys go in a second gitignored file, `cloudrun.agent.research-secrets.yaml`, so that only the research server gets them (the other servers have no use for them). It holds `TAVILY_API_KEY`, plus `MCP_SERVERS` / `EXTERNAL_DATABASE_URL` if you use them. `MCP_SERVERS` is JSON, so wrap it in single quotes. The main app keeps its own `TAVILY_API_KEY` in `cloudrun.env.yaml`, because the orchestrator also searches the web.
 4. **Build the image** (Cloud Build, about 5 minutes):
    ```powershell
    gcloud builds submit --config cloudbuild.agent.yaml
@@ -278,6 +278,7 @@ Each specialist runs as its own private Cloud Run service, all from one image (`
      $file = "cloudrun.agent.$r.env.yaml"
      $lines = @(Get-Content cloudrun.agent.env.yaml) + "AGENT_ROUTE: `"$r`"",
        "DATABASE_URI: `"$agentDb/agent_${r}?sslmode=require`"", "REDIS_KEY_PREFIX: `"${r}:`""
+     if ($r -eq "research") { $lines += @(Get-Content cloudrun.agent.research-secrets.yaml) }
      [IO.File]::WriteAllLines("$PWD\$file", $lines)   # UTF-8 without BOM
      gcloud run deploy "smallie-$r" --image asia-southeast1-docker.pkg.dev/smallie-review/cloud-run-source-deploy/smallie-agent `
        --region asia-southeast1 --no-allow-unauthenticated --env-vars-file $file `

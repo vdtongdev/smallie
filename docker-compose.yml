@@ -20,6 +20,10 @@ x-agent-env: &agent-env
   # Backstop for a run whose cancel never arrived: just over the main app's AGENT_TIMEOUT_S (300 s), not a day.
   BG_JOB_TIMEOUT_SECS: "360"
   LANGGRAPH_POSTGRES_POOL_MAX_SIZE: "5"
+  # Research's keys, blanked for the others; the research service reads them from .env.
+  TAVILY_API_KEY: ""
+  MCP_SERVERS: ""
+  EXTERNAL_DATABASE_URL: ""
 
 services:
   db:
@@ -60,7 +64,7 @@ services:
     ports: ["127.0.0.1:2102:8000"]
   research:
     <<: *agent
-    environment: {<<: *agent-env, AGENT_ROUTE: research, DATABASE_URI: "postgres://agent_server:server@db:5432/agent_research", REDIS_URI: "redis://redis:6379/3"}
+    environment: {<<: *agent-env, AGENT_ROUTE: research, TAVILY_API_KEY: "${TAVILY_API_KEY:-}", MCP_SERVERS: "${MCP_SERVERS:-}", EXTERNAL_DATABASE_URL: "${EXTERNAL_DATABASE_URL:-}",DATABASE_URI: "postgres://agent_server:server@db:5432/agent_research", REDIS_URI: "redis://redis:6379/3"}
     ports: ["127.0.0.1:2103:8000"]
   chart:
     <<: *agent

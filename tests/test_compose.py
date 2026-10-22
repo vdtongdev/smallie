@@ -29,3 +29,18 @@ def test_every_route_has_a_service_and_a_url():
     assert len(set(redis)) == len(redis)
     ports = [port for route in ROUTES for port in services[route]["ports"]]
     assert len(set(ports)) == len(ports)
+
+
+RESEARCH_SECRETS = ("TAVILY_API_KEY", "MCP_SERVERS", "EXTERNAL_DATABASE_URL")
+
+
+def test_research_secrets_reach_only_the_research_server():
+    # env_file: .env hands every key to every server; environment overrides it.
+    services = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))["services"]
+    for route in ROUTES:
+        env = services[route]["environment"]
+        for key in RESEARCH_SECRETS:
+            if route == "research":
+                assert env[key] == f"${{{key}:-}}"  # taken from .env by compose
+            else:
+                assert env[key] == ""

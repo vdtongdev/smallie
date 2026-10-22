@@ -21,6 +21,7 @@ def test_every_route_has_a_service_and_a_url():
         env = services[route]["environment"]
         assert env["AGENT_ROUTE"] == route
         assert env["DATABASE_URI"].endswith(f"/agent_{route}")  # a copied block keeps the old database
+        assert "//agent_server:" in env["DATABASE_URI"]  # never the app database's owner
         assert route in urls
         assert f"agent_{route}" in databases
     # Two servers on one Redis database or port would share a run queue or clash.

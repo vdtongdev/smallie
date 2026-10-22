@@ -12,6 +12,12 @@ BEGIN
     END IF;
     EXECUTE format('GRANT CONNECT ON DATABASE %I TO agent_reader', current_database());
     GRANT USAGE ON SCHEMA public TO agent_reader;
+    -- Only named roles open the app's database, not every login (agent_server, 05, must not).
+    -- The owner keeps its access; agent_readonly gets its grant here too (Neon's was made by hand).
+    IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'agent_readonly') THEN
+        EXECUTE format('GRANT CONNECT ON DATABASE %I TO agent_readonly', current_database());
+    END IF;
+    EXECUTE format('REVOKE CONNECT ON DATABASE %I FROM PUBLIC', current_database());
 END $$;
 
 -- Defence in depth: read-only transactions and bounded runtime, like agent_readonly.

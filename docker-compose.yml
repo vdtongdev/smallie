@@ -52,19 +52,19 @@ services:
   # Adding an agent: copy one block, pick the next port and Redis database, add it to AGENT_URLS.
   docs:
     <<: *agent
-    environment: {<<: *agent-env, AGENT_ROUTE: docs, DATABASE_URI: "postgres://smallie:smallie@db:5432/agent_docs", REDIS_URI: "redis://redis:6379/1"}
+    environment: {<<: *agent-env, AGENT_ROUTE: docs, DATABASE_URI: "postgres://agent_server:server@db:5432/agent_docs", REDIS_URI: "redis://redis:6379/1"}
     ports: ["127.0.0.1:2101:8000"]
   sql:
     <<: *agent
-    environment: {<<: *agent-env, AGENT_ROUTE: sql, DATABASE_URI: "postgres://smallie:smallie@db:5432/agent_sql", REDIS_URI: "redis://redis:6379/2"}
+    environment: {<<: *agent-env, AGENT_ROUTE: sql, DATABASE_URI: "postgres://agent_server:server@db:5432/agent_sql", REDIS_URI: "redis://redis:6379/2"}
     ports: ["127.0.0.1:2102:8000"]
   research:
     <<: *agent
-    environment: {<<: *agent-env, AGENT_ROUTE: research, DATABASE_URI: "postgres://smallie:smallie@db:5432/agent_research", REDIS_URI: "redis://redis:6379/3"}
+    environment: {<<: *agent-env, AGENT_ROUTE: research, DATABASE_URI: "postgres://agent_server:server@db:5432/agent_research", REDIS_URI: "redis://redis:6379/3"}
     ports: ["127.0.0.1:2103:8000"]
   chart:
     <<: *agent
-    environment: {<<: *agent-env, AGENT_ROUTE: chart, DATABASE_URI: "postgres://smallie:smallie@db:5432/agent_chart", REDIS_URI: "redis://redis:6379/4"}
+    environment: {<<: *agent-env, AGENT_ROUTE: chart, DATABASE_URI: "postgres://agent_server:server@db:5432/agent_chart", REDIS_URI: "redis://redis:6379/4"}
     ports: ["127.0.0.1:2104:8000"]
 
 volumes:

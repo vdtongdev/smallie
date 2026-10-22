@@ -79,6 +79,15 @@ def test_reader_cannot_write_even_in_a_read_write_transaction(reader, table):
             conn.execute(text(f"DELETE FROM {table} WHERE false"))
 
 
+def test_agent_server_account_reaches_only_the_agent_databases():
+    """The containers' own login (DATABASE_URI, 05_agent_databases.sql) must not open the app's database."""
+    url = make_url(get_settings().sqlalchemy_url).set(drivername="postgresql", username="agent_server",
+                                                       password="server")
+    with pytest.raises(psycopg.OperationalError, match="permission denied"):
+        psycopg.connect(url.render_as_string(hide_password=False), connect_timeout=5)
+    psycopg.connect(url.set(database="agent_sql").render_as_string(hide_password=False), connect_timeout=5).close()
+
+
 @pytest.mark.parametrize("table", ["users", "checkpoints", "conversations"])
 def test_reader_cannot_read_accounts_or_chats(reader, table):
     with reader.connect() as conn, pytest.raises(DBAPIError, match="permission denied"):

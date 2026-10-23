@@ -102,6 +102,22 @@ def agent(remote, timeout_s: float = 5) -> RemoteAgent:
     return RemoteAgent(SPEC, "http://sql:8000", service_token="t", timeout_s=timeout_s, remote=remote)
 
 
+async def test_team_mode_uses_the_team_budget(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "max_message_model_calls", 5)
+    monkeypatch.setattr(settings, "team_max_message_model_calls", 9)
+    team = AgentContext(user_id="u-7", agent="team")
+    counter = UsageCounter()
+    counter.add({"model_calls": 5})
+    remote = FakeRemote(output={"messages": []})
+    await agent(remote).ainvoke({"messages": []}, {"callbacks": [counter]}, context=team)
+    assert len(remote.calls) == 1  # 5 calls is under the team budget
+    counter.add({"model_calls": 4})
+    with pytest.raises(remote_module.CallBudgetExceeded, match="TEAM_MAX_MESSAGE_MODEL_CALLS"):
+        await agent(remote).ainvoke({"messages": []}, {"callbacks": [counter]}, context=team)
+    assert len(remote.calls) == 1
+
+
 async def test_sends_context_and_user_header_without_thread_id():
     remote = FakeRemote(output={"messages": [HUMAN]})
     config = {"configurable": {"thread_id": "c-42", "checkpoint_ns": "sql:abc", "__pregel_stream": "hook"}}

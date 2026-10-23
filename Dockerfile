@@ -1,4 +1,4 @@
-# Container image for Google Cloud Run (see README "Deploying"). Config comes from env vars, not .env.
+# Container image for Google Cloud Run (see DEPLOYING.md). Config comes from env vars, not .env.
 FROM python:3.12-slim
 
 COPY --from=ghcr.io/astral-sh/uv:0.8.22 /uv /usr/local/bin/uv

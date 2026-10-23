@@ -80,6 +80,51 @@ ATTEMPT_MESSAGE = """ATTEMPT (not visible to the user): the {route} specialist a
 
 Don't run those searches again. If its reply does answer the question after all, give that answer. Otherwise ask `ask_{route}` once more only with a clearly different, more specific question (e.g. naming the file or the exact data), use another specialist or a web search where the rules above allow it, or answer yourself when it needs none of them. If nothing can answer it, tell the user plainly what isn't available."""
 
+# Team mode (app/orchestration/team.py). {critics}: one "- route: what it can check" line per allowed critic.
+JUDGE_PROMPT = """You are the judge of a team that answers the user's latest message. An author has written a draft; you decide the next step from what is in front of you: the user's message, the draft and the critiques so far. Don't use outside knowledge to decide whether a fact is true. Turn {turns} of {max_turns}.
+
+CRITICS YOU MAY CHOOSE:
+{critics}
+
+Return exactly one action:
+- approve: the draft answers the message and no critique above leaves an open problem. Choose this for a short or simple answer (a greeting, a definition, small talk), and whenever there are no critics above.
+- critique: the draft states facts, figures or claims about the user's files that a critic above can check. Set `critic` to one route from the list. Never choose this for a trivial answer, and never choose a critic whose critique is already above.
+- revise: a critique above found concrete problems. List them in `issues` (at most 5, one short sentence each), and set `critic` to the route that should check the corrected draft (leave it empty when the list above is empty).
+- needs_human: the draft can't go on without information only the user has (for example, which of several files they mean). Write one short question in `question`, in {language}. Never choose this for a gap that a critic or a search could fill.
+
+Leave `issues` empty unless the action is revise. Leave `question` empty unless the action is needs_human."""
+
+# Hidden message for the critic: the thread plus this, as the last message (name TEAM).
+CRITIQUE_MESSAGE = """CRITIQUE REQUEST (not visible to the user). Another agent drafted this answer to the user's latest message:
+
+{draft}
+
+Check it with your own tools. List each concrete problem with the evidence you found (the source, the figure or the passage). If it holds, say so in one sentence. Don't rewrite the answer. Write in {language}."""
+
+# Hidden message for the author: the thread plus this, as the last message (name TEAM).
+REFINE_MESSAGE = """REVISION REQUEST (not visible to the user). Your draft of the answer to the user's latest message:
+
+{draft}
+
+A reviewer found these problems:
+{issues}
+
+Fix each problem, using your tools where a fix needs data. Return the whole corrected answer, not only the changes. Write in {language}."""
+
+# Hidden message for the orchestrator's final write-up; {issues} is "none" unless the debate was cut off.
+TEAM_MESSAGE = """TEAM RESULT for the user's latest message (not visible to the user). The team's work on it is done: write the answer from this now, without calling any tool. Write it in {language}, whatever language the draft and critiques are in.
+
+FINAL DRAFT:
+{draft}
+
+CRITIQUES:
+{critiques}
+
+OPEN ISSUES:
+{issues}
+
+Use the final draft as the base, and correct it where a critique above shows it wrong. When OPEN ISSUES is not "none", say plainly in the answer which points the team could not settle."""
+
 # Results of tool calls the orchestrator may not make (`no_repeats` in orchestrator.py).
 REPEATED_CALL = "Not run: this exact call was already made for this message; its result is above. Use it, or write the answer."
 ALREADY_ASKED = "Not run: this specialist was already asked enough about this message and had nothing more. Write the answer with what you have, saying plainly what is missing."

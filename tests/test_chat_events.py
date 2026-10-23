@@ -140,3 +140,45 @@ def test_remote_dict_chunks_become_events():
         {"type": "tool_call", "name": "run_sql", "args": {"query": "SELECT 1"}},
         {"type": "tool_result", "name": "run_sql", "content": "| ?column? |"},
     ]
+
+
+def test_custom_team_events_pass_through():
+    for chunk in ({"type": "team", "phase": "delegate"}, {"type": "verdict", "action": "approve"},
+                  {"type": "needs_human", "question": "Which year?"}):
+        assert _to_events("custom", chunk, SUBGRAPH) == [chunk]
+
+
+def test_other_custom_chunks_are_dropped():
+    assert _to_events("custom", {"type": "progress"}, SUBGRAPH) == []
+    assert _to_events("custom", "text", SUBGRAPH) == []
+
+
+def test_serialize_exposes_team_transcript():
+    from app.api.routes_conversations import _serialize
+
+    team = {"entries": [{"agent": "sql", "phase": "delegate", "text": "draft"}]}
+    assert _serialize(AIMessage("Final.", name="orchestrator", additional_kwargs={"team": team}))["team"] == team
+    assert _serialize(AIMessage("Hi.", name="orchestrator"))["team"] is None
+
+
+async def test_messages_show_a_pending_question(monkeypatch):
+    from types import SimpleNamespace
+
+    from langchain_core.messages import HumanMessage
+
+    from app.api import routes_conversations
+
+    monkeypatch.setattr(routes_conversations, "get_conversation", lambda user_id, cid: {"id": cid})
+    snapshot = SimpleNamespace(values={"messages": [HumanMessage("compare revenue")]},
+                               interrupts=[SimpleNamespace(value={"question": "Which company?"})])
+
+    async def aget_state(config):
+        return snapshot
+
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(assistant=SimpleNamespace(aget_state=aget_state))))
+    shown = await routes_conversations.messages("c1", request, "u1")
+    assert shown[0] == {"role": "user", "content": "compare revenue"}
+    assert shown[1] == {"role": "assistant", "agent": "orchestrator", "content": "Which company?", "pending": True,
+                        "team": None, "tool_calls": [], "charts": []}
+    snapshot.interrupts = []
+    assert len(await routes_conversations.messages("c1", request, "u1")) == 1

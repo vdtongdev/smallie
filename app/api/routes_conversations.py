@@ -23,7 +23,11 @@ async def messages(conversation_id: str, request: Request, user_id: str = Depend
     if not conversation:
         raise HTTPException(404, "Conversation not found")
     state = await request.app.state.assistant.aget_state({"configurable": {"thread_id": conversation_id}})
-    return [m for m in map(_serialize, state.values.get("messages", [])) if m]
+    shown = [m for m in map(_serialize, state.values.get("messages", [])) if m]
+    if state.interrupts:  # a paused team turn: its question is not in the thread yet
+        shown.append({"role": "assistant", "agent": "orchestrator", "content": state.interrupts[0].value["question"],
+                      "pending": True, "team": None, "tool_calls": [], "charts": []})
+    return shown
 
 
 @router.delete("/conversations/{conversation_id}", status_code=204)
@@ -43,6 +47,7 @@ def _serialize(message) -> dict | None:
             "role": "assistant",
             "agent": MESSAGE_ROUTES.get(message.name or ""),
             "content": message.text,
+            "team": message.additional_kwargs.get("team"),
             "tool_calls": [{"name": c["name"], "args": c["args"]} for c in message.tool_calls],
             "charts": artifacts_from([message], "charts"),  # the orchestrator's charts of that turn
         }

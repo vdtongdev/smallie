@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
 from pydantic import BaseModel, Field
+from langgraph.types import Command
 from starlette.background import BackgroundTask
 
 from app.core.accounts import get_profile
@@ -20,13 +21,14 @@ from app.core.auth import get_current_user
 from app.core.config import get_settings
 from app.core.conversations import create_conversation, get_conversation, list_conversations, touch_conversation
 from app.core.graph import extract_facts, recall_facts
-from app.core.memory import AgentContext, load_recent_chats, save_turn, turns
+from app.core.memory import TEAM_MODE, AgentContext, load_recent_chats, save_turn, turns
 from app.core.usage import UsageCounter, add_usage
 
 router = APIRouter(tags=["chat"])
 log = logging.getLogger(__name__)
 
 TOOL_RESULT_PREVIEW = 4000
+TEAM_EVENTS = frozenset({"team", "verdict", "needs_human"})  # custom events of a team turn
 
 
 class ChatRequest(BaseModel):
@@ -45,7 +47,7 @@ async def chat(
     request: Request,
     user_id: str = Depends(get_current_user),
 ):
-    if kind != "auto" and kind not in ROUTES:
+    if kind not in ("auto", TEAM_MODE) and kind not in ROUTES:
         raise HTTPException(404, "Unknown agent")
     if body.conversation_id:
         conversation = await asyncio.to_thread(get_conversation, user_id, body.conversation_id)
@@ -71,11 +73,11 @@ async def chat(
                 _user(user_id),
             )
             stream = assistant.astream(
-                {"messages": [{"role": "user", "content": body.message}]},
+                await _chat_input(assistant, config, kind, body.message),
                 config={**config, "callbacks": [usage], "metadata": {"user_id": user_id}},  # filter traces per user
                 context=AgentContext(user_id=user_id, user=user, memories=memories,
                                      recent_chats=recent_chats, agent=kind),
-                stream_mode=["messages", "updates"],
+                stream_mode=["messages", "updates", "custom"],
                 subgraphs=True,
             )
             async for event in _events_from(stream):
@@ -102,9 +104,12 @@ async def chat(
         if not finished:
             return
         try:
-            messages = (await assistant.aget_state(config)).values.get("messages", [])
+            snapshot = await assistant.aget_state(config)
+            messages = snapshot.values.get("messages", [])
         except Exception:  # noqa: BLE001 - history and memory are best effort
             log.exception("Reading the finished turn failed")
+            return
+        if snapshot.interrupts:  # paused on a question: nothing to remember yet
             return
         pairs = turns(messages)
         answer = pairs[-1][1] if pairs else ""
@@ -128,6 +133,13 @@ async def chat(
 
     return StreamingResponse(events(), media_type="text/event-stream", background=BackgroundTask(remember_turn),
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+async def _chat_input(assistant, config, kind: str, message: str) -> dict | Command:
+    """A paused team turn takes the message as the answer to its question; else a new user message."""
+    if kind == TEAM_MODE and (await assistant.aget_state(config)).interrupts:
+        return Command(resume=message)
+    return {"messages": [{"role": "user", "content": message}]}
 
 
 def _answered_by(messages: list) -> str | None:
@@ -201,6 +213,9 @@ def _to_events(mode: str, chunk, namespace: tuple[str, ...] = ()) -> list[dict]:
                 return []
             return [{"type": "token", "text": message.text}]
         return []
+
+    if mode == "custom":
+        return [chunk] if isinstance(chunk, dict) and chunk.get("type") in TEAM_EVENTS else []
 
     # mode == "updates": {node_name: state_update}
     events = []

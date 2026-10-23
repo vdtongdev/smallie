@@ -59,6 +59,7 @@ SCENARIOS = {
                        "the same data asked differently: reuse the table"),
     "chart_compound": ("Compare the skills in my resume with the five largest tech companies, with a chart of their market caps",
                        "files + database + a chart"),
+    "team": ("What is AAPL's market cap, and how does it compare with MSFT's?", "team mode: delegate, critique, synthesize"),
 }
 PAUSE_SECONDS = 20  # between scenarios, so bursts stay under the free tier's ~20 requests/min
 
@@ -150,8 +151,8 @@ async def run_scenario(assistant, store, user_id: str, name: str, run: int) -> R
         memories = await asyncio.to_thread(recall_facts, user_id)
         stream = assistant.astream(
             {"messages": [{"role": "user", "content": message}]}, config=config,
-            context=AgentContext(user_id=user_id, memories=memories),
-            stream_mode=["messages", "updates"], subgraphs=True,
+            context=AgentContext(user_id=user_id, memories=memories, agent="team" if name == "team" else "auto"),
+            stream_mode=["messages", "updates", "custom"], subgraphs=True,
         )
         async for event in _events_from(stream):
             kind = event["type"]

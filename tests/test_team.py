@@ -243,3 +243,26 @@ async def test_only_the_answer_joins_the_thread(monkeypatch):
     messages = await _thread(assistant)
     assert [type(m) for m in messages] == [HumanMessage, AIMessage]
     assert not any("secret" in m.text for m in messages)
+
+
+async def _paused(monkeypatch):
+    _judge(monkeypatch, Verdict(action="needs_human", question="Which year?"), Verdict(action="approve"))
+    assistant = _assistant(monkeypatch, per_agent(sql=[AIMessage("draft")], orchestrator=[AIMessage("Final 2024.")]))
+    await _stream(assistant, _ask())
+    return assistant
+
+
+async def test_chat_input_resumes_a_paused_team_turn(monkeypatch):
+    from app.api.routes_chat import _chat_input
+
+    assistant = await _paused(monkeypatch)
+    assert await _chat_input(assistant, CONFIG, "team", "2024") == Command(resume="2024")
+    # Only team mode resumes; another kind sends a message.
+    assert await _chat_input(assistant, CONFIG, "auto", "2024") == {"messages": [{"role": "user", "content": "2024"}]}
+
+
+async def test_chat_input_is_a_message_otherwise(monkeypatch):
+    from app.api.routes_chat import _chat_input
+
+    assistant = _assistant(monkeypatch, per_agent(orchestrator=[AIMessage("Hi.")]))
+    assert await _chat_input(assistant, CONFIG, "team", "hello") == {"messages": [{"role": "user", "content": "hello"}]}

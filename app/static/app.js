@@ -179,9 +179,10 @@ $("langBtn").onclick = () => {
 };
 
 // ---------- team mode ----------
-// A new conversation starts as a team chat when the switch is on; an opened one keeps its own kind.
-const chatKind = () => (state.conversationId ? state.kinds[state.conversationId] : null) ||
-  ($("teamMode").checked ? "team" : "auto");
+// A new conversation starts as a team chat when the switch is on; an opened one stays team or else uses auto.
+const chatKind = () => state.conversationId
+  ? (state.kinds[state.conversationId] === "team" ? "team" : "auto")
+  : ($("teamMode").checked ? "team" : "auto");
 
 function syncTeamSwitch() {
   const id = state.conversationId;

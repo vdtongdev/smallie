@@ -252,6 +252,7 @@ function addTeamDiscussion(before = null) {
       details.append(div);
       let text = "";
       return {
+        el: div,
         append(chunk) { text += chunk; body.innerHTML = renderMarkdown(text); },
         update(full) { text = ""; this.append(full); },
       };
@@ -268,6 +269,7 @@ function addTeamDiscussion(before = null) {
         for (const issue of v.issues) ul.append(Object.assign(document.createElement("li"), { textContent: issue }));
         div.append(ul);
       }
+      if (v.explanation) div.append(Object.assign(document.createElement("p"), { textContent: v.explanation }));
       details.append(div);
     },
   };
@@ -477,7 +479,7 @@ function addAgentBadge(name, before = null, step = null) {
   return div;
 }
 
-function addToolCall(name, args) {
+function addToolCall(name, args, parent = $("messages")) {
   const details = document.createElement("details");
   details.className = "tool";
   const summary = document.createElement("summary");
@@ -486,7 +488,7 @@ function addToolCall(name, args) {
   const pre = document.createElement("pre");
   pre.textContent = typeof args.query === "string" ? args.query : JSON.stringify(args, null, 2);
   details.append(summary, pre);
-  $("messages").append(details);
+  parent.append(details);
   scrollToBottom();
 }
 
@@ -499,7 +501,7 @@ function addCharts(charts) {
   scrollToBottom();
 }
 
-function addToolResult(name, content, charts = []) {
+function addToolResult(name, content, charts = [], parent = $("messages")) {
   if (charts.length) return addCharts(charts); // the chart is the result; its summary is for the model
   const details = document.createElement("details");
   details.className = "tool";
@@ -508,7 +510,7 @@ function addToolResult(name, content, charts = []) {
   const pre = document.createElement("pre");
   pre.textContent = content;
   details.append(summary, pre);
-  $("messages").append(details);
+  parent.append(details);
   scrollToBottom();
 }
 
@@ -615,6 +617,7 @@ async function sendMessage(text) {
             current.append(event.text);
             break;
           case "tool_call":
+            if (entry) { addToolCall(event.name, event.args, entry.el); break; } // a team phase's own tool use
             if (!started || waiting) current.remove();
             waiting = false;
             addToolCall(event.name, event.args);
@@ -622,6 +625,7 @@ async function sendMessage(text) {
             started = true;
             break;
           case "tool_result":
+            if (entry) { addToolResult(event.name, event.content, [], entry.el); break; } // its charts stay out of the answer
             addToolResult(event.name, event.content, event.charts);
             current = addAssistantMessage();
             break;

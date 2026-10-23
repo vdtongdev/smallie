@@ -68,7 +68,7 @@ delegate ──► judge₀ ─┬─ approve ───────────�
 `Verdict` (Pydantic):
 
 ```python
-action: Literal["approve", "critique", "revise", "needs_human"]  # judge₀ allows approve|critique|needs_human
+action: Literal["approve", "critique", "revise", "needs_human"]  # judge₀ may also revise (e.g. after the user's clarification)
 critic: Literal[<allowed routes>] | None   # built per request
 issues: list[str]                          # for refine; ≤ 5
 question: str                              # for needs_human
@@ -78,7 +78,8 @@ question: str                              # for needs_human
 
 - New optional `AgentSpec.review: str`: one line on what the agent can verify (research: facts and figures against the web, Wikipedia, arXiv; sql: stock and company figures against the market database; docs: claims about the user's files; chart: the query and numbers behind a chart). Empty = never a critic.
 - Allowed critics per request: routes with `review`, available to this user (`route_info` not `None`, e.g. docs only with files), not the draft's author. Their `review` lines go into the judge's prompt; the `Literal` is built from them.
-- Code checks the verdict: a critic outside the allowed list or equal to the author becomes the first allowed critic; with no allowed critics judge₀ can only approve; `revise` before any critique becomes `critique`.
+- Code checks the verdict: for `critique` or `revise`, a critic outside the allowed list or equal to the author becomes the first allowed critic. With no allowed critics, `critique` becomes `approve` and `revise` refines once, then synthesizes.
+- Turn order: `refine` goes straight to `critique` while `turns < TEAM_MAX_TURNS`; a refine that reaches the cap goes to `synthesize` (forced; the last refinement is unreviewed). So the default cap allows critique, refine, critique, refine.
 - A new agent becomes a reviewer by setting `review`. Nothing else changes.
 
 ### Guardrails
@@ -95,7 +96,7 @@ Only the synthesized answer joins `messages`. The draft, critiques and verdicts 
 
 ### SSE events
 
-New, from `_to_events` (team node updates):
+New, written by the team nodes with LangGraph's `get_stream_writer()` (stream mode `custom`) and passed through by `_to_events`:
 
 ```jsonc
 {"type": "team",    "phase": "delegate|critique|refine|synthesize", "agent": "<route>", "turn": 1, "max_turns": 4}

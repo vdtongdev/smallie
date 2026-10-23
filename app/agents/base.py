@@ -85,6 +85,8 @@ class AgentSpec:
     overrides: tuple[str, ...] = ()
     # A tool result of this entry that holds nothing to answer from (an error, no rows, no passages).
     no_result: Callable[[str], bool] = is_error
+    # What this entry can check when asked to critique another agent's draft; empty = never asked.
+    review: str = ""
 
     async def info(self, user_id: str) -> RouteInfo | None:
         return await self.route_info(user_id) if self.route_info else RouteInfo()

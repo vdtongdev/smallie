@@ -30,6 +30,10 @@ from app.core.llm import get_embeddings
 from app.core.usage import usage_namespace
 
 
+# AgentContext.agent value for team mode (agents critique each other's drafts).
+TEAM_MODE = "team"
+
+
 @dataclass
 class AgentContext:
     """Per-request data passed to every agent run."""

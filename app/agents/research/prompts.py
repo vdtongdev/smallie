@@ -12,6 +12,12 @@ TOOL_DESCRIPTION = (
     "for research, reports, overviews, news and topics that need several sources, not for one quick fact."
 )
 
+# Read by the judge that picks a critic for another agent's draft: what this agent can check.
+REVIEW = (
+    "Checks facts, dates and figures against web search, Wikipedia and arXiv papers, "
+    "and reports which claims the sources support or contradict."
+)
+
 # {sources}: the tool families that loaded; {web_rule}: WEB_ALONGSIDE_WIKI when web search loaded;
 # {skills}: skills_section(); {schema}: the market tables.
 RESEARCHER_SYSTEM = """You are a research assistant. You only GATHER facts; another assistant writes the answer to the user from your notes. Today is {today}.

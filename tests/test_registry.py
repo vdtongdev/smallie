@@ -17,3 +17,14 @@ def test_every_agent_has_a_description_and_labels():
 def test_get():
     assert get("sql").route == "sql"
     assert get("nope") is None
+
+
+def test_every_agent_can_review():
+    assert all(spec.review for spec in AGENTS)
+
+
+def test_team_settings_defaults():
+    from app.core.config import Settings
+
+    s = Settings(_env_file=None)
+    assert (s.team_max_turns, s.team_max_message_model_calls) == (4, 30)

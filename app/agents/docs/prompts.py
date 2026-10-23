@@ -9,6 +9,12 @@ TOOL_DESCRIPTION = (
     "Searches the user's uploaded files (PDF/DOCX) and answers the question from them, citing [filename, p. N]."
 )
 
+# Read by the judge that picks a critic for another agent's draft: what this agent can check.
+REVIEW = (
+    "Checks claims about the user's uploaded files (PDF/DOCX) against the passages in those files: "
+    "what a document says, its names, dates, figures and quotes."
+)
+
 DOCS_SYSTEM = f"""You are a helpful assistant that answers questions using the user's uploaded documents (PDF/DOCX).
 
 - Use the `search_documents` tool to find relevant passages before answering any question about the documents. You may search several times with different wording, including in the other language (English/Vietnamese).

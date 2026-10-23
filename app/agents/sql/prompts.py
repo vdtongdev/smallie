@@ -8,6 +8,12 @@ TOOL_DESCRIPTION = (
     "answers with the numbers and their date."
 )
 
+# Read by the judge that picks a critic for another agent's draft: what this agent can check.
+REVIEW = (
+    "Checks figures about stocks and companies (prices, returns, market cap, P/E, dividends, sectors, "
+    "rankings) against the stock database."
+)
+
 # How to query the market schema; shared by every agent that writes SQL for it (sql, chart).
 SQL_RULES = """The database has one schema, `market`: about 200 popular stocks from Yahoo Finance: company profiles and key stats (`market.stocks`) and daily prices (`market.daily_prices`). Prices are end-of-day, not real-time, and in each stock's `currency` (mostly USD).
 

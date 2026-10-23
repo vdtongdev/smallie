@@ -6,7 +6,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.agents.base import AgentSpec, RouteInfo, is_error
 from app.agents.factory import build_agent
-from app.agents.sql.prompts import ROUTE_DESCRIPTION, SQL_RULES, SQL_SYSTEM, TOOL_DESCRIPTION
+from app.agents.sql.prompts import REVIEW, ROUTE_DESCRIPTION, SQL_RULES, SQL_SYSTEM, TOOL_DESCRIPTION
 from app.agents.sql.tools import describe_schema, run_sql
 from app.core.db import get_readonly_engine
 from app.core.prompts import LANGUAGE_RULE, MEMORY_RULE
@@ -64,5 +64,6 @@ SPEC = AgentSpec(
     hints=HINTS,
     route_info=route_info,
     tool_description=TOOL_DESCRIPTION,
+    review=REVIEW,
     no_result=no_rows,
 )

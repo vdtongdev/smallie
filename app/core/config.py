@@ -67,6 +67,9 @@ class Settings(BaseSettings):
     # Loop guard: model calls one chat message may use across the orchestrator and every agent
     # server (they report theirs); past it, no further specialist is called.
     max_message_model_calls: int = 30
+    # Team mode: critique turns per message, and its own model-call cap (same guard as above).
+    team_max_turns: int = 4
+    team_max_message_model_calls: int = 30
 
     @property
     def agent_url_map(self) -> dict[str, str]:

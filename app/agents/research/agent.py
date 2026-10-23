@@ -36,6 +36,7 @@ from app.agents.research.prompts import (
     RESEARCHER_SYSTEM,
     ROUTE_DESCRIPTION,
     SOURCE_LINES,
+    REVIEW,
     TOOL_DESCRIPTION,
     WEB_ALONGSIDE_WIKI,
 )
@@ -426,6 +427,7 @@ SPEC = AgentSpec(
     prepare=prepare,
     silent_steps=("gather",),
     tool_description=TOOL_DESCRIPTION,
+    review=REVIEW,
     answers_directly=False,
     result=findings_result,
 )

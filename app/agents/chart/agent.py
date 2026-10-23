@@ -4,7 +4,7 @@ from langchain.agents.middleware import ModelRequest
 
 from app.agents.artifacts import artifacts_from, table_note
 from app.agents.base import AgentSpec
-from app.agents.chart.prompts import CHART_SYSTEM, ROUTE_DESCRIPTION, TABLES_SECTION
+from app.agents.chart.prompts import CHART_SYSTEM, REVIEW, ROUTE_DESCRIPTION, TABLES_SECTION
 from app.agents.chart.tools import chart_data, chart_sql, chart_table
 from app.agents.factory import build_agent
 from app.agents.sql import agent as sql_agent
@@ -44,4 +44,5 @@ SPEC = AgentSpec(
     message_names=("chart_agent",),
     hints=HINTS,
     overrides=("sql",),
+    review=REVIEW,
 )

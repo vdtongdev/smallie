@@ -280,3 +280,23 @@ dialog::backdrop { background: rgb(0 0 0 / .4); }
   .topbar { flex-wrap: wrap; gap: 8px; }
   .readme { padding: 0 16px 16px; }
 }
+
+.team-switch { display: flex; align-items: center; gap: 6px; font-size: 14px; cursor: pointer; }
+.team-switch input:disabled + span { opacity: 0.6; }
+.team-discussion {
+  font-size: 13px;
+  color: var(--muted);
+  border-left: 3px solid var(--accent);
+  padding-left: 8px;
+  max-width: 820px;
+}
+.team-discussion summary { cursor: pointer; }
+.team-entry { margin: 8px 0; }
+.team-head { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.team-text { color: var(--text); overflow-wrap: anywhere; }
+.team-text > :first-child { margin-top: 4px; }
+.team-text > :last-child { margin-bottom: 0; }
+.team-verdict { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 6px 0; padding: 4px 8px; background: var(--user-bubble); border-radius: 6px; }
+.team-verdict ul { flex-basis: 100%; margin: 0; padding-left: 18px; }
+.msg.pending { border: 1px dashed var(--accent); border-radius: 8px; padding: 8px 12px; }
+.pending-note { font-size: 12px; color: var(--accent); margin-top: 6px; }

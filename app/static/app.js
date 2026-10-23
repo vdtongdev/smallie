@@ -7,6 +7,8 @@ const state = {
   conversationId: null,
   busy: false,
   docsPoll: null,
+  awaiting: false, // the open chat is paused on a question to the user
+  kinds: {}, // conversation id -> kind ("auto" | "team"), from /api/conversations
   agents: {}, // route -> {labels: {en, vi}, steps: {step: {en, vi}}}, from /api/agents
 };
 
@@ -145,7 +147,8 @@ function applyLanguage() {
   document.querySelectorAll("[data-i18n]").forEach((el) => (el.textContent = t(el.dataset.i18n)));
   document.querySelectorAll("[data-i18n-title]").forEach((el) => (el.title = t(el.dataset.i18nTitle)));
   $("langBtn").textContent = state.lang === "en" ? "Tiếng Việt" : "English";
-  $("input").placeholder = t("placeholder");
+  $("input").placeholder = t(state.awaiting ? "answerPlaceholder" : "placeholder");
+  document.querySelectorAll(".team-discussion").forEach(labelTeamSummary);
   document.querySelectorAll("[data-lang]").forEach((el) => (el.hidden = el.dataset.lang !== state.lang));
   labelAgentBadges();
 }
@@ -174,6 +177,114 @@ $("langBtn").onclick = () => {
   if ($("adminDialog").open) loadAccounts();
   if (!state.conversationId) showWelcome();
 };
+
+// ---------- team mode ----------
+// A new conversation starts as a team chat when the switch is on; an opened one keeps its own kind.
+const chatKind = () => (state.conversationId ? state.kinds[state.conversationId] : null) ||
+  ($("teamMode").checked ? "team" : "auto");
+
+function syncTeamSwitch() {
+  const id = state.conversationId;
+  $("teamMode").checked = id ? state.kinds[id] === "team" : localGet("team_mode") === "1";
+  $("teamMode").disabled = !!id;
+}
+$("teamMode").onchange = () => localSet("team_mode", $("teamMode").checked ? "1" : "0");
+
+function setAwaiting(awaiting) {
+  state.awaiting = awaiting;
+  $("input").placeholder = t(awaiting ? "answerPlaceholder" : "placeholder");
+}
+
+function markPending(el) {
+  el.classList.add("pending");
+  const note = document.createElement("div");
+  note.className = "pending-note";
+  note.dataset.i18n = "waitingForYou";
+  note.textContent = t("waitingForYou");
+  el.append(note);
+  setAwaiting(true);
+}
+
+function labelTeamSummary(details) {
+  const n = Number(details.dataset.rounds);
+  details.firstChild.textContent = n === 1 ? t("teamDiscussionOne") : t("teamDiscussion").replace("{n}", n);
+}
+
+function agentBadge(route) {
+  const badge = document.createElement("span");
+  badge.className = "agent-badge";
+  badge.dataset.agent = route;
+  badge.textContent = badgeLabel(badge);
+  return badge;
+}
+
+function i18nSpan(tag, key) {
+  const el = document.createElement(tag);
+  el.dataset.i18n = key;
+  el.textContent = t(key);
+  return el;
+}
+
+// The collapsible discussion above a team reply: `entry` adds a phase block, `verdict` a line between blocks.
+// Placed before `before`, or at the end of the chat.
+function addTeamDiscussion(before = null) {
+  const details = document.createElement("details");
+  details.className = "team-discussion";
+  details.open = true;
+  details.dataset.rounds = 0;
+  details.append(document.createElement("summary"));
+  if (before) before.before(details);
+  else $("messages").append(details);
+  labelTeamSummary(details);
+  return {
+    el: details,
+    rounds(n) { details.dataset.rounds = n; labelTeamSummary(details); },
+    entry(agent, phase) {
+      const div = document.createElement("div");
+      div.className = "team-entry";
+      const head = document.createElement("div");
+      head.className = "team-head";
+      head.append(agentBadge(agent), i18nSpan("span", "phase" + phase[0].toUpperCase() + phase.slice(1)));
+      const body = document.createElement("div");
+      body.className = "team-text";
+      div.append(head, body);
+      details.append(div);
+      let text = "";
+      return {
+        append(chunk) { text += chunk; body.innerHTML = renderMarkdown(text); },
+        update(full) { text = ""; this.append(full); },
+      };
+    },
+    verdict(v) {
+      const div = document.createElement("div");
+      div.className = "team-verdict";
+      const key = "verdict" + v.action.split("_").map((w) => w[0].toUpperCase() + w.slice(1)).join("");
+      div.append(i18nSpan("strong", key));
+      if (v.critic) div.append(agentBadge(v.critic));
+      if (v.forced) div.append(i18nSpan("em", "forcedStop"));
+      if (v.issues?.length) {
+        const ul = document.createElement("ul");
+        for (const issue of v.issues) ul.append(Object.assign(document.createElement("li"), { textContent: issue }));
+        div.append(ul);
+      }
+      details.append(div);
+    },
+  };
+}
+
+// Rebuilds a finished discussion from a message's `team` transcript (it keeps the final draft only).
+function addTeamTranscript(team) {
+  const section = addTeamDiscussion();
+  section.entry(team.author, "delegate").update(team.draft || "");
+  const rows = Math.max(team.verdicts.length, team.critiques.length);
+  for (let i = 0; i < rows; i++) {
+    if (team.verdicts[i]) section.verdict(team.verdicts[i]);
+    const c = team.critiques[i];
+    if (c) section.entry(c.critic, "critique").update(c.text);
+  }
+  section.rounds(team.turns);
+  section.el.open = false;
+}
 
 // ---------- readme ----------
 $("readmeBtn").onclick = () => {
@@ -224,6 +335,7 @@ const conversationKey = () => `conversation_${KIND}_${state.me?.user_id}`;
 function setConversation(id) {
   state.conversationId = id;
   if (state.me) localSet(conversationKey(), id || "");
+  syncTeamSwitch();
 }
 
 function setBusy(busy) {
@@ -236,6 +348,8 @@ function setBusy(busy) {
 async function loadConversations() {
   const list = $("conversationList");
   const items = await api("/conversations").catch(() => []);
+  state.kinds = Object.fromEntries(items.map((c) => [c.id, c.kind]));
+  syncTeamSwitch();
   list.innerHTML = "";
   if (!items.length) {
     list.innerHTML = `<li class="muted">${t("noConversations")}</li>`;
@@ -259,6 +373,12 @@ async function loadConversations() {
       if (c.id === state.conversationId) newChat();
       loadConversations();
     };
+    if (c.kind === "team") {
+      const icon = document.createElement("span");
+      icon.textContent = "\u{1F465}";
+      icon.title = t("teamMode");
+      li.append(icon);
+    }
     li.append(title, del);
     li.onclick = () => openConversation(c.id);
     list.append(li);
@@ -268,6 +388,7 @@ async function loadConversations() {
 async function openConversation(id) {
   if (state.busy) return;
   setConversation(id);
+  setAwaiting(false);
   $("messages").innerHTML = "";
   let messages;
   try {
@@ -285,9 +406,14 @@ async function openConversation(id) {
     if (m.role === "user") { addUserMessage(m.content); agent = null; }
     else if (m.role === "assistant") {
       if (m.agent && m.agent !== agent) addAgentBadge((agent = m.agent));
+      if (m.team) addTeamTranscript(m.team);
       for (const call of m.tool_calls || []) addToolCall(call.name, call.args);
       addCharts(m.charts); // an orchestrator answer's charts, shown above it as when it streamed
-      if (m.content) addAssistantMessage().update(m.content);
+      if (m.content) {
+        const msg = addAssistantMessage();
+        msg.update(m.content);
+        if (m.pending) markPending(msg.el);
+      }
     } else if (m.role === "tool") addToolResult(m.name, m.content, m.charts);
   }
   loadConversations();
@@ -295,6 +421,7 @@ async function openConversation(id) {
 
 function newChat() {
   setConversation(null);
+  setAwaiting(false);
   showWelcome();
   loadConversations();
 }
@@ -405,6 +532,8 @@ function dropReplies() {
 // ---------- chat ----------
 async function sendMessage(text) {
   setBusy(true);
+  setAwaiting(false);
+  const kind = chatKind();
   addUserMessage(text);
   let current = addAssistantMessage();
   current.update(`_${t("thinking")}_`);
@@ -412,9 +541,11 @@ async function sendMessage(text) {
   let finished = false;
   let badge = null; // this turn's agent badge
   let waiting = false; // showing "thinking" after a fallback
+  let discussion = null; // this reply's team discussion section
+  let entry = null; // the discussion block receiving tokens (null once the final answer starts)
 
   try {
-    const res = await fetch(`/api/chat/${KIND}`, {
+    const res = await fetch(`/api/chat/${kind}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message: text, conversation_id: state.conversationId }),
@@ -436,9 +567,11 @@ async function sendMessage(text) {
         const event = JSON.parse(raw.slice(6));
         switch (event.type) {
           case "conversation":
+            state.kinds[event.id] = kind;
             setConversation(event.id);
             break;
           case "agent":
+            if (event.name === "team") break; // the team's phases name their own agents
             // The orchestrator handed off before showing anything: relabel its badge, as a reload would show it.
             if (badge && !started) { badge.dataset.agent = event.name; badge.textContent = badgeLabel(badge); }
             else badge = addAgentBadge(event.name, current.el);
@@ -453,10 +586,30 @@ async function sendMessage(text) {
             current.update(`_${t("thinking")}_`);
             started = waiting = true; // the next `agent` event adds the assistant's own badge
             break;
+          case "team":
+            if (event.phase === "synthesize") {
+              entry = null;
+              if (discussion) discussion.el.open = false;
+              break;
+            }
+            discussion ??= addTeamDiscussion(current.el);
+            entry = discussion.entry(event.agent, event.phase);
+            discussion.rounds(event.phase === "delegate" ? 0 : event.turn);
+            break;
+          case "verdict":
+            discussion ??= addTeamDiscussion(current.el);
+            discussion.verdict(event);
+            break;
+          case "needs_human":
+            if (!started || waiting) { current.update(""); started = true; waiting = false; }
+            current.update(event.question);
+            markPending(current.el);
+            break;
           case "done":
             finished = true;
             break;
           case "token":
+            if (entry) { entry.append(event.text); scrollToBottom(); break; }
             if (!started || waiting) { current.update(""); started = true; waiting = false; }
             current.append(event.text);
             break;

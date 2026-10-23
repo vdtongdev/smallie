@@ -182,3 +182,45 @@ async def test_messages_show_a_pending_question(monkeypatch):
                         "team": None, "tool_calls": [], "charts": []}
     snapshot.interrupts = []
     assert len(await routes_conversations.messages("c1", request, "u1")) == 1
+
+
+async def test_paused_turn_is_not_remembered(monkeypatch):
+    """A turn that paused on a question saves no history and extracts no facts."""
+    from types import SimpleNamespace
+
+    from app.api.routes_chat import ChatRequest, chat
+
+    calls = []
+
+    async def spy(*args, **kwargs):
+        calls.append(args)
+
+    async def aget_state(config):
+        return SimpleNamespace(values={"messages": [AIMessage("x", name="orchestrator")]},
+                               interrupts=[SimpleNamespace(value={"question": "Which?"})])
+
+    async def astream(*args, **kwargs):
+        return
+        yield
+
+    async def none(*args, **kwargs):
+        return ""
+
+    monkeypatch.setattr(routes_chat, "create_conversation", lambda u, k, m: {"id": "c1", "title": "t"})
+    monkeypatch.setattr(routes_chat, "touch_conversation", lambda cid: None)
+    monkeypatch.setattr(routes_chat, "recall_facts", lambda u: "")
+    monkeypatch.setattr(routes_chat, "_recent_chats", none)
+    monkeypatch.setattr(routes_chat, "_user", none)
+    monkeypatch.setattr(routes_chat, "add_usage", spy)
+    monkeypatch.setattr(routes_chat, "save_turn", spy)
+    monkeypatch.setattr(routes_chat, "extract_facts", spy)
+    monkeypatch.setattr(routes_chat, "_chat_input", lambda *a: none())
+    assistant = SimpleNamespace(aget_state=aget_state, astream=astream)
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(assistant=assistant, store=None)))
+
+    response = await chat("team", ChatRequest(message="compare"), request, "u1")
+    async for _ in response.body_iterator:
+        pass
+    calls.clear()  # add_usage runs for the stream itself
+    await response.background()
+    assert calls == []

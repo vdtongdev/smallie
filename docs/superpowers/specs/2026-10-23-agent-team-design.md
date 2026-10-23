@@ -82,6 +82,20 @@ question: str                              # for needs_human
 - Turn order: `refine` goes straight to `critique` while `turns < TEAM_MAX_TURNS`; a refine that reaches the cap goes to `synthesize` (forced; the last refinement is unreviewed). So the default cap allows critique, refine, critique, refine.
 - A new agent becomes a reviewer by setting `review`. Nothing else changes.
 
+### Independent critics and conflicts (added after the first measurement)
+
+Measured on 2026-10-23 (free models, "AAPL vs MSFT market cap"): the judge picked chart to review sql both times. Chart reads the same database, so its critique could only confirm, and one run spent a second round (12 calls, 59 s) without changing the answer. The critic's chart also showed up twice in the reply.
+
+- **Different sources only.** New `AgentSpec.sources: frozenset[str]` (docs `user_files`, sql and chart `market_db`, research `web`). A critic whose sources are all among the author's is not allowed. An orchestrator draft's sources are those of the agents it asked (recorded on its answer as `additional_kwargs["asked"]`); a draft from the model alone has none, so every critic is allowed.
+- **No source is trusted by kind.** The market data and the user's files can be wrong (stale data, a wrong query, a file with wrong figures on purpose); nothing wins because of where it came from.
+- **Debate only on a conflict.** After a critique the judge sorts the result:
+  - agree → `approve`;
+  - a difference both sides explain (as-of date, definition, scope) → `approve` with `explanation`; the answer states both values, each with its source and date, and why they differ;
+  - a conflict the author can fix with its own tools (wrong query, wrong ticker, a claim its data doesn't support) → `revise` with `issues`;
+  - a conflict nobody in the team can fix → `approve` with `explanation`; the answer shows both sides and says they disagree, without picking a winner.
+- `Verdict` gains `explanation: str`. Critics state the source and date of every figure they check; sql states the as-of date of its figures (`trade_date`, profile `updated_at`).
+- A critic's tool calls and charts stay in its discussion entry; they never reach the answer.
+
 ### Guardrails
 
 - **Turn cap:** `TEAM_MAX_TURNS` (default 4) internal messages. At the cap a `revise` becomes a forced synthesis (`verdicts[-1].forced = true`).

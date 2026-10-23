@@ -65,5 +65,6 @@ SPEC = AgentSpec(
     route_info=route_info,
     tool_description=TOOL_DESCRIPTION,
     review=REVIEW,
+    sources=frozenset({"market_db"}),
     no_result=no_rows,
 )

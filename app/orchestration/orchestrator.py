@@ -286,8 +286,12 @@ def build_orchestrator(specs: Sequence[AgentSpec], agents: Mapping[str, Runnable
             answer = AIMessage(SORRY, name=ORCHESTRATOR)
         # Only this message enters the thread: keep the turn's charts (shown again on reload) and
         # query results (for "plot that" later) on it.
-        if artifacts := collect(new):
-            answer = answer.model_copy(update={"additional_kwargs": {**answer.additional_kwargs, **artifacts}})
+        extra = collect(new)
+        if asked := list(dict.fromkeys(r for m in new if isinstance(m, AIMessage) for c in m.tool_calls
+                                       if (r := next((s.route for s in specs if c["name"] == ask_tool_name(s)), None)))):
+            extra["asked"] = asked  # team mode picks critics that read other sources
+        if extra:
+            answer = answer.model_copy(update={"additional_kwargs": {**answer.additional_kwargs, **extra}})
         return Command(goto=END, update={"messages": [answer], "findings": "", "failed": "", "attempt": ""})
 
     return orchestrator, targets

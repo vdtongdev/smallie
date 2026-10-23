@@ -71,5 +71,6 @@ SPEC = AgentSpec(
     route_info=route_info,
     tool_description=TOOL_DESCRIPTION,
     review=REVIEW,
+    sources=frozenset({"user_files"}),
     no_result=lambda text: text == NO_PASSAGES,
 )

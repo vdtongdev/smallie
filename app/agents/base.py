@@ -87,6 +87,8 @@ class AgentSpec:
     no_result: Callable[[str], bool] = is_error
     # What this entry can check when asked to critique another agent's draft; empty = never asked.
     review: str = ""
+    # Data sources it reads (e.g. "market_db", "web"); a critic must read other ones than the author.
+    sources: frozenset[str] = frozenset()
 
     async def info(self, user_id: str) -> RouteInfo | None:
         return await self.route_info(user_id) if self.route_info else RouteInfo()

@@ -3,7 +3,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import Runnable
 from langgraph.types import Command
 from pydantic import ValidationError
@@ -24,8 +24,14 @@ SQL, DOCS, RESEARCH = get("sql"), get("docs"), get("research")
 def test_allowed_critics_skip_author_unavailable_and_reviewless():
     available = [(replace(s, review="" if s.route == "chart" else s.review), RouteInfo())
                  for s in AGENTS if s.route != "docs"]
-    routes = [s.route for s in allowed_critics(available, author="sql")]
+    routes = [s.route for s in allowed_critics(available, author="sql", author_sources=frozenset())]
     assert routes == [s.route for s in AGENTS if s.route not in ("sql", "docs", "chart")]
+
+
+def test_same_source_critic_is_dropped():
+    available = [(s, RouteInfo()) for s in AGENTS]
+    routes = [s.route for s in allowed_critics(available, "sql", SQL.sources)]
+    assert "chart" not in routes and {"research", "docs"} <= set(routes)
 
 
 def test_coerce_replaces_unknown_or_self_critic():
@@ -266,3 +272,53 @@ async def test_chat_input_is_a_message_otherwise(monkeypatch):
 
     assistant = _assistant(monkeypatch, per_agent(orchestrator=[AIMessage("Hi.")]))
     assert await _chat_input(assistant, CONFIG, "team", "hello") == {"messages": [{"role": "user", "content": "hello"}]}
+
+
+def _spy_judge(monkeypatch, seen):
+    async def fake(messages, state, allowed, config):
+        seen.append((state["author_sources"], [s.route for s in allowed]))
+        return Verdict(action="approve")
+
+    monkeypatch.setattr(team, "ask_judge", fake)
+
+
+async def test_orchestrator_draft_excludes_critics_of_asked_sources(monkeypatch):
+    seen = []
+    _spy_judge(monkeypatch, seen)
+    ask = AIMessage("", tool_calls=[{"name": "ask_sql", "args": {"question": "AAPL cap?"}, "id": "s"}])
+    model = per_agent(orchestrator=[ask, AIMessage("3T."), AIMessage("Final.")], sql=[AIMessage("Cap 3T.")])
+    assistant = _assistant(monkeypatch, model)
+    await _stream(assistant, _ask("What is the AAPL market cap and what does handbook.pdf say?"))
+
+    sources, allowed = seen[0]
+    assert sources == ["market_db"] and "chart" not in allowed and "sql" not in allowed and "docs" in allowed
+
+
+async def test_model_only_draft_allows_every_critic(monkeypatch):
+    seen = []
+    _spy_judge(monkeypatch, seen)
+    assistant = _assistant(monkeypatch, per_agent(orchestrator=[AIMessage("A poem."), AIMessage("Final.")]))
+    await _stream(assistant, _ask("write a short poem"))
+
+    sources, allowed = seen[0]
+    assert sources == [] and set(allowed) == {s.route for s in AGENTS}
+
+
+class _ChartCritic(Runnable):
+    """A critic whose run produces a chart."""
+
+    def invoke(self, input, config=None, **kwargs):
+        chart = ToolMessage("ok", tool_call_id="c", name="chart_sql", artifact={"charts": [{"id": "leak"}]})
+        return {"messages": [chart, AIMessage("looks fine")]}
+
+    async def ainvoke(self, input, config=None, **kwargs):
+        return self.invoke(input)
+
+
+async def test_critic_artifacts_stay_off_the_answer(monkeypatch):
+    _judge(monkeypatch, Verdict(action="critique", critic="research"), Verdict(action="approve"))
+    model = per_agent(sql=[AIMessage("draft")], orchestrator=[AIMessage("Final.")])
+    assistant = _assistant(monkeypatch, model, research=_ChartCritic())
+    await _stream(assistant, _ask())
+
+    assert "charts" not in (await _thread(assistant))[-1].additional_kwargs

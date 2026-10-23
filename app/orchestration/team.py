@@ -66,8 +66,12 @@ def verdict_model(allowed: list[AgentSpec]) -> type[Verdict]:
     return create_model("TeamVerdict", __base__=Verdict, critic=(routes | None, None))
 
 
-def allowed_critics(available: list[tuple[AgentSpec, RouteInfo]], author: str) -> list[AgentSpec]:
-    return [spec for spec, _ in available if spec.review and spec.route != author]
+def allowed_critics(available: list[tuple[AgentSpec, RouteInfo]], author: str,
+                    author_sources: frozenset[str]) -> list[AgentSpec]:
+    """Reviewers other than the author that read a source the author did not (a same-source critic
+    could only confirm its figures)."""
+    return [spec for spec, _ in available
+            if spec.review and spec.route != author and not (spec.sources and spec.sources <= author_sources)]
 
 
 def coerce(verdict: Verdict, allowed: list[AgentSpec]) -> Verdict:
@@ -153,21 +157,22 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         if route and not by_route[route].answers_directly:
             route = None
         announce("delegate", route or ORCHESTRATOR, 0)
-        draft, artifacts = "", {}
+        draft, artifacts, asked = "", {}, []
         if route is None:
             route, answer = await ask_orchestrator(state, runtime)
             if answer is not None:
-                draft, artifacts = answer.text, collect([answer])
+                draft, artifacts, asked = answer.text, collect([answer]), answer.additional_kwargs.get("asked", [])
         if route:
             draft, artifacts = await run(route, messages, runtime, config)
-        team = {"phase": "delegate", "author": route or ORCHESTRATOR, "critic": None, "draft": draft, "critiques": [],
+        sources = by_route[route].sources if route else frozenset().union(*(by_route[r].sources for r in asked))
+        team = {"phase": "delegate", "author": route or ORCHESTRATOR, "author_sources": sorted(sources), "critic": None, "draft": draft, "critiques": [],
                 "verdicts": [], "turns": 0, "question": "", "issues": [], "open": "", "artifacts": artifacts}
         return {"team": team}  # a fresh debate: nothing of an earlier message's carries over
 
     async def judge(state: AssistantState, runtime: Runtime[AgentContext], config: RunnableConfig) -> Command:
         team = state["team"]
         available = await available_agents(runtime.context.user_id, specs)
-        verdict = await ask_judge(state["messages"], team, allowed_critics(available, team["author"]), config)
+        verdict = await ask_judge(state["messages"], team, allowed_critics(available, team["author"], frozenset(team["author_sources"])), config)
         cut = verdict.action in ("critique", "revise") and team["turns"] >= get_settings().team_max_turns
         record = {"action": verdict.action, "critic": verdict.critic, "issues": verdict.issues,
                   "turn": team["turns"], "forced": cut}

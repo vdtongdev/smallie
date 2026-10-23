@@ -428,6 +428,7 @@ SPEC = AgentSpec(
     silent_steps=("gather",),
     tool_description=TOOL_DESCRIPTION,
     review=REVIEW,
+    sources=frozenset({"web"}),
     answers_directly=False,
     result=findings_result,
 )

@@ -28,3 +28,8 @@ def test_team_settings_defaults():
 
     s = Settings(_env_file=None)
     assert (s.team_max_turns, s.team_max_message_model_calls) == (4, 30)
+
+
+def test_every_agent_has_sources():
+    assert all(spec.sources for spec in AGENTS)
+    assert get("sql").sources == get("chart").sources

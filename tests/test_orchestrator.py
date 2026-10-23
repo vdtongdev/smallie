@@ -310,3 +310,12 @@ async def test_max_asks_still_caps_remote_calls(monkeypatch):
 
     assert len(remote.calls) == orchestrator_module.MAX_ASKS
     assert _streamed(events) == "AAPL's P/E is 30."
+
+
+async def test_orchestrator_answer_records_asked_routes(monkeypatch):
+    ask = AIMessage("", tool_calls=[{"name": "ask_sql", "args": {"question": "AAPL cap?"}, "id": "s"}])
+    model = per_agent(orchestrator=[ask, AIMessage("3T.")], sql=[AIMessage("Cap 3T.")])
+    assistant = _assistant(monkeypatch, model)
+    await _run(assistant, "What is the AAPL market cap and what does handbook.pdf say?")
+
+    assert (await _thread(assistant))[-1].additional_kwargs["asked"] == ["sql"]

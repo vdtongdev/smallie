@@ -720,7 +720,7 @@ sequenceDiagram
 | 3. Agent server image + compose stack | done (plan Tasks 4–5: one image, 4 servers in compose, end-to-end checked) |
 | 4. `RemoteAgent` wrapper in the main app | done (plan Tasks 1–3: `RemoteAgent`, the main app calls every specialist through it) |
 | 5. Security (service token, IAM, read-only roles) | done (plan Tasks 6–7: Cloud Run ID tokens; `agent_reader` for the app's data, `agent_server` for the servers' own databases; calls the main app gave up on are cancelled) |
-| 6. Cloud Run deployment | config and steps written (plan Task 8: `cloudbuild.agent.yaml`, README "Deploying"); first deploy pending |
+| 6. Cloud Run deployment | config and steps written (plan Task 8: `cloudbuild.agent.yaml`, `DEPLOYING.md`); first deploy pending |
 | Loop audit (plan Task 9) | done: on a subset of 6 `bench_chat` scenarios, `main` and this branch used the same number of model calls (17 vs 17), and the worst case was 6 calls for one message against `MAX_MESSAGE_MODEL_CALLS` = 30 |
 
 ---

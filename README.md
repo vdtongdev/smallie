@@ -1,51 +1,61 @@
 # [smallie](https://smallie-976519788978.asia-southeast1.run.app/)
 
-LangChain agents behind a FastAPI app with a small web UI. You type into one chat, and an **orchestrator** handles each message. It answers general questions itself (explanations, maths, writing, small talk, with a quick web search for fresh facts). It hands a question to the right specialist, or asks several specialists and writes the combined answer. When nothing it has can answer, it says so. There are four specialists today, and the code is laid out so more can be added (see "Adding an agent" below):
+LangChain agents behind a FastAPI app with a small web UI. You type into one chat, and an **orchestrator** handles each message: it answers general questions itself (with a quick web search for fresh facts), hands a question to the right specialist, or asks several specialists and writes the combined answer. There are four specialists today:
 
 - **Documents**: upload PDF/DOCX files and ask questions about them. Answers cite the file and page.
-- **Database**: ask questions in plain language about a stock database (200 popular stocks loaded from Yahoo Finance with `yfinance`). The agent writes and runs read-only SQL.
-- **Charts**: say "chart", "plot" or "vẽ biểu đồ" to get an interactive line, bar, area, pie or scatter chart of the stock data, or of numbers from another answer ("plot that"). The data goes from the database straight to the chart (Chart.js in the browser); the model only sees a short summary, so charts of hundreds of points stay fast.
-- **Research**: a researcher gathers facts from the web (Tavily), Wikipedia, arXiv, an optional external Postgres, the stock database and your files. The orchestrator then turns those findings into a summary or a structured report with sources. External tools come in through MCP (`langchain-mcp-adapters`), and the researcher loads "skills" (instruction files) on demand.
+- **Database**: ask in plain language about a stock database (200 popular stocks from Yahoo Finance via `yfinance`). The agent writes and runs read-only SQL.
+- **Charts**: say "chart", "plot" or "vẽ biểu đồ" for an interactive line, bar, area, pie or scatter chart of the stock data, or of numbers from another answer ("plot that").
+- **Research**: gathers facts from the web (Tavily), Wikipedia, arXiv, an optional external Postgres, the stock database and your files; the orchestrator writes them up with sources.
 
-The **Readme** button in the header explains how to use the app, with example questions.
+All agents understand and reply in **English and Vietnamese**, remember each conversation, and keep long-term memories about you across chats (a knowledge graph per user in Postgres). The **Readme** button in the app header explains how to use it, with example questions.
 
-All agents understand and reply in **English and Vietnamese**. They remember each conversation and keep **long-term memories about the user across all chats**. They can also look back at your earlier chats. Memories live in a **knowledge graph per user** (plain Postgres tables): facts about you, learned automatically after replies, plus a node per uploaded file linked to the people and companies it is about, so a question about one of them searches the right file. The UI has no memory list (`GET/DELETE /api/memories` still exist).
+## Contents
 
-## Prerequisites (install once)
+- [Setup](#setup)
+  - [Prerequisites](#prerequisites)
+  - [Database](#database)
+  - [App and stock data](#app-and-stock-data)
+  - [Agent servers](#agent-servers)
+- [Run](#run)
+- [Accounts](#accounts)
+  - [Letting others on your network use it](#letting-others-on-your-network-use-it)
+- [Models and cost](#models-and-cost)
+- [Architecture](#architecture)
+- [Adding an agent](#adding-an-agent)
+- [Deploying](#deploying)
+- [Using your own database](#using-your-own-database)
+- [Troubleshooting](#troubleshooting)
+
+## Setup
+
+### Prerequisites
 
 | Tool | How |
 |---|---|
 | Python 3.12+ | https://www.python.org/downloads/ (tick "Add to PATH") |
 | uv | `winget install --id=astral-sh.uv -e` |
-| WSL2 + Docker Engine (runs Postgres) | `wsl --install -d Ubuntu` in an admin PowerShell, reboot, then see Setup step 1. No Docker Desktop needed. |
+| WSL2 + Docker Engine (runs Postgres) | `wsl --install -d Ubuntu` in an admin PowerShell, reboot, then see [Database](#database). No Docker Desktop needed. |
 | OpenRouter API key | https://openrouter.ai/keys |
 
-## Setup
+### Database
 
-**1. Database.** Postgres 18 + pgvector runs in Docker inside WSL Ubuntu (Docker Engine from Ubuntu's packages, no Docker Desktop). Once, from Windows:
+Postgres 18 + pgvector runs in Docker inside WSL Ubuntu. Once, from Windows:
 ```powershell
 wsl -d Ubuntu -u root -- sh -c "apt-get update && apt-get install -y docker.io docker-compose-v2 && systemctl enable --now docker"
 wsl -d Ubuntu -u root --cd "/mnt/c/Users/Asus ROG/projects/smallie" -- docker compose up -d db
 ```
-The first start loads `db/init/*.sql`. The container listens on port 5433 and restarts by itself whenever WSL starts (`restart: unless-stopped`; WSL needs `systemd=true` in `/etc/wsl.conf`, the default on new installs).
+The first start loads `db/init/*.sql`. The container listens on port 5433 and restarts whenever WSL starts (WSL needs `systemd=true` in `/etc/wsl.conf`, the default on new installs).
 
 **Each time you work on the app**, start the database with:
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\dev_db.ps1
 ```
-WSL shuts down about 25 seconds after the last `wsl` command, even with Docker running, and the database goes with it (tests then get skipped or freeze). The script keeps WSL running in the background until the PC shuts down (or `wsl --shutdown`), starts the container and waits until it's ready. Running it twice is harmless.
+WSL shuts down about 25 seconds after the last `wsl` command, even with Docker running, and the database goes with it (tests then get skipped or freeze). The script keeps WSL running until the PC shuts down (or `wsl --shutdown`), starts the container and waits until it's ready. Running it twice is harmless. Or work from a WSL terminal (WSL stays up while it is open): `docker compose up -d db`, `docker compose ps` (should say `healthy`). Keep running `uv run ...` in a Windows terminal: the `.venv` is a Windows one.
 
-Or work from a WSL terminal yourself. WSL stays up as long as that terminal is open:
-```bash
-cd "/mnt/c/Users/Asus ROG/projects/smallie"
-docker compose up -d db          # start (no sudo: your user is in the docker group)
-docker compose ps                # status, should say (healthy)
-docker logs -f smallie-db        # live Postgres log; Ctrl+C stops watching, not the database
-docker exec -it smallie-db psql -U smallie -d smallie   # SQL shell
-```
-Keep running `uv run ...` (tests, the app) in a Windows terminal: the `.venv` is a Windows one.
+<details>
+<summary>Moving from the old WSL-installed Postgres (<code>db/setup_wsl.sh</code>, legacy)</summary>
 
-Moving from the old WSL-installed Postgres (`db/setup_wsl.sh`, now legacy): dump it, stop it, restore into the container.
+Dump it, stop it, restore into the container:
 ```powershell
 wsl -d Ubuntu -u root -- sh -c "PGPASSWORD=smallie pg_dump -h localhost -p 5433 -U smallie -Fc smallie -f /root/smallie.dump && systemctl disable --now postgresql"
 wsl -d Ubuntu -u root --cd "/mnt/c/Users/Asus ROG/projects/smallie" -- docker compose up -d db
@@ -54,32 +64,28 @@ wsl -d Ubuntu -u root -- docker exec smallie-db psql -U smallie -d postgres -c "
 wsl -d Ubuntu -u root -- docker exec smallie-db pg_restore -U smallie -d smallie --exit-on-error /tmp/smallie.dump
 ```
 The old data stays in `/var/lib/postgresql` inside WSL until you remove the `postgresql` package.
+</details>
 
-**2. App.** Run these on Windows:
+### App and stock data
+
 ```powershell
 copy .env.example .env          # then put your OPENROUTER_API_KEY in .env
 uv sync                         # creates .venv and installs dependencies
 uv run pytest                   # tests that need Postgres are skipped if it isn't running
+uv run python -m scripts.load_stocks   # 200 stocks into the market schema, about 2 minutes
 ```
+After that the app keeps the data fresh itself: a background job fetches the day's prices every weekday at `MARKET_UPDATE_TIME` (default 17:30 New York time), refreshes profiles weekly, and catches up at startup if the app was off. Set `MARKET_UPDATE_TIME=` (empty) to turn it off. You can still run the script by hand: later runs fetch only the last few days; `--prices-only` skips the profiles, `--full` re-downloads all history (e.g. after a stock split). The ticker list is in `app/features/market/tickers.py`.
 
-**3. Stock data.** Download the 200 stocks into the `market` schema. This takes about 2 minutes: one profile request per stock, plus 5 years of daily prices.
-```powershell
-uv run python -m scripts.load_stocks
-```
-After that, the app keeps the data fresh on its own. While it runs, a background job fetches the day's prices every weekday at `MARKET_UPDATE_TIME` (default 17:30 New York time, after the US close), which takes a few seconds. It refreshes company profiles and key stats once a week. If the app was off at the scheduled time, it catches up when it starts. Set `MARKET_UPDATE_TIME=` (empty) to turn the job off.
+### Agent servers
 
-You can still run the script by hand. Later runs only fetch the last few days; add `--prices-only` to skip the profiles, or `--full` to re-download all history (for example after a stock split). The script and the background job share a database lock, so they never update at the same time. The ticker list is in `app/features/market/tickers.py`.
-
-**4. Agent servers.** The specialists (docs, sql, research, chart) each run as their own LangGraph Agent Server in Docker, next to the database. The main app calls them over HTTP (see `ARCHITECTURE.md`, section 10).
+The specialists (docs, sql, research, chart) each run as their own LangGraph Agent Server in Docker, next to the database. The main app calls them over HTTP and won't start without `AGENT_URLS`.
 1. In `.env`, set `LANGSMITH_API_KEY` (the Agent Server's free "lite" licence needs it), a `SERVICE_TOKEN` (any long random string), and `AGENT_URLS` (copy the local line from `.env.example`).
-2. **Turn off Cloudflare WARP and other VPN clients (e.g. SoftEther) first.** They corrupt downloads inside WSL ("bad record MAC"), and the agent servers' calls to OpenRouter go through the same network.
-3. Build and start the stack:
+2. **Turn off Cloudflare WARP and other VPN clients (e.g. SoftEther) first.** They corrupt downloads inside WSL ("bad record MAC"), and the servers' calls to OpenRouter use the same network.
+3. Build and start the stack (first build downloads about 1 GB; run it again after changing agent code):
    ```powershell
    wsl -d Ubuntu -u root --cd "/mnt/c/Users/Asus ROG/projects/smallie" -- docker compose up -d --build
    wsl -d Ubuntu -u root --cd "/mnt/c/Users/Asus ROG/projects/smallie" -- docker compose ps   # all agents "(healthy)"
    ```
-
-The first build downloads about 1 GB. After changing agent code, run the same `up -d --build` again. The main app won't start without `AGENT_URLS`.
 
 ## Run
 
@@ -87,248 +93,59 @@ The first build downloads about 1 GB. After changing agent code, run the same `u
 uv run uvicorn app.api.main:app --reload --loop asyncio:SelectorEventLoop
 ```
 
-Open http://localhost:8000. The API docs are at http://localhost:8000/docs.
+Open http://localhost:8000 (API docs at http://localhost:8000/docs). `--loop asyncio:SelectorEventLoop` is required on Windows: psycopg's async driver does not work on the default Proactor event loop.
 
-> `--loop asyncio:SelectorEventLoop` is required on Windows. psycopg's async driver (used for chat memory) does not work on Windows' default Proactor event loop.
-
-### Accounts
+## Accounts
 
 Everyone creates their own account on the login screen (name, username, password; up to `MAX_ACCOUNTS`, default 20). Each account has its own chats, documents and memories.
 
-Set `APP_PASSWORD` and `SESSION_SECRET` in `.env` (see `.env.example`). `APP_PASSWORD` is the password of the `admin` account, which can use the app normally and also manage accounts (reset a password, delete an account with all its data) under **Accounts** in the header. The admin owns the data from before accounts existed. If you used the app without a password before, give those anonymous chats to the admin once with `uv run python -m scripts.claim_anonymous_data`.
+Set `APP_PASSWORD` and `SESSION_SECRET` in `.env` (see `.env.example`). `APP_PASSWORD` is the password of the `admin` account, which also manages accounts (reset a password, delete an account with all its data) under **Accounts** in the header. The admin owns the data from before accounts existed. To give earlier anonymous chats to the admin, run once `uv run python -m scripts.claim_anonymous_data`.
 
 ### Letting others on your network use it
 
-The app only runs while this PC is on and the server is running.
-
-1. Set `APP_PASSWORD` first.
-2. Start the server with `--host 0.0.0.0` (and without `--reload`):
-   ```powershell
-   uv run uvicorn app.api.main:app --host 0.0.0.0 --port 8000 --loop asyncio:SelectorEventLoop
-   ```
-3. Allow the port once, in an admin PowerShell:
-   ```powershell
-   New-NetFirewallRule -DisplayName "smallie" -Direction Inbound -Protocol TCP -LocalPort 8000 -Action Allow -Profile Private,Domain
-   ```
-4. Others open `http://<this PC's IP>:8000`. Find the IP with `ipconfig`.
-
-For access from anywhere without your PC, see [Deploying](#deploying-google-cloud-run--neon).
+Set `APP_PASSWORD` first, then start the server on all interfaces (without `--reload`):
+```powershell
+uv run uvicorn app.api.main:app --host 0.0.0.0 --port 8000 --loop asyncio:SelectorEventLoop
+```
+Allow the port once, in an admin PowerShell, then others open `http://<this PC's IP>:8000` (`ipconfig` shows the IP):
+```powershell
+New-NetFirewallRule -DisplayName "smallie" -Direction Inbound -Protocol TCP -LocalPort 8000 -Action Allow -Profile Private,Domain
+```
+It only runs while this PC is on. For access from anywhere, see [Deploying](#deploying).
 
 ## Models and cost
 
-These are set in `.env`; all calls go through OpenRouter.
+Set in `.env`; all calls go through OpenRouter.
 
-- `OPENROUTER_CHAT_MODEL`: defaults to a free model with tool calling. Free models come and go, so see the list at https://openrouter.ai/models?supported_parameters=tools&max_price=0. `OPENROUTER_FALLBACK_MODEL` (comma-separated, tried in order) is used automatically when the main one fails or is rate-limited; pick models that write good Vietnamese, since weaker ones slip Chinese, Korean or Thai words into Vietnamese answers. With a paid model, `OPENROUTER_QUANTIZATIONS=bf16,fp8` keeps OpenRouter off the cheapest fp4 providers, which slip more.
-- `OPENROUTER_ORCHESTRATOR_MODEL`: the model of the orchestrator. It is skipped when the message clearly points to one agent (a ticker, "stock", a file name, "research", "latest news"…). Empty means it uses `OPENROUTER_CHAT_MODEL`. `ORCHESTRATOR_MAX_MODEL_CALLS` (4) caps its own calls per message.
-- `TAVILY_API_KEY`: web search for the research agent (free 1,000 credits/month at https://app.tavily.com). Without it, research uses the other sources. `MCP_SERVERS` adds more remote MCP servers, and `EXTERNAL_DATABASE_URL` lets the researcher read another Postgres (see `.env.example`).
-- `LANGSMITH_TRACING` + `LANGSMITH_API_KEY` (free account at https://smith.langchain.com): records every model call, tool call and routing step of each chat as a trace you can click through, for debugging. Off by default. Traces contain the full prompts, including users' messages and file passages, so only turn it on in production if you accept that.
-- `OPENROUTER_EMBED_MODEL`: defaults to `baai/bge-m3`, which is multilingual and costs about $0.01 per 1M tokens. A $1 top-up covers thousands of documents. The fully free option is `liquid/lfm-2.5-embedding-350m:free`, but the provider may keep and train on your data.
-- **Free-tier limits:** about 20 requests/min, and 50 requests/day unless you have bought at least $10 of credits (then 1000/day). A general question takes 1 model call, plus 1 after the reply to learn facts about you. Each uploaded file takes 1 (its document card). A database or documents question takes 2–5, plus 1 when the orchestrator has to hand it over. A question that combines agents takes 1 + each agent's calls + 1 to write the answer. A research question takes up to `RESEARCH_MAX_MODEL_CALLS` (8) for the researcher plus 1 for the write-up. `uv run python -m scripts.bench_chat` measures the calls and latency of typical questions on your models.
-- **Changing the embedding model or `EMBED_DIM`:** stop the app, then run `uv run python -m scripts.reindex` (it also re-embeds the knowledge graph's names).
+- `OPENROUTER_CHAT_MODEL`: defaults to a free model with tool calling (list: https://openrouter.ai/models?supported_parameters=tools&max_price=0). `OPENROUTER_FALLBACK_MODEL` (comma-separated, tried in order) kicks in when the main one fails or is rate-limited; pick models that write good Vietnamese. With a paid model, `OPENROUTER_QUANTIZATIONS=bf16,fp8` keeps OpenRouter off the cheapest fp4 providers, which slip more.
+- `OPENROUTER_ORCHESTRATOR_MODEL`: the orchestrator's model; empty means `OPENROUTER_CHAT_MODEL`. The orchestrator is skipped when a message clearly points to one agent. `ORCHESTRATOR_MAX_MODEL_CALLS` (4) caps its calls per message.
+- `TAVILY_API_KEY`: web search (free 1,000 credits/month at https://app.tavily.com). Without it, research uses the other sources. `MCP_SERVERS` adds remote MCP servers and `EXTERNAL_DATABASE_URL` lets the researcher read another Postgres (see `.env.example`).
+- `LANGSMITH_TRACING` + `LANGSMITH_API_KEY`: records every model call, tool call and routing step as a trace. Off by default. Traces contain full prompts (users' messages, file passages), so enable it in production only if you accept that.
+- `OPENROUTER_EMBED_MODEL`: defaults to `baai/bge-m3` (multilingual, about $0.01 per 1M tokens). The free `liquid/lfm-2.5-embedding-350m:free` may keep and train on your data. After changing it or `EMBED_DIM`, stop the app and run `uv run python -m scripts.reindex`.
+- **Free-tier limits:** about 20 requests/min, and 50/day unless you bought at least $10 of credits (then 1000/day). A general question takes 1 model call, plus 1 after the reply to learn facts about you. An upload takes 1. A database or documents question takes 2–5 (+1 if handed over); a combined one 1 + each agent's calls + 1; research up to `RESEARCH_MAX_MODEL_CALLS` (8) + 1. `uv run python -m scripts.bench_chat` measures calls and latency on your models.
 
-## How it works
+## Architecture
 
-```
-app/
-  core/           shared infrastructure: config, OpenRouter models (llm.py), app tables (db.py),
-                  memory (checkpointer + store), knowledge graph (graph.py), auth/accounts,
-                  conversations, shared prompt rules
-  agents/         one package per agent (agent.py with its SPEC, tools.py, prompts.py)
-    registry.py   the list of agents the router can pick
-    factory.py    create_agent + memory tools + memory-aware dynamic prompt + call limit
-    docs/         search_documents tool over pgvector
-    sql/          schema in prompt + read-only run_sql tool
-  features/       data the agents use, with its API and background jobs
-    documents/    upload routes, ingest.py (PDF/DOCX -> chunks -> pgvector)
-    market/       tickers.py (the 200 stocks), loader.py (yfinance -> market schema), daily scheduler
-  orchestration/  START -> router -> one agent, or the orchestrator (answers, hands off, or asks agents) -> END
-    formats/      answer formats the orchestrator follows when it writes up results (summary, list, report...)
-  api/            FastAPI app and shared routes: chat (SSE streaming), conversations, memories, agents, admin
-  static/         plain HTML/JS UI with an EN/VI toggle
-db/init/          extension, read-only role, market schema, agent servers' databases (loaded on the first `docker compose up`; db/setup_wsl.sh is the legacy non-Docker setup)
-Dockerfile        container image for Cloud Run (.gcloudignore / .dockerignore keep secrets out)
-Dockerfile.agent  one image for every agent server (AGENT_ROUTE picks the agent; docker-compose.yml runs all four)
-scripts/          load_stocks.py (fill/refresh stock data), reindex.py (after changing the embedding model),
-                  bench_chat.py (latency and model calls per scenario)
-```
+A router, an orchestrator and four specialists that each run as their own agent server. [ARCHITECTURE.md](ARCHITECTURE.md) has the details: [the router](ARCHITECTURE.md#3-router), [the orchestrator](ARCHITECTURE.md#4-orchestrator), [memory](ARCHITECTURE.md#8-memory), [remote agents](ARCHITECTURE.md#10-remote-agents-040-in-progress) and [deployment](ARCHITECTURE.md#12-deployment). Developer notes for coding agents are in [CLAUDE.md](CLAUDE.md).
 
-**Routing**
-- Every message goes to `POST /api/chat/auto`. If it clearly points to one agent (e.g. "stock", a known ticker, one of your file names, "research") and doesn't also mention another agent's data ("my resume" or a word of one of your file names next to a ticker), the router (`app/orchestration/router.py`) sends it there without a model call. Everything else goes to the orchestrator (`app/orchestration/orchestrator.py`).
-- The orchestrator knows each agent's description, which agents have something for you (no documents uploaded: no documents agent), your file names, and who answered last. It answers itself, **hands off** to one agent (which then replies directly with the whole chat), or **asks** agents with self-contained questions (several in parallel) and writes the answer from their results, with citations. Small free models rarely choose a handoff themselves, so asking a single agent in the first step is turned into a handoff, unless the message also mentions another agent's data. Stock figures and anything in your files always come from those agents, so a question like "which of the most valuable tech companies fits my resume?" asks both and gets one combined answer.
-- Only the final answer is saved to the chat; the agents it asked show in the UI as tool calls.
-- Agents are subgraphs on the same conversation thread, so one chat can switch between them and each sees the whole history. The UI shows which agent answered each turn; badge labels (EN/VI) come from `GET /api/agents`.
-- `POST /api/chat/<agent>` (`/api/chat/docs`, `/api/chat/sql`) skips the router and forces that agent (API only). An unknown agent name returns 404.
+## Adding an agent
 
-**Adding an agent**
-- An agent is a package under `app/agents/<name>/`: `tools.py`, `prompts.py`, and `agent.py`, which builds the agent and defines its `SPEC` (route name, description, UI labels, hint words, and a `tool_description` if the orchestrator may ask it). Add the `SPEC` to `AGENTS` in `app/agents/registry.py`. The router, orchestrator, chat API and UI pick it up with no other changes.
-- A multi-step workflow is added the same way; its `build` returns a small graph instead of a single agent. An entry that only gathers material (like research) sets `answers_directly=False`, and the orchestrator writes its answer.
-- If the agent needs its own data (tables, ingestion, API routes, background jobs), add a feature under `app/features/<name>/` and register it in `app/features/registry.py`.
-- The full checklist is in CLAUDE.md ("Adding an agent or workflow").
+An agent is a package under `app/agents/<name>/` (`tools.py`, `prompts.py`, `agent.py` with its `SPEC`). Add the `SPEC` to `AGENTS` in `app/agents/registry.py`, give it a service block in `docker-compose.yml`, and the router, orchestrator, API and UI pick it up. If it needs its own data, add a feature under `app/features/<name>/`. The full checklist is in `CLAUDE.md` ("Adding an agent or workflow").
 
-**Memory**
-- *Within a chat:* every message is checkpointed in Postgres (`thread_id` = conversation id), so chats survive restarts.
-- *Across chats:* a knowledge graph per user (`app/core/graph.py`, tables `graph_nodes` and `graph_edges`).
-  - After each reply the orchestrator writes (not plain stock, chart or document lookups), one extra model call picks out facts about you as triples (`User works_at <company>`, risk tolerance, goals, preferences, what a file of yours is).
-  - Names are matched to existing nodes (exact, then by embedding). A new value of a one-value fact (where you live or work, your risk tolerance…) replaces the old one.
-  - Each upload gets a *document card*: one model call reads the start of the file and stores its type, a one-line summary and up to 10 names it is about.
-  - Before each turn, your newest facts go into every agent's prompt. When a documents question names a person or company the graph links to a file, the search looks in that file first, then in all files.
-  - Deleting a chat keeps the facts; deleting a file or the account removes its part of the graph.
-- The checkpointer and the store share one psycopg connection pool that checks each connection before use. If Postgres restarts (for example when WSL shuts down), the app reconnects on its own and doesn't need a restart.
-- The UI remembers the open chat, so reloading the page brings it back.
+## Deploying
 
-**Research agent (`app/agents/research/`)**
-- The researcher (`gather`) only collects findings; whenever it searches Wikipedia it also runs a web search in the same step (when Tavily is configured); the orchestrator writes the answer, which is the only part saved to the chat and streamed. The researcher's tool calls show in the UI as progress, but its notes don't.
-- MCP (`app/core/mcp.py`): remote servers (Tavily, `MCP_SERVERS`) are loaded with `MultiServerMCPClient`, one short session per tool call. Our own servers (`app/features/research/mcp_servers/`: `knowledge` for Wikipedia and arXiv, `external_db` for `EXTERNAL_DATABASE_URL`) run in-process over MCP's memory transport. That needs no subprocess, which wouldn't start on Windows under the selector event loop. Tools are named `<server>_<tool>`. A server that fails to load is skipped with a warning.
-- Skills (`app/agents/skills.py`) are `skills/<role>/<name>/SKILL.md` files. The prompt lists their names and descriptions, and the agent calls `load_skill` to read one. The researcher's skills are `web-research`, `market-data` and `academic`. The answer formats in `app/orchestration/formats/` (`summary`, `list`, `structured-report`, `comparison` and `company-brief`) are always in the orchestrator's prompt while it writes up results, and it picks one from the question.
-
-**SQL safety**
-- The SQL agent connects as `agent_readonly`. That role has SELECT-only access to the `market` schema, read-only transactions, and a 10 s statement timeout. It cannot see the app's own tables.
-- Results are capped at `SQL_MAX_ROWS`.
-
-**Users and accounts**
-- Everything (documents, vector chunks, chats, memories) is keyed by `user_id`.
-- `app/core/auth.py::get_current_user()` reads the `user_id` from the signed session cookie set at login (401 if missing or the account was deleted). Accounts live in the `users` table (`app/core/accounts.py`).
-- The `admin` account (password `APP_PASSWORD`) keeps the old shared id `team` and can list, reset and delete accounts (`app/api/routes_admin.py`). Deleting an account removes its chats, memories, document chunks and uploads.
-
-## Deploying (Google Cloud Run + Neon)
-
-The app runs as a container on **Cloud Run** (free tier, scales to zero). All data lives in a free **Neon** Postgres, so nothing is lost when the container stops. Uploaded files are only needed while they're being indexed.
-
-**1. Neon (database), once**
-1. Create a project at https://neon.tech, region AWS Singapore. Copy the **direct** connection string (not the `-pooler` one; the app uses advisory locks).
-2. Enable pgvector and create the read-only role, using the statements in `db/init/01_extensions.sql` and `db/init/03_readonly_role.sql` (run them with `psql` or a short psycopg script as the owner):
-   - Use a strong generated password instead of `'readonly'`; Neon rejects weak passwords.
-   - Use your database's name in `GRANT CONNECT` (Neon's default is not `smallie`).
-   - The schema grants come later from `load_stocks`, which re-applies `04_market_schema.sql`.
-3. Load the stocks from your PC (Yahoo often blocks cloud IPs on a big first download):
-   ```powershell
-   $env:DATABASE_URL="<neon owner url>"; uv run python -m scripts.load_stocks --full
-   ```
-
-**2. Cloud Run (app)**
-1. Install the gcloud CLI (`winget install Google.CloudSDK`), then run `gcloud init` and log in.
-2. Create a project and make it the default, then link a billing account to it in the console (*Billing → Linked account*; the free tier still needs one). Set a budget alert at $1 in *Billing → Budgets & alerts*.
-   ```powershell
-   gcloud projects create <project-id> --name="smallie"
-   gcloud config set project <project-id>
-   ```
-3. Enable the services once. New projects also have to let the default compute service account build from source, otherwise the deploy fails with `PERMISSION_DENIED ... missing required IAM permissions`:
-   ```powershell
-   gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com
-   $num = gcloud projects describe <project-id> --format="value(projectNumber)"
-   gcloud projects add-iam-policy-binding <project-id> --role="roles/run.builder" --condition=None `
-     --member="serviceAccount:$num-compute@developer.gserviceaccount.com"
-   ```
-4. Create `cloudrun.env.yaml` (gitignored). It's your `.env` as YAML, with the Neon URLs and `SESSION_HTTPS_ONLY: "true"`. All values must be quoted strings. Add `TAVILY_API_KEY` (and `MCP_SERVERS` / `EXTERNAL_DATABASE_URL` if you use them) for the research agent. `MCP_SERVERS` is JSON, so wrap it in single quotes in YAML.
-5. Deploy from the project folder (Cloud Build builds the `Dockerfile`; `.gcloudignore` keeps `.env` and `.venv` out):
-   ```powershell
-   gcloud run deploy smallie --source . --region asia-southeast1 --allow-unauthenticated `
-     --env-vars-file cloudrun.env.yaml --memory 1Gi --cpu 1 --no-cpu-throttling `
-     --min-instances 0 --max-instances 1 --timeout 900
-   ```
-   - `--no-cpu-throttling` keeps the CPU on after a response, so document indexing, chat-history indexing and the stock update (all background tasks) still run.
-   - `--max-instances 1` caps the cost.
-   - `--allow-unauthenticated` only opens the URL; the app still requires a login.
-6. Share the printed `https://smallie-....run.app` URL. Run the same deploy command again after code or `cloudrun.env.yaml` changes; each deploy creates a new revision.
-
-**3. Agent servers (docs, sql, research, chart)**
-
-Each specialist runs as its own private Cloud Run service, all from one image (`Dockerfile.agent`). The main app calls them with the service token and a Google ID token. Since 0.4.0 the app doesn't start without `AGENT_URLS`, so on a first setup do this section before the app's deploy (2.5). Do these once, in this order, then repeat steps 4–5 after changing agent code.
-
-1. **Neon: two more roles and the agents' databases.** Create the roles yourself with strong passwords, because Neon rejects the weak ones in the files. Use long passwords of letters and digits only: they also go into URLs and PowerShell strings, where `$ @ / ? # &` break. Then run the two scripts with the `psql` inside the local `smallie-db` container (start it with `scripts\dev_db.ps1`). `--exec` hands the arguments over as they are; without it, bash splits the URL at its `&`.
-   ```powershell
-   $neon = "<neon owner url>"   # direct URL of smalliedb (not -pooler)
-   $sql = { wsl -d Ubuntu -u root --exec docker exec smallie-db psql $neon -v ON_ERROR_STOP=1 @args }
-   & $sql -tAc "SELECT current_user, pg_get_userbyid(datdba) FROM pg_database WHERE datname = current_database()"
-   ```
-   Both names must be the same (the app's role owns `smalliedb`). If they differ, stop: `06` would lock the live app out. Otherwise:
-   ```powershell
-   & $sql -c "CREATE ROLE agent_server LOGIN PASSWORD '<strong 1>'" -c "CREATE ROLE agent_reader LOGIN PASSWORD '<strong 2>'"
-   & $sql -f /docker-entrypoint-initdb.d/05_agent_databases.sql   # agent_docs, agent_sql, agent_research, agent_chart, owned by agent_server
-   & $sql -f /docker-entrypoint-initdb.d/06_agent_reader.sql      # agent_reader's settings; smalliedb stops accepting every login
-   ```
-   - `agent_server` holds only the agents' run queues and can't open `smalliedb`. `agent_reader` can only read documents, the knowledge graph and chat history, never accounts or chats. The main app grants its tables at every start.
-   - After `06`, check that the live app's stock questions still work (`06` grants `agent_readonly` access explicitly).
-   - If `05` fails at `CREATE DATABASE ... OWNER agent_server`, create the four databases in the Neon console with owner `agent_server`.
-   - The owner URL and both passwords are now in PowerShell's history (`(Get-PSReadLineOption).HistorySavePath`); delete those lines from that file.
-2. **Upstash: a free Redis.** Create a database at https://upstash.com (region `ap-southeast-1`) and copy its `rediss://default:...@....upstash.io:6379` URL. The four servers share it; each uses its own key prefix.
-3. **`cloudrun.agent.env.yaml`** (gitignored). It holds only what an agent server needs, never `APP_PASSWORD` or `SESSION_SECRET`. All values are quoted strings:
-   ```yaml
-   OPENROUTER_API_KEY: "..."          # and the OPENROUTER_* / EMBED_DIM / MAX_MODEL_CALLS / RESEARCH_MAX_MODEL_CALLS / SQL_MAX_ROWS values you use in cloudrun.env.yaml
-   LANGSMITH_API_KEY: "..."           # required: the free Agent Server licence checks it
-   SERVICE_TOKEN: "..."               # the same value as in cloudrun.env.yaml
-   # LANGSMITH_TRACING: "true"        # optional, with LANGSMITH_PROJECT: records the servers' part of a traced chat
-   DATABASE_URL: "postgresql://agent_reader:<strong 2>@<neon direct host>/smalliedb?sslmode=require"
-   READONLY_DATABASE_URL: "<the same value as in cloudrun.env.yaml>"
-   REDIS_URI: "rediss://default:...@....upstash.io:6379"
-   DB_POOL_SIZE: "2"
-   LANGGRAPH_POSTGRES_POOL_MAX_SIZE: "5"
-   BG_JOB_MAX_RETRIES: "1"            # counts attempts: a run cut off by a restart is not repeated
-   BG_JOB_TIMEOUT_SECS: "360"         # stops a run the main app gave up on (it waits 300 s)
-   ```
-   Research's keys go in a second gitignored file, `cloudrun.agent.research-secrets.yaml`, so that only the research server gets them (the other servers have no use for them). It holds `TAVILY_API_KEY`, plus `MCP_SERVERS` / `EXTERNAL_DATABASE_URL` if you use them. `MCP_SERVERS` is JSON, so wrap it in single quotes. The main app keeps its own `TAVILY_API_KEY` in `cloudrun.env.yaml`, because the orchestrator also searches the web.
-4. **Build the image** (Cloud Build, about 5 minutes):
-   ```powershell
-   gcloud builds submit --config cloudbuild.agent.yaml
-   ```
-5. **Deploy the four services.** Each one gets its own env file with three route-specific lines (gcloud takes only one env file, and doesn't combine it with `--set-env-vars`). The files are deleted after each deploy:
-   ```powershell
-   $agentDb = "postgresql://agent_server:<strong 1>@<neon direct host>"   # not -pooler: the servers take advisory locks
-   foreach ($r in "docs", "sql", "research", "chart") {
-     $file = "cloudrun.agent.$r.env.yaml"
-     $lines = @(Get-Content cloudrun.agent.env.yaml) + "AGENT_ROUTE: `"$r`"",
-       "DATABASE_URI: `"$agentDb/agent_${r}?sslmode=require`"", "REDIS_KEY_PREFIX: `"${r}:`""
-     if ($r -eq "research") { $lines += @(Get-Content cloudrun.agent.research-secrets.yaml) }
-     [IO.File]::WriteAllLines("$PWD\$file", $lines)   # UTF-8 without BOM
-     gcloud run deploy "smallie-$r" --image asia-southeast1-docker.pkg.dev/smallie-review/cloud-run-source-deploy/smallie-agent `
-       --region asia-southeast1 --no-allow-unauthenticated --env-vars-file $file `
-       --memory 1Gi --cpu 1 --min-instances 0 --max-instances 1 --timeout 600
-     Remove-Item $file
-   }
-   ```
-   - `--no-allow-unauthenticated`: only callers with `roles/run.invoker` get through. Each server also checks the service token.
-   - No `--no-cpu-throttling`: an agent only works while the main app's request is open, so it is billed only then.
-6. **Let the main app call them**, then point it at their URLs:
-   ```powershell
-   $num = gcloud projects describe smallie-review --format="value(projectNumber)"
-   foreach ($r in "docs", "sql", "research", "chart") {
-     gcloud run services add-iam-policy-binding "smallie-$r" --region asia-southeast1 --role roles/run.invoker `
-       --member "serviceAccount:$num-compute@developer.gserviceaccount.com"
-     gcloud run services describe "smallie-$r" --region asia-southeast1 --format "value(status.url)"
-   }
-   ```
-   Add the printed URLs and the token to `cloudrun.env.yaml`, then redeploy the app (step 2.5). Use the URLs exactly as printed, because the ID token is issued for that URL:
-   ```yaml
-   AGENT_URLS: '{"docs": "https://smallie-docs-....run.app", "sql": "...", "research": "...", "chart": "..."}'
-   SERVICE_TOKEN: "..."
-   ```
-
-**Upgrading a database from before the knowledge graph** (once): the app creates the graph tables at startup, but old memories and files need converting.
-1. Back up first: in the Neon console create a branch (an instant copy), e.g. `pre-graph-<date>`. Delete it after a week or so.
-2. Deploy the new version.
-3. From your PC, with the same embedding settings as the deployment, run:
-   ```powershell
-   $env:DATABASE_URL="<neon owner url>"; uv run python -m scripts.build_graph
-   ```
-   For each user it turns the old memory sentences into graph facts (one model call per 5 memories, then deletes them) and reads every turn of their past chats for facts (one call per 4 turns of a chat; short chats still take one call each, so expect roughly one call per chat). Then it writes a card for every file that has none (one call each, read from the stored chunks). It prints the number of calls first. Each user is built once: a finished user is skipped on later runs, and a run stopped by the rate limit resumes where it stopped. New accounts never need it.
-
-**Current deployment:** project `smallie-review`, region `asia-southeast1`, https://smallie-976519788978.asia-southeast1.run.app, database on Neon (Singapore, Postgres 18). App logs:
-```powershell
-gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=smallie" --limit 50 --freshness 1h
-```
-
-**Limits:** the first request after ~15 min idle cold-starts the container (10–20 s), and the first call to an idle agent server cold-starts that one too. The OpenRouter free quota is shared by everyone using the deployment. The images are stored in Artifact Registry as `asia-southeast1-docker.pkg.dev/smallie-review/cloud-run-source-deploy/smallie` and `.../smallie-agent` (0.5 GB free for both; delete old images if you redeploy often). An agent server that is awake polls Redis about once a second, so watch the Upstash command count in the first week (its free tier has a monthly cap). Neon only hosts the database; a deploy never touches it unless the schema changes.
+The app runs on Google Cloud Run (project `smallie-review`, region `asia-southeast1`) with its data in Neon Postgres, and each specialist as its own private Cloud Run service. Step-by-step instructions are in [DEPLOYING.md](DEPLOYING.md).
 
 ## Using your own database
 
-Point `READONLY_DATABASE_URL` at a read-only role on your database and set `SCHEMAS` in `app/agents/sql/tools.py`. The agent reads the schema at startup and puts it in its prompt. Table and column comments help it a lot.
+Point `READONLY_DATABASE_URL` at a read-only role on your database and set `SCHEMAS` in `app/agents/sql/tools.py`. The agent reads the schema at startup and puts it in its prompt; table and column comments help it a lot.
 
 ## Troubleshooting
 
-- **Port 5433 already in use:** the old WSL Postgres may still be running (`wsl -d Ubuntu -u root -- systemctl disable --now postgresql`). Otherwise change `ports` in `docker-compose.yml` and update both URLs in `.env`.
-- **Can't connect from Windows to Postgres:** check the container is up (`wsl -d Ubuntu -u root -- docker ps`). Also check that `localhostForwarding` isn't set to false in `%UserProfile%\.wslconfig`.
-- **Recreating the database from scratch:** `docker compose down -v` then `docker compose up -d db` (run both via `wsl -d Ubuntu -u root --cd "<project path in /mnt/c>" --`; `-v` deletes all local data), then `uv run python -m scripts.load_stocks --full`.
-- **Chat errors with "the connection is closed", or old chats won't open:** Postgres was restarted while the app was running. Current versions reconnect automatically. If you still see this, make sure Postgres is running and restart the app.
-- **Stock questions return nothing / "relation market.stocks does not exist":** run `uv run python -m scripts.load_stocks`, then restart the app (the SQL agent reads the schema at startup). If it reports tickers with no price data, those companies were delisted or renamed; replace them in `app/features/market/tickers.py`.
-- **Cloud Run build fails:** `gcloud builds list --region asia-southeast1 --limit 1`, then `gcloud builds log <id> --region asia-southeast1`. `PERMISSION_DENIED` before the build starts means the `roles/run.builder` grant in *Deploying* is missing.
+- **Port 5433 already in use:** the old WSL Postgres may still be running (`wsl -d Ubuntu -u root -- systemctl disable --now postgresql`). Otherwise change `ports` in `docker-compose.yml` and both URLs in `.env`.
+- **Can't connect from Windows to Postgres:** check the container is up (`wsl -d Ubuntu -u root -- docker ps`) and that `localhostForwarding` isn't false in `%UserProfile%\.wslconfig`.
+- **Recreating the database from scratch:** `docker compose down -v` then `docker compose up -d db` (both via `wsl -d Ubuntu -u root --cd "<project path in /mnt/c>" --`; `-v` deletes all local data), then `uv run python -m scripts.load_stocks --full`.
+- **Chat errors with "the connection is closed", or old chats won't open:** Postgres restarted while the app ran. The app reconnects on its own; if not, make sure Postgres is running and restart the app.
+- **Stock questions return nothing / "relation market.stocks does not exist":** run `uv run python -m scripts.load_stocks`, then restart the app (the SQL agent reads the schema at startup). Tickers reported without price data were delisted or renamed; replace them in `app/features/market/tickers.py`.
+- **Cloud Run build fails:** `gcloud builds list --region asia-southeast1 --limit 1`, then `gcloud builds log <id> --region asia-southeast1`. `PERMISSION_DENIED` before the build starts means the `roles/run.builder` grant is missing; see [DEPLOYING.md](DEPLOYING.md).
 - **"No text found" on a PDF:** scanned or image-only PDFs need OCR, which isn't supported yet.

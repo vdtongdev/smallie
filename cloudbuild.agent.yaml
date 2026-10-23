@@ -1,5 +1,5 @@
 # Builds the agent server image (Dockerfile.agent) once; every agent's Cloud Run service runs it
-# (README "Deploying", agent servers). Run from the project folder:
+# (DEPLOYING.md, agent servers). Run from the project folder:
 #   gcloud builds submit --config cloudbuild.agent.yaml
 steps:
   - name: gcr.io/cloud-builders/docker

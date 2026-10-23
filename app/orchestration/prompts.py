@@ -87,19 +87,23 @@ CRITICS YOU MAY CHOOSE:
 {critics}
 
 Return exactly one action:
-- approve: the draft answers the message and no critique above leaves an open problem. Choose this for a short or simple answer (a greeting, a definition, small talk), and whenever there are no critics above.
+- approve: the draft answers the message and no critique above leaves a problem the author can fix. Choose this for a short or simple answer (a greeting, a definition, small talk), and whenever there are no critics above. Two cases need `explanation` (one or two sentences, with each side's value and source):
+  - The critique differs from the draft, but both sides explain the difference (as-of date, definition, scope): both are right.
+  - The critique conflicts with the draft and nobody on the team can fix it: describe the conflict.
 - critique: the draft states facts, figures or claims about the user's files that a critic above can check. Set `critic` to one route from the list. Never choose this for a trivial answer, and never choose a critic whose critique is already above.
-- revise: a critique above found concrete problems. List them in `issues` (at most 5, one short sentence each), and set `critic` to the route that should check the corrected draft (leave it empty when the list above is empty).
+- revise: a critique above shows a conflict the author can fix with its own tools (a wrong query, a wrong ticker or name, a claim its data doesn't support). List the problems in `issues` (at most 5, one short sentence each), and set `critic` to the route that should check the corrected draft (leave it empty when the list above is empty).
 - needs_human: the draft can't go on without information only the user has (for example, which of several files they mean). Write one short question in `question`, in {language}. Never choose this for a gap that a critic or a search could fill.
 
-Leave `issues` empty unless the action is revise. Leave `question` empty unless the action is needs_human."""
+Never decide that a source is right because of its kind (database, file, web page, model). Any source can be wrong.
+
+Leave `issues` empty unless the action is revise. Leave `question` empty unless the action is needs_human. Leave `explanation` empty unless the action is approve after a critique."""
 
 # Hidden message for the critic: the thread plus this, as the last message (name TEAM).
 CRITIQUE_MESSAGE = """CRITIQUE REQUEST (not visible to the user). Another agent drafted this answer to the user's latest message:
 
 {draft}
 
-Check it with your own tools. List each concrete problem with the evidence you found (the source, the figure or the passage). If it holds, say so in one sentence. Don't rewrite the answer. Write in {language}."""
+Check it with your own tools. For every figure or claim you check, give your source and its date, and say whether a difference from the draft could come from date, definition or scope. List each concrete problem with the evidence you found (the source, the figure or the passage). If it holds, say so in one sentence. Don't rewrite the answer. Write in {language}."""
 
 # Hidden message for the author: the thread plus this, as the last message (name TEAM).
 REFINE_MESSAGE = """REVISION REQUEST (not visible to the user). Your draft of the answer to the user's latest message:
@@ -123,7 +127,10 @@ CRITIQUES:
 OPEN ISSUES:
 {issues}
 
-Use the final draft as the base, and correct it where a critique above shows it wrong. When OPEN ISSUES is not "none", say plainly in the answer which points the team could not settle."""
+EXPLANATIONS:
+{explanations}
+
+Use the final draft as the base, and correct it where a critique above shows it wrong. When EXPLANATIONS is not "none", give each source's value with its source and date, plus the explanation, so the user sees both. When EXPLANATIONS describes a conflict nobody settled, or OPEN ISSUES is not "none", show both sides, say plainly that the team could not settle it, and do not pick one."""
 
 # Results of tool calls the orchestrator may not make (`no_repeats` in orchestrator.py).
 REPEATED_CALL = "Not run: this exact call was already made for this message; its result is above. Use it, or write the answer."

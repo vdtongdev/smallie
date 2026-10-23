@@ -51,6 +51,7 @@ class Verdict(BaseModel):
     critic: str | None = None
     issues: list[str] = []
     question: str = ""
+    explanation: str = ""
 
     @field_validator("issues")
     @classmethod
@@ -175,7 +176,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         verdict = await ask_judge(state["messages"], team, allowed_critics(available, team["author"], frozenset(team["author_sources"])), config)
         cut = verdict.action in ("critique", "revise") and team["turns"] >= get_settings().team_max_turns
         record = {"action": verdict.action, "critic": verdict.critic, "issues": verdict.issues,
-                  "turn": team["turns"], "forced": cut}
+                  "turn": team["turns"], "forced": cut, "explanation": verdict.explanation}
         emit({"type": "verdict", **record})
         team = {**team, "verdicts": [*team["verdicts"], record], "critic": verdict.critic, "issues": verdict.issues}
         if cut:
@@ -234,7 +235,8 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         announce("synthesize", ORCHESTRATOR, team["turns"])
         note = TEAM_MESSAGE.format(
             draft=team["draft"], language=reply_language(messages), issues=team["open"] or "none",
-            critiques="\n\n".join(f"{c['critic']}: {c['text']}" for c in team["critiques"]) or "none")
+            critiques="\n\n".join(f"{c['critic']}: {c['text']}" for c in team["critiques"]) or "none",
+            explanations=_bullets([v["explanation"] for v in team["verdicts"] if v.get("explanation")]) or "none")
         _, answer = await ask_orchestrator(state, runtime, note)
         answer = answer or AIMessage(team["draft"], name=ORCHESTRATOR)  # it handed off: the draft stands
         transcript = {key: team[key] for key in ("author", "draft", "critiques", "verdicts", "turns")}

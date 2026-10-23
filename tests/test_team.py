@@ -322,3 +322,38 @@ async def test_critic_artifacts_stay_off_the_answer(monkeypatch):
     await _stream(assistant, _ask())
 
     assert "charts" not in (await _thread(assistant))[-1].additional_kwargs
+
+
+async def test_approve_with_explanation_reaches_the_write_up(monkeypatch):
+    _judge(monkeypatch, Verdict(action="critique", critic="research"),
+           Verdict(action="approve", explanation="figures differ by as-of date"))
+    model = per_agent(sql=[AIMessage("draft")], research=[AIMessage("notes")], orchestrator=[AIMessage("Final.")])
+    assistant = _assistant(monkeypatch, model)
+    chunks = await _stream(assistant, _ask())
+
+    assert _phases(chunks) == ["delegate", "critique", "synthesize"]
+    assert _events(chunks, "verdict")[-1]["explanation"] == "figures differ by as-of date"
+    last = (await _thread(assistant))[-1].additional_kwargs["team"]["verdicts"][-1]
+    assert last["explanation"] == "figures differ by as-of date"
+    seen = [m.text for prompt in model.prompts for m in prompt if "TEAM RESULT" in m.text]
+    assert seen and "- figures differ by as-of date" in seen[-1]
+
+
+async def test_unfixable_conflict_does_not_revise(monkeypatch):
+    _judge(monkeypatch, Verdict(action="critique", critic="research"),
+           Verdict(action="approve", explanation="sources disagree, nobody can settle it"))
+    assistant = _assistant(monkeypatch, per_agent(sql=[AIMessage("d")], research=[AIMessage("n")],
+                                                  orchestrator=[AIMessage("Final.")]))
+    chunks = await _stream(assistant, _ask())
+
+    assert "refine" not in _phases(chunks)
+    assert (await _thread(assistant))[-1].additional_kwargs["team"]["turns"] == 1
+
+
+def test_prompts_format():
+    from app.orchestration import prompts
+
+    prompts.JUDGE_PROMPT.format(critics="", turns=0, max_turns=3, language="English")
+    prompts.CRITIQUE_MESSAGE.format(draft="", language="English")
+    prompts.REFINE_MESSAGE.format(draft="", issues="", language="English")
+    prompts.TEAM_MESSAGE.format(draft="", language="English", issues="none", critiques="none", explanations="none")

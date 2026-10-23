@@ -44,7 +44,7 @@ from app.agents.factory import build_agent
 from app.agents.research.agent import mcp_tools
 from app.agents.skills import load_skills, skills_inline
 from app.core.config import get_settings
-from app.core.memory import AgentContext
+from app.core.memory import TEAM_MODE, AgentContext
 from app.core.prompts import LANGUAGE_RULE, MEMORY_RULE, reply_language
 from app.orchestration.prompts import (
     ALREADY_ASKED,
@@ -64,7 +64,7 @@ FORMATS = skills_inline(load_skills(Path(__file__).resolve().parent / "formats")
 HANDOFF = "handoff"
 FINDINGS = "research_findings"  # HumanMessage.name of the hidden findings message
 ATTEMPT = "failed_attempt"  # HumanMessage.name of the hidden note on a specialist that gave up
-HIDDEN = frozenset({FINDINGS, ATTEMPT})
+HIDDEN = frozenset({FINDINGS, ATTEMPT, TEAM_MODE})
 MAX_ASKS = 2  # `ask_<route>` calls per specialist and message, a fallen-back direct attempt included
 WEB_SEARCH_TOOLS = ("tavily_tavily_search", "knowledge_wikipedia_search")
 SORRY = "Sorry, I couldn't finish this answer. Please try again or rephrase the question."
@@ -185,7 +185,7 @@ def is_composing(messages: Sequence[AnyMessage]) -> bool:
         if isinstance(message, ToolMessage) and message.name not in MEMORY_TOOL_NAMES:
             return True
         if isinstance(message, HumanMessage):
-            return message.name == FINDINGS
+            return message.name in (FINDINGS, TEAM_MODE)
     return False
 
 
@@ -273,6 +273,8 @@ def build_orchestrator(specs: Sequence[AgentSpec], agents: Mapping[str, Runnable
         if failed := state.get("failed", ""):
             hidden.append(HumanMessage(ATTEMPT_MESSAGE.format(route=failed, attempt=state.get("attempt", "")),
                                        name=ATTEMPT))
+        if note := state.get("team_note"):
+            hidden.append(HumanMessage(note, name=TEAM_MODE))
         notes, mentioned = await request_notes(runtime.context.user_id, specs, messages)
         context = dataclasses.replace(runtime.context, notes=notes, mentioned=mentioned, failed=failed)
         result = await agent.ainvoke({"messages": [*messages, *hidden]}, context=context)

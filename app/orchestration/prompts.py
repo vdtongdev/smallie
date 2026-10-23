@@ -128,3 +128,8 @@ Use the final draft as the base, and correct it where a critique above shows it 
 # Results of tool calls the orchestrator may not make (`no_repeats` in orchestrator.py).
 REPEATED_CALL = "Not run: this exact call was already made for this message; its result is above. Use it, or write the answer."
 ALREADY_ASKED = "Not run: this specialist was already asked enough about this message and had nothing more. Write the answer with what you have, saying plainly what is missing."
+
+# What stayed open when the debate was cut short (the {issues} of TEAM_MESSAGE).
+UNREVIEWED = "The last revision of the draft was not reviewed."
+FAILED_STEP = "A team member failed, so the draft was not fully checked."
+CUT_SHORT = "The turn limit was reached before the draft was approved."

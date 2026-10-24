@@ -23,6 +23,8 @@ Both ship as 0.5.0 (an architecture change: how agents talk to each other). Imag
 
 ## Phase C: the debate loop
 
+> **Superseded in part (2026-10-24):** the author → critic → refine relay below was built, measured and replaced by the round table in "Phase C v2". Kept from it: team mode and `TEAM_MODE`, `AgentSpec.review`/`sources`, the judge as one structured call, the four conflict rules, `interrupt()`/resume, `TEAM_MAX_MESSAGE_MODEL_CALLS`, the transcript on `additional_kwargs["team"]`, custom stream events. Where the two differ, v2 wins.
+
 ### Turning it on
 
 - `POST /api/chat/team` starts or continues a team-mode conversation. `conversations.kind = 'team'` stores the mode (no schema change). `chat()` accepts `team` next to `auto` and the routes.
@@ -136,6 +138,58 @@ Tokens keep the `token` event; the UI writes them into the block of the latest `
 - Router: `agent="team"` → `team`. `chat()` accepts `team` and resumes a pending interrupt instead of starting a new turn.
 - Budget: team messages use `TEAM_MAX_MESSAGE_MODEL_CALLS`.
 - `scripts.bench_chat`: one team scenario to measure calls and latency on the real models.
+
+## Phase C v2: round table (replaces the relay)
+
+### Why
+
+The relay's evaluation on 2026-10-24 (free models, five team scenarios after the source fixes): 7 calls / 38 s for a stock question, but 126–156 s whenever research took part, because every step waits for the previous one; agents never see each other's work; research "independently" re-ran `run_sql` on the author's own table, because `sources` labelled agents but didn't limit their tools; the write-up re-emitted the whole draft (about 46 s); two English questions got Vietnamese drafts or answers; live and reload views differed; `needs_human` never fired.
+
+### Flow
+
+```
+message ─► pick ─┬─ nobody picked ─────────────────────────────► orchestrator answers alone (as normal mode)
+                 └─ participants ─► round 1: speak × N (parallel, own sources only)
+                                        ▼
+                                      judge ─┬─ agree / differences explained ─► write-up ─► END
+                                             ├─ needs_human ─► interrupt() ─► judge
+                                             └─ fixable conflicts & rounds < TEAM_MAX_ROUNDS ─► conflict round: speak × involved ─► judge
+                                                (at the cap: write-up shows the open conflicts)
+```
+
+- **pick** (code, no model call). Team = every registered agent (phase A: `room_agents`) available to this user (`route_info` not `None`). An agent joins when the message mentions it (`AgentSpec.is_mentioned`); of an `overrides` pair only the winner joins. `AgentSpec.joins = "with_others"` (research) joins whenever any other agent participates; default `"mentioned"`. Nobody mentioned → the orchestrator answers alone, same cost as normal mode.
+- **speak** (LangGraph `Send`, one task per agent, in parallel). Round 1: thread + hidden `ROUND_MESSAGE` (answer from your own sources only; cite source and as-of date; say plainly when your sources hold nothing on it; reply in the named language). Conflict round: only the agents in a conflict's `routes`, with hidden `CONFLICT_MESSAGE` (the other side's claim and evidence; correct yours, or say why yours stands).
+- **Source scoping.** Every tool carries a `source` tag in its metadata (`run_sql`/`chart_sql` `market_db`, `search_documents` `user_files`, web and Wikipedia/arXiv tools `web`; memory and chart-from-data tools untagged). `AgentContext.sources` holds the sources an agent may use on this request (its spec's `sources` in team mode, empty = no limit otherwise); a middleware in `build_agent` hides tools whose tag isn't in it. Runs on the agent servers.
+- **judge** (one structured call, orchestrator model): `Board = {agreements: [str], differences: [{routes, explanation}], conflicts: [{routes, claim, fixable_by, issue}], question: str}`. Rules kept: a difference both sides explain is not a conflict; no source is right because of its kind; only a conflict with someone in `fixable_by` (an involved route that can fix it with its own tools) gets another round; `question` only for information only the user has. Code drops `fixable_by` routes outside the conflict's `routes`.
+- **write-up.** One participant and no conflict → its answer is the reply (no synthesis call). Otherwise the orchestrator writes one answer from the board (`TEAM_MESSAGE`): each source's value with its source and date, the explanations, open conflicts without picking a winner.
+- **Language.** `ROUND_MESSAGE`, `CONFLICT_MESSAGE` and `TEAM_MESSAGE` name the reply language from `reply_language(messages)`. The cause of the observed drift is traced before relying on this.
+- **Caps.** `TEAM_MAX_ROUNDS=4` conflict rounds after round 1 (replaces `TEAM_MAX_TURNS`); the evaluation measures what it costs. `TEAM_MAX_MESSAGE_MODEL_CALLS=30` stays the backstop: a call refused by it fails that agent's turn, and a failed turn forces the write-up with what stayed open.
+
+### Events
+
+Inside a round every `token`, `tool_call` and `tool_result` carries `"agent": "<route>"` (from the `speak` task's namespace); outside rounds they keep today's shape. If per-task namespaces can't be mapped to agents reliably, the fallback is: tool events live, each answer sent whole when its task ends.
+
+```jsonc
+{"type": "round", "round": 1, "max_rounds": 4, "kind": "answer|conflict", "agents": ["sql", "research"]}
+{"type": "board", "round": 1, "agreements": ["…"],
+ "differences": [{"routes": ["sql", "research"], "explanation": "…"}],
+ "conflicts": [{"routes": ["sql", "docs"], "claim": "…", "fixable_by": ["sql"], "issue": "…"}], "forced": false}
+{"type": "synthesize"}
+{"type": "needs_human", "question": "…"}
+```
+
+`team` and `verdict` events are removed.
+
+### UI: minimal chat, activity popup (every chat, team or not)
+
+- **Main window:** while running, one status line above the reply (agent badges, spinner, e.g. `Round 2 of 4 · resolving a conflict · sql, docs`; in normal mode the agent and its step). When done it becomes a short summary (e.g. `Team · 2 rounds · sql, research · 1 difference explained`), then the answer with charts and citations, and an "Activity" button with a step count.
+- **Activity popup** (`<dialog>`, like the Readme dialog): the full log of that reply. Team mode, per round and agent: answer text, tool calls (name, arguments), tool results, then the board; the pause question if any. Normal mode: the tool calls and results that today render inline.
+- **Reload matches live:** team transcript in `additional_kwargs["team"]` = `{rounds: [{round, kind, answers: [{agent, text, tools: [{name, args, result}]}]}], boards: [...], participants, forced}`; normal mode rebuilds from the thread's tool messages. The reply's badge is whoever answered (orchestrator, or the single participant).
+- Relay-era transcripts (two dev chats) may render without a discussion.
+
+### Evaluation
+
+The five team bench scenarios plus `team_conflict`: a small uploaded file stating a wrong market cap, asked together with that ticker, so docs and sql conflict. Measure calls, latency, rounds and conflicts at `TEAM_MAX_ROUNDS=4`; live UI pass (status line, popup, reload); the language-drift trace; another try at `needs_human`.
 
 ## Phase A: shared rooms
 

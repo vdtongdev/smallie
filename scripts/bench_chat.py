@@ -21,6 +21,7 @@ import statistics
 import sys
 import time
 import uuid
+from pathlib import Path
 from contextlib import AsyncExitStack
 from dataclasses import asdict, dataclass, field
 
@@ -65,7 +66,10 @@ SCENARIOS = {
                       "team mode: market data plus general knowledge, so the orchestrator authors"),
     "team_vi": ("Vốn hóa của AAPL so với MSFT thế nào?", "team mode: a Vietnamese stock question"),
     "team_ambiguous": ("Which one is better?", "team mode: a comparison with no subject, to try needs_human"),
+    "team_conflict": ("What is AAPL's market cap according to the file bench_team_conflict.docx, and what does the stock database say?",
+                      "team mode: the uploaded file and the database disagree"),
 }
+FIXTURES = {"team_conflict": ("team_conflict.md", "bench_team_conflict.docx")}  # scenario -> (source, uploaded name)
 PAUSE_SECONDS = 20  # between scenarios, so bursts stay under the free tier's ~20 requests/min
 
 
@@ -182,6 +186,44 @@ async def run_scenario(assistant, store, user_id: str, name: str, run: int) -> R
     return result
 
 
+async def upload_fixture(store, user_id: str, source: str, filename: str) -> str:
+    """Ingest a fixture like POST /api/documents does (a .docx made from the markdown text); returns the document id."""
+    import docx
+
+    from app.core.config import get_settings
+    from app.core.db import documents, get_engine
+    from app.features.documents.card import process_document
+
+    doc_id = str(uuid.uuid4())
+    path = get_settings().upload_dir / user_id / f"{doc_id}.docx"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    document = docx.Document()
+    for line in (Path(__file__).parent / "bench_data" / source).read_text(encoding="utf-8").splitlines():
+        document.add_paragraph(line)
+    document.save(path)
+    with get_engine().begin() as conn:
+        conn.execute(documents.insert().values(id=doc_id, user_id=user_id, filename=filename, path=str(path), status="processing"))
+    await process_document(store, doc_id, user_id, path, filename)
+    return doc_id
+
+
+def delete_fixture(user_id: str, doc_id: str) -> None:
+    from sqlalchemy import delete, select
+
+    from app.core.db import documents, get_engine
+    from app.core.graph import drop_orphans
+    from app.features.documents.ingest import delete_document_chunks
+
+    with get_engine().begin() as conn:
+        row = conn.execute(select(documents).where(documents.c.id == doc_id)).mappings().first()
+        if row:
+            delete_document_chunks(doc_id, row["chunk_count"])
+            conn.execute(delete(documents).where(documents.c.id == doc_id))
+    drop_orphans(user_id)
+    if row:
+        Path(row["path"]).unlink(missing_ok=True)
+
+
 def messages_of(name: str) -> list[str]:
     message = SCENARIOS[name][0]
     return message if isinstance(message, list) else [message]
@@ -223,7 +265,12 @@ async def main(args) -> None:
                 if results:
                     await asyncio.sleep(PAUSE_SECONDS)
                 print(f"[run {run}] {name}: {' / '.join(messages_of(name))}", flush=True)
-                results.append(await run_scenario(assistant, store, user_id, name, run))
+                doc_id = await upload_fixture(store, user_id, *FIXTURES[name]) if name in FIXTURES else None
+                try:
+                    results.append(await run_scenario(assistant, store, user_id, name, run))
+                finally:
+                    if doc_id:
+                        delete_fixture(user_id, doc_id)
                 r = results[-1]
                 print(f"  {'->'.join(r.route)}  {r.model_calls} calls  {r.total:.1f}s  {r.error}", flush=True)
     report(results)

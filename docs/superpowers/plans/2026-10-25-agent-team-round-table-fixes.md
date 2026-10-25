@@ -37,6 +37,18 @@
 - [ ] **Step 3:** `uv run pytest -q -rs`; rebuild the agent servers (`docker compose up -d --build` through PowerShell + WSL); one real team message (a stock question) through the bench `team` scenario with the events wrapper: research's round-1 tool calls contain no `run_sql`/`search_documents`.
 - [ ] **Step 4:** commit `fix: team source scoping works on the agent servers`
 
+### Task 1b: Research's prompt only names its allowed sources
+
+**Found by Task 1:** the root cause was not the context (it reaches the server) but the model calling a tool it wasn't offered, because research's system prompt names `run_sql`, the market schema and the user's files. Task 1 now refuses such calls; each attempt still wastes a step (one per research turn in the live run).
+
+**Files:** `app/agents/research/agent.py` (how `sources(...)`, `MARKET_LINE`, `DOCUMENTS_LINE` and `describe_schema()` reach the prompt), `app/agents/research/prompts.py`. Test: `tests/test_research_workflow.py`.
+
+**Interfaces:** when `AgentContext.sources` is non-empty, the researcher's prompt leaves out the source lines and the schema of sources not in it (a per-request part of the prompt, e.g. via `build_agent(prompt_extra=...)`, instead of the static system prompt). With empty `sources` the prompt is as today.
+
+- [ ] **Step 1:** failing test `test_research_prompt_omits_sources_outside_scope` (with `sources=("web",)` the researcher's system prompt has no `run_sql`/schema/documents lines; with empty `sources` it has them)
+- [ ] **Step 2:** implement (`writing-llm-document`; traps `prompt-format-braces`, `reply-language`)
+- [ ] **Step 3:** `uv run pytest -q -rs`; commit `fix: research prompt names only its allowed sources`
+
 ### Task 2: Board: an undated contradicting figure is a conflict
 
 **Files:** `app/orchestration/team.py` (`Difference`, `clean`), `app/orchestration/prompts.py` (`BOARD_PROMPT`, `TEAM_MESSAGE`), spec "judge" bullet. Test: `tests/test_team.py`.

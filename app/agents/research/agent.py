@@ -44,7 +44,7 @@ from app.agents.skills import load_skills, make_load_skill_tool, skills_section
 from app.agents.sql.tools import describe_schema, run_sql
 from app.core.config import get_settings
 from app.core.mcp import open_mcp_tools
-from app.core.memory import AgentContext
+from app.core.memory import TOOL_SOURCE, AgentContext
 from app.core.prompts import MEMORY_RULE
 from app.features.research.mcp_servers.knowledge import wikipedia_article
 from app.features.research.sources import local_servers, remote_servers
@@ -75,10 +75,17 @@ def mcp_tools() -> list[BaseTool]:
     return list(_mcp_tools)
 
 
+def tag_mcp(tools: list[BaseTool]) -> list[BaseTool]:
+    """Copies of the Tavily and knowledge (Wikipedia, arXiv) tools tagged as web, so `scope_tools`
+    can hide them; the loaded objects stay untouched."""
+    return [t.model_copy(update={"metadata": {**(t.metadata or {}), TOOL_SOURCE: "web"}})
+            if t.name.startswith(("tavily_", "knowledge_")) else t for t in tools]
+
+
 async def prepare(stack: AsyncExitStack) -> None:
     remote, local = remote_servers(), local_servers()
     tools = await open_mcp_tools(stack, remote, local)
-    _mcp_tools[:] = [tool for tool in tools if tool.name not in SKIPPED_TOOLS]
+    _mcp_tools[:] = tag_mcp([tool for tool in tools if tool.name not in SKIPPED_TOOLS])
     # Tool names are "<server>_<tool>", so a server that failed to load has no tools here.
     _mcp_servers[:] = [name for name in [*remote, *local] if any(t.name.startswith(f"{name}_") for t in _mcp_tools)]
 
@@ -429,6 +436,7 @@ SPEC = AgentSpec(
     tool_description=TOOL_DESCRIPTION,
     review=REVIEW,
     sources=frozenset({"web"}),
+    joins="with_others",
     answers_directly=False,
     result=findings_result,
 )

@@ -33,3 +33,8 @@ def test_team_settings_defaults():
 def test_every_agent_has_sources():
     assert all(spec.sources for spec in AGENTS)
     assert get("sql").sources == get("chart").sources
+
+
+def test_research_joins_with_others():
+    assert get("research").joins == "with_others"
+    assert all(spec.joins == "mentioned" for spec in AGENTS if spec.route != "research")

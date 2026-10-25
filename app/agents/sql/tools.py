@@ -10,6 +10,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.config import get_settings
 from app.core.db import get_readonly_engine
+from app.core.memory import TOOL_SOURCE
 
 # Schemas the agent may read.
 SCHEMAS = ("market",)
@@ -135,3 +136,6 @@ async def run_sql(query: str) -> tuple[str, dict]:
     # The model sees the first SQL_MAX_ROWS rows; the table artifact keeps them all (for charts).
     content = render_rows(columns, rows, get_settings().sql_max_rows, truncated)
     return f"{content[:-1]}; table {table['id']})", {"tables": [table]}
+
+
+run_sql.metadata = {TOOL_SOURCE: "market_db"}

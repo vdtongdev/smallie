@@ -4,7 +4,7 @@ from langchain.tools import ToolRuntime, tool
 
 from app.core.graph import documents_for
 from app.features.documents.ingest import get_vector_store
-from app.core.memory import AgentContext
+from app.core.memory import TOOL_SOURCE, AgentContext
 
 TOP_K = 6
 NO_PASSAGES = "No matching passages in the user's documents."
@@ -46,3 +46,6 @@ async def search_documents(query: str, runtime: ToolRuntime[AgentContext], entit
             then looks first in the files linked to it. Leave empty otherwise.
     """
     return await asyncio.to_thread(search_with_graph, runtime.context.user_id, query, entity)
+
+
+search_documents.metadata = {TOOL_SOURCE: "user_files"}

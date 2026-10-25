@@ -14,7 +14,7 @@ from langchain.tools import ToolRuntime, tool
 from app.agents.artifacts import artifacts_from, same_query
 from app.agents.chart.spec import ChartSpec, ChartType, Series, make_spec, summary
 from app.agents.sql.tools import query_readonly
-from app.core.memory import AgentContext
+from app.core.memory import TOOL_SOURCE, AgentContext
 
 
 def to_number(value) -> float | None:
@@ -150,3 +150,6 @@ def chart_data(type: ChartType, title: str, labels: list[str | float], series: l
     spec = make_spec(type=type, title=title, labels=labels, series=[dict(s) for s in series],
                      x_label=x_label, y_label=y_label)
     return drawn(spec)
+
+
+chart_sql.metadata = {TOOL_SOURCE: "market_db"}

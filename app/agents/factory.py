@@ -1,15 +1,32 @@
 from collections.abc import Callable, Sequence
 
 from langchain.agents import create_agent
-from langchain.agents.middleware import AgentMiddleware, ModelCallLimitMiddleware, ModelRequest, dynamic_prompt
+from langchain.agents.middleware import (
+    AgentMiddleware,
+    ModelCallLimitMiddleware,
+    ModelRequest,
+    dynamic_prompt,
+    wrap_model_call,
+)
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.store.base import BaseStore
 
 from app.core.config import get_settings
 from app.core.llm import get_chat_model
-from app.core.memory import MEMORY_TOOLS, AgentContext
+from app.core.memory import MEMORY_TOOLS, TOOL_SOURCE, AgentContext
 from app.core.prompts import MEMORIES_SECTION, RECENT_CHATS_SECTION, USER_SECTION
+
+
+@wrap_model_call
+async def scope_tools(request: ModelRequest, handler):
+    """Team requests limit an agent to the tools of its sources; untagged tools stay."""
+    sources = request.runtime.context.sources
+    if sources:
+        request = request.override(tools=[
+            t for t in request.tools
+            if (tag := (getattr(t, "metadata", None) or {}).get(TOOL_SOURCE)) is None or tag in sources])
+    return await handler(request)
 
 
 def build_agent(
@@ -53,7 +70,7 @@ def build_agent(
     return create_agent(
         get_chat_model(model),
         tools=[*tools, *MEMORY_TOOLS],
-        middleware=[prompt_with_memories, call_limit, *middleware],
+        middleware=[prompt_with_memories, call_limit, scope_tools, *middleware],
         context_schema=AgentContext,
         checkpointer=checkpointer,
         store=store,

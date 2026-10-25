@@ -9,6 +9,7 @@ import re
 from collections.abc import Awaitable, Callable, Sequence
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
+from typing import Literal
 
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import Runnable
@@ -89,6 +90,8 @@ class AgentSpec:
     review: str = ""
     # Data sources it reads (e.g. "market_db", "web"); a critic must read other ones than the author.
     sources: frozenset[str] = frozenset()
+    # Team mode: "mentioned" = joins when the message points to it; "with_others" = also joins whenever another agent does.
+    joins: Literal["mentioned", "with_others"] = "mentioned"
 
     async def info(self, user_id: str) -> RouteInfo | None:
         return await self.route_info(user_id) if self.route_info else RouteInfo()

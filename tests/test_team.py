@@ -215,7 +215,7 @@ async def test_single_participant_answer_stands(monkeypatch):
     reply = (await _thread(assistant))[-1]
     assert (reply.name, reply.text) == ("sql_agent", "Cap is 3T.")
     assert reply.additional_kwargs["team"]["participants"] == ["sql"]
-    assert not model.prompts and _events(chunks, "synthesize")
+    assert not model.prompts and not _events(chunks, "synthesize")
 
 
 async def test_agreement_writes_up_once(monkeypatch):

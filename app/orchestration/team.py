@@ -259,7 +259,6 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
 
     async def synthesize(state: TeamState, runtime: Runtime[AgentContext]) -> dict:
         team, messages = state["team"], state["messages"]
-        emit({"type": "synthesize"})
         answers = _latest(state["speeches"], team["participants"])
         board = Board(**team["boards"][-1])
         transcript = {key: team[key] for key in ("participants", "rounds", "boards", "forced")}
@@ -268,6 +267,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
                 and only.answers_directly:
             answer = AIMessage(answers[0]["text"], name=only.message_names[0])
         else:
+            emit({"type": "synthesize"})  # only a write-up announces itself
             note = TEAM_MESSAGE.format(
                 answers="\n\n".join(f"{a['agent']}:\n{a['text']}" for a in answers),
                 differences=_bullets([f"{', '.join(d.routes)}: {d.explanation} ({'; '.join(f'{x.route}: {x.value}, {x.source}, {x.as_of}' for x in d.sides)})"

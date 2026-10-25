@@ -308,6 +308,23 @@ async def test_real_team_stream_tags_agents(monkeypatch):
     assert all("agent" not in e for e in writeup)
 
 
+async def test_lone_participant_reply_reaches_the_answer(monkeypatch):
+    """One participant, no write-up: no `synthesize`, and its text arrives in `spoke` (the route sends `done` after the stream)."""
+    from tests import test_team
+    from tests.scripted import per_agent
+    from tests.test_orchestrator import _assistant
+
+    test_team._research_does_not_join(monkeypatch)
+    test_team._board(monkeypatch, test_team.Board())
+    assistant = _assistant(monkeypatch, per_agent(sql=[AIMessage("Cap is 3T.")]))
+    stream = assistant.astream(test_team._ask(), test_team.CONFIG, context=test_team.TEAM_CONTEXT,
+                               stream_mode=["messages", "updates", "custom"], subgraphs=True)
+    events = [e async for e in _events_from(stream)]
+
+    assert not [e for e in events if e["type"] == "synthesize"]
+    assert any(e["type"] == "spoke" and e["text"] == "Cap is 3T." for e in events)
+
+
 def test_spoke_event_passes_through():
     chunk = {"type": "spoke", "agent": "sql", "round": 1, "text": "x", "tools": []}
     assert _to_events("custom", chunk, SUBGRAPH) == [chunk]

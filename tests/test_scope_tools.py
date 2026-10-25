@@ -50,3 +50,16 @@ def test_every_data_tool_has_a_source():
     tagged = {t.name: (t.metadata or {}).get(TOOL_SOURCE) for t in research_agent.tag_mcp(
         [_tagged("tavily_tavily_search", None), _tagged("knowledge_arxiv_search", None), _tagged("other_tool", None)])}
     assert tagged == {"tavily_tavily_search": "web", "knowledge_arxiv_search": "web", "other_tool": None}
+
+
+def test_external_db_tools_are_tagged():
+    tagged = research_agent.tag_mcp([_tagged("external_db_query", None), _tagged("external_db_schema", None)])
+    assert all(t.metadata[TOOL_SOURCE] == "external_db" for t in tagged)
+    assert research_agent.SPEC.sources == frozenset({"web", "external_db"})
+
+
+def test_memories_section_keeps_message_language():
+    from app.core.prompts import MEMORIES_SECTION
+
+    text = MEMORIES_SECTION.lower()
+    assert "language" in text and "latest message" in text

@@ -76,10 +76,14 @@ def mcp_tools() -> list[BaseTool]:
 
 
 def tag_mcp(tools: list[BaseTool]) -> list[BaseTool]:
-    """Copies of the Tavily and knowledge (Wikipedia, arXiv) tools tagged as web, so `scope_tools`
-    can hide them; the loaded objects stay untouched."""
-    return [t.model_copy(update={"metadata": {**(t.metadata or {}), TOOL_SOURCE: "web"}})
-            if t.name.startswith(("tavily_", "knowledge_")) else t for t in tools]
+    """Copies of the Tavily and knowledge (Wikipedia, arXiv) tools tagged as web, and of the
+    external database tools tagged external_db, so `scope_tools` can hide them; the loaded objects
+    stay untouched."""
+    def source(name: str) -> str | None:
+        return "web" if name.startswith(("tavily_", "knowledge_")) else "external_db" if name.startswith("external_db_") else None
+
+    return [t.model_copy(update={"metadata": {**(t.metadata or {}), TOOL_SOURCE: source(t.name)}}) if source(t.name) else t
+            for t in tools]
 
 
 async def prepare(stack: AsyncExitStack) -> None:
@@ -435,7 +439,7 @@ SPEC = AgentSpec(
     silent_steps=("gather",),
     tool_description=TOOL_DESCRIPTION,
     review=REVIEW,
-    sources=frozenset({"web"}),
+    sources=frozenset({"web", "external_db"}),
     joins="with_others",
     answers_directly=False,
     result=findings_result,

@@ -13,6 +13,7 @@ from starlette.background import BackgroundTask
 
 from app.core.accounts import get_profile
 from app.agents.artifacts import artifacts_from
+from app.agents.base import TOOL_RESULT_PREVIEW
 from app.agents.registry import ROUTES, SILENT_STEPS, STEPS
 from app.agents.remote import RUN_NODE, as_message
 from app.orchestration.orchestrator import HANDOFF
@@ -27,7 +28,6 @@ from app.core.usage import UsageCounter, add_usage
 router = APIRouter(tags=["chat"])
 log = logging.getLogger(__name__)
 
-TOOL_RESULT_PREVIEW = 4000
 TEAM_EVENTS = frozenset({"team", "verdict", "needs_human"})  # custom events of a team turn
 
 

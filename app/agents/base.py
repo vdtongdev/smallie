@@ -18,6 +18,7 @@ from app.core.memory import MEMORY_TOOLS
 
 LIMIT_MESSAGE = "Model call limits exceeded"  # ModelCallLimitMiddleware's closing message
 MEMORY_TOOL_NAMES = frozenset(t.name for t in MEMORY_TOOLS)
+TOOL_RESULT_PREVIEW = 4000  # characters of a tool result shown in the UI and kept in a team transcript
 GAVE_UP_CHARS = 600  # longer replies count as answers (often partial ones), whatever they say
 # A reply that only says the search came up empty (not a negative answer such as "pays no dividend").
 NOT_FOUND = re.compile(

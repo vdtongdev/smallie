@@ -1,119 +1,139 @@
-"""Team mode: a judge decides after each draft whether a critic checks it (design:
-docs/superpowers/specs/2026-10-23-agent-team-design.md):
+"""Team mode, a round table (design: docs/superpowers/specs/2026-10-23-agent-team-design.md):
 
-    delegate -> judge -+- approve ------------------------------> synthesize -> END
-                       +- needs_human -> pause -> judge
-                       +- critique -> critique -> judge
-                       +- revise -> refine -> critique (turns < cap) | synthesize (forced)
+    pick -+- nobody mentioned -> the orchestrator answers as in normal mode -> END
+          +- speak x N (parallel, one `Send` each, own sources only) -> judge -+- agreed / explained -> synthesize -> END
+                                                                              +- question -> pause -> judge
+                                                                              +- fixable conflicts, round < cap -> speak x involved -> judge
 
-A `team` node of the assistant graph. Only the synthesized answer joins the thread; the transcript
-goes on its `additional_kwargs["team"]`. Progress goes out as `custom` stream events.
+A `team` node of the assistant graph. Only the final answer joins the thread; the transcript goes
+on its `additional_kwargs["team"]`. Progress goes out as `custom` stream events: `round`, `board`,
+`synthesize`, `needs_human`, and `speaker` (internal: which `speak` task runs which agent).
 """
 
 import asyncio
+import dataclasses
 import logging
 from collections.abc import Mapping, Sequence
-from typing import Literal
+from typing import Annotated
 
 import openai
-from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 from langgraph.runtime import Runtime
-from langgraph.types import Command, interrupt
-from pydantic import BaseModel, create_model, field_validator
+from langgraph.types import Command, Send, interrupt
+from pydantic import BaseModel
 
 from app.agents.artifacts import KINDS, collect
-from app.agents.base import AgentSpec, RouteInfo
+from app.agents.base import MEMORY_TOOL_NAMES, TOOL_RESULT_PREVIEW, AgentSpec, RouteInfo, turn_messages
 from app.core.config import get_settings
 from app.core.llm import get_chat_model
 from app.core.memory import TEAM_MODE, AgentContext
 from app.core.prompts import reply_language
-from app.orchestration.prompts import (
-    CRITIQUE_MESSAGE,
-    CUT_SHORT,
-    FAILED_STEP,
-    JUDGE_PROMPT,
-    REFINE_MESSAGE,
-    TEAM_MESSAGE,
-    UNREVIEWED,
-)
-from app.orchestration.router import ORCHESTRATOR, AssistantState, available_agents, obvious_route
+from app.orchestration.prompts import BOARD_PROMPT, CONFLICT_MESSAGE, ROUND_MESSAGE, TEAM_MESSAGE
+from app.orchestration.router import ORCHESTRATOR, AssistantState, available_agents
 
 log = logging.getLogger(__name__)
 
 TEAM = TEAM_MODE
+RESET = {"reset": True}  # first entry of `speeches` at the start of a message: forget the earlier message's
 
 
-class Verdict(BaseModel):
-    action: Literal["approve", "critique", "revise", "needs_human"]
-    critic: str | None = None
-    issues: list[str] = []
+class Difference(BaseModel):
+    routes: list[str]
+    explanation: str
+
+
+class Conflict(BaseModel):
+    routes: list[str]
+    claim: str
+    fixable_by: list[str] = []
+    issue: str = ""
+
+
+class Board(BaseModel):
+    agreements: list[str] = []
+    differences: list[Difference] = []
+    conflicts: list[Conflict] = []
     question: str = ""
-    explanation: str = ""
-
-    @field_validator("issues")
-    @classmethod
-    def _cap(cls, issues: list[str]) -> list[str]:
-        return issues[:5]
 
 
-def verdict_model(allowed: list[AgentSpec]) -> type[Verdict]:
-    """Verdict whose `critic` only accepts an allowed route (plain Verdict when none)."""
-    if not allowed:
-        return Verdict
-    routes = Literal[tuple(spec.route for spec in allowed)]  # type: ignore[valid-type]
-    return create_model("TeamVerdict", __base__=Verdict, critic=(routes | None, None))
+def participants(available: list[tuple[AgentSpec, RouteInfo]], message: str) -> list[AgentSpec]:
+    """Who takes part: agents the message points to (of an `overrides` pair only the winner), plus
+    the `joins == "with_others"` agents when any other takes part. Registry order."""
+    mentioned = [spec for spec, info in available if spec.is_mentioned(message, info)]
+    chosen = [spec for spec in mentioned if not any(spec.route in other.overrides for other in mentioned)]
+    return [spec for spec, _ in available if spec in chosen
+            or (chosen and spec.joins == "with_others" and any(c.route != spec.route for c in chosen))]
 
 
-def allowed_critics(available: list[tuple[AgentSpec, RouteInfo]], author: str,
-                    author_sources: frozenset[str]) -> list[AgentSpec]:
-    """Reviewers other than the author that read a source the author did not (a same-source critic
-    could only confirm its figures)."""
-    return [spec for spec, _ in available
-            if spec.review and spec.route != author and not (spec.sources and spec.sources <= author_sources)]
+def clean(board: Board, speakers: Sequence[str]) -> Board:
+    """Make a board safe to route on: routes only of agents that answered, `fixable_by` only of the
+    conflict's own routes."""
+    def keep(routes: Sequence[str], allowed: Sequence[str]) -> list[str]:
+        return [r for r in dict.fromkeys(routes) if r in allowed]
+
+    conflicts = []
+    for conflict in board.conflicts:
+        routes = keep(conflict.routes, speakers)
+        conflicts.append(conflict.model_copy(update={"routes": routes, "fixable_by": keep(conflict.fixable_by, routes)}))
+    differences = [d.model_copy(update={"routes": keep(d.routes, speakers)}) for d in board.differences]
+    return board.model_copy(update={"conflicts": conflicts, "differences": differences})
 
 
-def coerce(verdict: Verdict, allowed: list[AgentSpec]) -> Verdict:
-    """Make a verdict safe to route on: a critic outside `allowed` becomes the first allowed one."""
-    update: dict = {}
-    if verdict.action == "needs_human" and not verdict.question.strip():
-        update = {"action": "approve", "critic": None}
-    elif verdict.action in ("critique", "revise"):
-        if not allowed:
-            update = {"action": "approve" if verdict.action == "critique" else "revise", "critic": None}
-        elif verdict.critic not in [spec.route for spec in allowed]:
-            update = {"critic": allowed[0].route}
-    else:
-        update = {"critic": None}
-    return verdict.model_copy(update=update)
-
-
-async def ask_judge(messages: list[AnyMessage], team: dict, allowed: list[AgentSpec],
-                    config: RunnableConfig) -> Verdict:
+async def ask_board(messages: list[AnyMessage], answers: list[dict], config: RunnableConfig) -> Board:
     """One model call; `config` carries the usage counter's callbacks."""
     settings = get_settings()
     question = next((m.text for m in reversed(messages) if isinstance(m, HumanMessage)), "")
-    critiques = "\n\n".join(f"{c['critic']}: {c['text']}" for c in team.get("critiques", [])) or "none yet"
-    system = JUDGE_PROMPT.format(
-        critics="\n".join(f"- {spec.route}: {spec.review}" for spec in allowed) or "none: choose approve, revise or needs_human.",
-        turns=team.get("turns", 0), max_turns=settings.team_max_turns, language=reply_language(messages))
-    # Texts go into the message, not a template: drafts may contain braces.
-    human = f"USER MESSAGE:\n{question}\n\nDRAFT:\n{team.get('draft', '')}\n\nCRITIQUES:\n{critiques}"
-    judge = get_chat_model(settings.openrouter_orchestrator_model or None).with_structured_output(
-        verdict_model(allowed), method="function_calling")
-    return coerce(await judge.ainvoke([SystemMessage(system), HumanMessage(human)], config=config), allowed)
+    # Texts go into the message, not a template: answers may contain braces.
+    human = f"USER MESSAGE:\n{question}\n\nANSWERS:\n" + "\n\n".join(f"{a['agent']}:\n{a['text']}" for a in answers)
+    board = get_chat_model(settings.openrouter_orchestrator_model or None).with_structured_output(
+        Board, method="function_calling")
+    system = BOARD_PROMPT.format(language=reply_language(messages))
+    return await board.ainvoke([SystemMessage(system), HumanMessage(human)], config=config)
 
 
-def _merge(*artifacts: dict) -> dict:
+def merge_speeches(old: list[dict] | None, new: list[dict]) -> list[dict]:
+    """Reducer: parallel `speak` tasks each add one entry; `RESET` first starts a new list."""
+    if new and new[0] == RESET:
+        return new[1:]
+    return [*(old or []), *new]
+
+
+class TeamState(AssistantState):
+    speeches: Annotated[list[dict], merge_speeches]  # {round, kind, agent, text, tools, artifacts, failed}
+
+
+def _merge(artifacts: Sequence[dict]) -> dict:
     """Tables and charts of several runs, once per id."""
     merged = {kind: list({item["id"]: item for a in artifacts for item in a.get(kind, [])}.values()) for kind in KINDS}
     return {kind: items for kind, items in merged.items() if items}
 
 
-def _bullets(issues: Sequence[str]) -> str:
-    return "\n".join(f"- {issue}" for issue in issues)
+def _tools(messages: Sequence[AnyMessage]) -> list[dict]:
+    results = {m.tool_call_id: m for m in messages if isinstance(m, ToolMessage)}
+    return [{"name": c["name"], "args": c["args"],
+             "result": (r.text or str(r.content))[:TOOL_RESULT_PREVIEW] if (r := results.get(c["id"])) else ""}
+            for m in messages if isinstance(m, AIMessage) for c in m.tool_calls if c["name"] not in MEMORY_TOOL_NAMES]
+
+
+def _rounds(speeches: Sequence[dict]) -> list[dict]:
+    rounds: dict[int, dict] = {}
+    for s in speeches:
+        entry = rounds.setdefault(s["round"], {"round": s["round"], "kind": s["kind"], "answers": []})
+        entry["answers"].append({"agent": s["agent"], "text": s["text"], "tools": s["tools"]})
+    return list(rounds.values())
+
+
+def _latest(speeches: Sequence[dict], routes: Sequence[str]) -> list[dict]:
+    """Each listed agent's newest entry, in the order of `routes`."""
+    newest = {s["agent"]: s for s in speeches}
+    return [newest[r] for r in routes if r in newest]
+
+
+def _bullets(lines: Sequence[str]) -> str:
+    return "\n".join(f"- {line}" for line in lines) or "none"
 
 
 def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
@@ -124,133 +144,119 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
     def emit(event: dict) -> None:
         get_stream_writer()(event)
 
-    def announce(phase: str, agent: str, turn: int) -> None:
-        emit({"type": "team", "phase": phase, "agent": agent, "turn": turn, "max_turns": get_settings().team_max_turns})
-
-    async def run(route: str, messages: list[AnyMessage], runtime: Runtime[AgentContext], config: RunnableConfig):
-        state = await agents[route].ainvoke({"messages": messages}, config, context=runtime.context)
-        return by_route[route].result(state), collect(state.get("messages", []))
+    def sends(routes: Sequence[str], rnd: int, kind: str, notes: Mapping[str, str], messages) -> list[Send]:
+        emit({"type": "round", "round": rnd, "max_rounds": get_settings().team_max_rounds, "kind": kind,
+              "agents": list(routes)})
+        return [Send("speak", {"route": r, "round": rnd, "kind": kind, "note": notes[r], "messages": messages})
+                for r in routes]
 
     async def ask_orchestrator(state: AssistantState, runtime: Runtime[AgentContext], note: str = ""):
-        """(handoff route, None) or (None, the orchestrator's answer)."""
-        command = await orchestrator({**state, "team_note": note} if note else state, runtime)
-        if command.goto in by_route:
-            return command.goto, None
-        return None, command.update["messages"][0]
+        """The orchestrator node's Command for this thread (`note` as its hidden team message)."""
+        return await orchestrator({**state, "team_note": note} if note else state, runtime)
 
-    def force(team: dict, reason: str) -> dict:
-        """Mark the last verdict as a forced stop and say what stayed open."""
-        verdicts = team["verdicts"]
-        if verdicts:
-            verdicts = [*verdicts[:-1], {**verdicts[-1], "forced": True}]
-            emit({"type": "verdict", **verdicts[-1]})
-        return {**team, "verdicts": verdicts, "open": reason}
-
-    def failed(team: dict, route: str, exc: Exception) -> Command:
-        log.exception("Team step by %s failed", route)
-        critiques = [*team["critiques"], {"critic": route, "text": f"failed: {type(exc).__name__}", "turn": team["turns"]}]
-        return Command(update={"team": force({**team, "critiques": critiques}, FAILED_STEP)}, goto="synthesize")
-
-    async def delegate(state: AssistantState, runtime: Runtime[AgentContext], config: RunnableConfig) -> dict:
+    async def pick(state: TeamState, runtime: Runtime[AgentContext], config: RunnableConfig) -> Command:
         messages = state["messages"]
         available = await available_agents(runtime.context.user_id, specs)
-        route = await asyncio.to_thread(obvious_route, messages[-1].text, available)
-        if route and not by_route[route].answers_directly:
-            route = None
-        announce("delegate", route or ORCHESTRATOR, 0)
-        draft, artifacts, asked = "", {}, []
-        if route is None:
-            route, answer = await ask_orchestrator(state, runtime)
-            if answer is not None:
-                draft, artifacts, asked = answer.text, collect([answer]), answer.additional_kwargs.get("asked", [])
-        if route:
-            draft, artifacts = await run(route, messages, runtime, config)
-        sources = by_route[route].sources if route else frozenset().union(*(by_route[r].sources for r in asked))
-        team = {"phase": "delegate", "author": route or ORCHESTRATOR, "author_sources": sorted(sources), "critic": None, "draft": draft, "critiques": [],
-                "verdicts": [], "turns": 0, "question": "", "issues": [], "open": "", "artifacts": artifacts}
-        return {"team": team}  # a fresh debate: nothing of an earlier message's carries over
+        chosen = [spec.route for spec in participants(available, messages[-1].text)]
+        if not chosen:
+            command = await ask_orchestrator(state, runtime)
+            if command.goto not in by_route:
+                return Command(goto=END, update=command.update)
+            # It handed off: that agent answers on the thread, as in normal mode.
+            spec = by_route[command.goto]
+            result = await agents[spec.route].ainvoke({"messages": messages}, config, context=runtime.context)
+            turn = turn_messages(result.get("messages", []))
+            answer = AIMessage(spec.result(result), name=spec.message_names[0], additional_kwargs=collect(turn))
+            return Command(goto=END, update={"messages": [answer]})
+        note = ROUND_MESSAGE.format(language=reply_language(messages))
+        team = {"participants": chosen, "round": 1, "rounds": [], "boards": [], "forced": False, "artifacts": {},
+                "question": ""}  # a fresh debate: nothing of an earlier message's carries over
+        return Command(update={"team": team, "speeches": [RESET]},
+                       goto=sends(chosen, 1, "answer", {r: note for r in chosen}, messages))
 
-    async def judge(state: AssistantState, runtime: Runtime[AgentContext], config: RunnableConfig) -> Command:
-        team = state["team"]
-        available = await available_agents(runtime.context.user_id, specs)
-        verdict = await ask_judge(state["messages"], team, allowed_critics(available, team["author"], frozenset(team["author_sources"])), config)
-        cut = verdict.action in ("critique", "revise") and team["turns"] >= get_settings().team_max_turns
-        record = {"action": verdict.action, "critic": verdict.critic, "issues": verdict.issues,
-                  "turn": team["turns"], "forced": cut, "explanation": verdict.explanation}
-        emit({"type": "verdict", **record})
-        team = {**team, "verdicts": [*team["verdicts"], record], "critic": verdict.critic, "issues": verdict.issues}
-        if cut:
-            return Command(update={"team": {**team, "open": _bullets(verdict.issues) or CUT_SHORT}}, goto="synthesize")
-        if verdict.action == "needs_human":
-            emit({"type": "needs_human", "question": verdict.question})
-            return Command(update={"team": {**team, "question": verdict.question},
-                                   "messages": [AIMessage(verdict.question, name=ORCHESTRATOR)]}, goto="pause")
-        goto = {"approve": "synthesize", "critique": "critique", "revise": "refine"}[verdict.action]
-        return Command(update={"team": team}, goto=goto)
+    async def speak(job, runtime: Runtime[AgentContext], config: RunnableConfig) -> dict:
+        route, spec = job["route"], by_route[job["route"]]
+        emit({"type": "speaker", "agent": route, "ns": config["configurable"]["checkpoint_ns"]})
+        context = dataclasses.replace(runtime.context, sources=tuple(sorted(spec.sources)))
+        messages = [*job["messages"], HumanMessage(job["note"], name=TEAM)]
+        entry = {"round": job["round"], "kind": job["kind"], "agent": route, "tools": [], "artifacts": {}, "failed": False}
+        try:
+            result = await agents[route].ainvoke({"messages": messages}, config, context=context)
+        except (openai.RateLimitError, openai.AuthenticationError):
+            raise
+        except Exception as exc:  # noqa: BLE001 - the user still gets an answer from the others
+            log.exception("Team step by %s failed", route)
+            return {"speeches": [{**entry, "text": f"failed: {type(exc).__name__}", "failed": True}]}
+        turn = turn_messages(result.get("messages", []))
+        return {"speeches": [{**entry, "text": spec.result(result), "tools": _tools(turn), "artifacts": collect(turn)}]}
 
-    async def pause(state: AssistantState) -> Command:
+    async def judge(state: TeamState, runtime: Runtime[AgentContext], config: RunnableConfig) -> Command:
+        team, speeches, settings = state["team"], state["speeches"], get_settings()
+        rnd, messages = team["round"], state["messages"]
+        answers = _latest(speeches, team["participants"])
+        board = clean(await ask_board(messages, answers, config), [a["agent"] for a in answers])
+        fixable = [c for c in board.conflicts if c.fixable_by]
+        failed = team["forced"] or any(s["failed"] for s in speeches if s["round"] == rnd)
+        asks = bool(board.question.strip())
+        again = bool(fixable) and not asks and not failed and rnd < settings.team_max_rounds
+        forced = failed or (bool(fixable) and not asks and not again)
+        record = {"round": rnd, **board.model_dump(), "forced": forced}
+        emit({"type": "board", **record})
+        team = {**team, "rounds": _rounds(speeches), "boards": [*team["boards"], record], "forced": forced,
+                "artifacts": _merge([s["artifacts"] for s in speeches])}
+        if asks:
+            emit({"type": "needs_human", "question": board.question})
+            return Command(update={"team": {**team, "question": board.question},
+                                   "messages": [AIMessage(board.question, name=ORCHESTRATOR)]}, goto="pause")
+        if not again:
+            return Command(update={"team": team}, goto="synthesize")
+        routes = [r for r in team["participants"] if any(r in c.routes for c in fixable)]
+        language, notes = reply_language(messages), {}
+        for r in routes:
+            mine = [c for c in fixable if r in c.routes]
+            others = [o for o in _latest(speeches, team["participants"]) if o["agent"] != r
+                      and any(o["agent"] in c.routes for c in mine)]
+            notes[r] = CONFLICT_MESSAGE.format(
+                conflicts=_bullets([f"{c.claim} ({c.issue})" for c in mine]),
+                others="\n\n".join(f"{o['agent']}:\n{o['text']}" for o in others) or "none",
+                own=next(s["text"] for s in reversed(speeches) if s["agent"] == r), language=language)
+        return Command(update={"team": {**team, "round": rnd + 1}}, goto=sends(routes, rnd + 1, "conflict", notes, messages))
+
+    async def pause(state: TeamState) -> Command:
         # Only this: on resume the node runs again from its start.
         reply = interrupt({"question": state["team"]["question"]})
         return Command(update={"messages": [HumanMessage(reply)]}, goto="judge")
 
-    async def critique(state: AssistantState, runtime: Runtime[AgentContext], config: RunnableConfig) -> Command:
+    async def synthesize(state: TeamState, runtime: Runtime[AgentContext]) -> dict:
         team, messages = state["team"], state["messages"]
-        route, turn = team["critic"], team["turns"] + 1
-        announce("critique", route, turn)
-        note = HumanMessage(CRITIQUE_MESSAGE.format(draft=team["draft"], language=reply_language(messages)), name=TEAM)
-        try:
-            text, _ = await run(route, [*messages, note], runtime, config)
-        except (openai.RateLimitError, openai.AuthenticationError):
-            raise
-        except Exception as exc:  # noqa: BLE001 - the user still gets an answer from the latest draft
-            return failed(team, route, exc)
-        critiques = [*team["critiques"], {"critic": route, "text": text, "turn": turn}]
-        return Command(update={"team": {**team, "phase": "critique", "critiques": critiques, "turns": turn}}, goto="judge")
-
-    async def refine(state: AssistantState, runtime: Runtime[AgentContext], config: RunnableConfig) -> Command:
-        team, messages = state["team"], state["messages"]
-        author, turn = team["author"], team["turns"] + 1
-        announce("refine", author, turn)
-        note = REFINE_MESSAGE.format(draft=team["draft"], issues=_bullets(team["issues"]), language=reply_language(messages))
-        try:
-            if author == ORCHESTRATOR:  # a handoff is not followed: the draft stays
-                _, answer = await ask_orchestrator(state, runtime, note)
-                text, artifacts = (answer.text, collect([answer])) if answer is not None else ("", {})
-            else:
-                text, artifacts = await run(author, [*messages, HumanMessage(note, name=TEAM)], runtime, config)
-        except (openai.RateLimitError, openai.AuthenticationError):
-            raise
-        except Exception as exc:  # noqa: BLE001 - the user still gets an answer from the latest draft
-            return failed(team, author, exc)
-        team = {**team, "phase": "refine", "draft": text or team["draft"], "turns": turn,
-                "artifacts": _merge(team["artifacts"], artifacts)}
-        if team["critic"] and turn < get_settings().team_max_turns:
-            return Command(update={"team": team}, goto="critique")
-        if turn >= get_settings().team_max_turns:
-            team = force(team, UNREVIEWED)
-        return Command(update={"team": team}, goto="synthesize")
-
-    async def synthesize(state: AssistantState, runtime: Runtime[AgentContext]) -> dict:
-        team, messages = state["team"], state["messages"]
-        announce("synthesize", ORCHESTRATOR, team["turns"])
-        note = TEAM_MESSAGE.format(
-            draft=team["draft"], language=reply_language(messages), issues=team["open"] or "none",
-            critiques="\n\n".join(f"{c['critic']}: {c['text']}" for c in team["critiques"]) or "none",
-            explanations=_bullets([v["explanation"] for v in team["verdicts"] if v.get("explanation")]) or "none")
-        _, answer = await ask_orchestrator(state, runtime, note)
-        answer = answer or AIMessage(team["draft"], name=ORCHESTRATOR)  # it handed off: the draft stands
-        transcript = {key: team[key] for key in ("author", "draft", "critiques", "verdicts", "turns")}
-        kwargs = {**answer.additional_kwargs, **_merge(team["artifacts"], collect([answer])), "team": transcript}
+        emit({"type": "synthesize"})
+        answers = _latest(state["speeches"], team["participants"])
+        board = Board(**team["boards"][-1])
+        transcript = {key: team[key] for key in ("participants", "rounds", "boards", "forced")}
+        only = by_route[team["participants"][0]]
+        if len(answers) == 1 and len(team["participants"]) == 1 and not board.conflicts and not team["forced"] \
+                and only.answers_directly:
+            answer = AIMessage(answers[0]["text"], name=only.message_names[0])
+        else:
+            note = TEAM_MESSAGE.format(
+                answers="\n\n".join(f"{a['agent']}:\n{a['text']}" for a in answers),
+                differences=_bullets([f"{', '.join(d.routes)}: {d.explanation}" for d in board.differences]),
+                conflicts=_bullets([f"{c.claim} ({', '.join(c.routes)}): {c.issue}" for c in board.conflicts]),
+                language=reply_language(messages))
+            command = await ask_orchestrator(state, runtime, note)
+            handed_off = command.goto in by_route  # it handed off: the answers stand
+            answer = AIMessage("\n\n".join(a["text"] for a in answers), name=ORCHESTRATOR) if handed_off \
+                else command.update["messages"][0]
+        kwargs = {**answer.additional_kwargs, **_merge([team["artifacts"], collect([answer])]), "team": transcript}
         return {"messages": [answer.model_copy(update={"additional_kwargs": kwargs})]}
 
-    graph = StateGraph(AssistantState, context_schema=AgentContext)
-    graph.add_node("delegate", delegate)
-    graph.add_node("judge", judge, destinations=("synthesize", "pause", "critique", "refine"))
-    graph.add_node("critique", critique, destinations=("judge", "synthesize"))
-    graph.add_node("refine", refine, destinations=("critique", "synthesize"))
+    graph = StateGraph(TeamState, context_schema=AgentContext)
+    graph.add_node("pick", pick, destinations=("speak", END))
+    graph.add_node("speak", speak)
+    graph.add_node("judge", judge, destinations=("speak", "synthesize", "pause"))
     graph.add_node("pause", pause, destinations=("judge",))
     graph.add_node("synthesize", synthesize)
-    graph.add_edge(START, "delegate")
-    graph.add_edge("delegate", "judge")
+    graph.add_edge(START, "pick")
+    graph.add_edge("speak", "judge")
     graph.add_edge("synthesize", END)
     return graph.compile(name=TEAM)

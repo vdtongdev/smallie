@@ -80,63 +80,52 @@ ATTEMPT_MESSAGE = """ATTEMPT (not visible to the user): the {route} specialist a
 
 Don't run those searches again. If its reply does answer the question after all, give that answer. Otherwise ask `ask_{route}` once more only with a clearly different, more specific question (e.g. naming the file or the exact data), use another specialist or a web search where the rules above allow it, or answer yourself when it needs none of them. If nothing can answer it, tell the user plainly what isn't available."""
 
-# Team mode (app/orchestration/team.py). {critics}: one "- route: what it can check" line per allowed critic.
-JUDGE_PROMPT = """You are the judge of a team that answers the user's latest message. An author has written a draft; you decide the next step from what is in front of you: the user's message, the draft and the critiques so far. Don't use outside knowledge to decide whether a fact is true. Turn {turns} of {max_turns}.
+# Team mode (app/orchestration/team.py). Hidden message for each participant in the first round: the thread plus this, as the last message (name TEAM).
+ROUND_MESSAGE = """TEAM ROUND (not visible to the user). Answer the user's latest message with your own sources only. Give each figure or claim with its source and as-of date. Say plainly when your sources hold nothing on it, and don't guess. Write in {language}."""
 
-CRITICS YOU MAY CHOOSE:
-{critics}
+# Hidden message for the participants of a conflict round. {conflicts}: bullets, one per conflict;
+# {others}: the other side's answers; {own}: this agent's earlier answer.
+CONFLICT_MESSAGE = """TEAM CONFLICT (not visible to the user). The team found a conflict between your answer and another source's answer to the user's latest message.
 
-Return exactly one action:
-- approve: the draft answers the message and no critique above leaves a problem the author can fix. Choose this for a short or simple answer (a greeting, a definition, small talk), and whenever there are no critics above. Two cases need `explanation` (one or two sentences, with each side's value and source):
-  - The critique differs from the draft, but both sides explain the difference (as-of date, definition, scope): both are right.
-  - The critique conflicts with the draft and nobody on the team can fix it: describe the conflict.
-- critique: the draft states facts, figures or claims about the user's files that a critic above can check. Set `critic` to one route from the list. Never choose this for a trivial answer, and never choose a critic whose critique is already above.
-- revise: a critique above shows a conflict the author can fix with its own tools (a wrong query, a wrong ticker or name, a claim its data doesn't support). List the problems in `issues` (at most 5, one short sentence each), and set `critic` to the route that should check the corrected draft (leave it empty when the list above is empty).
-- needs_human: the draft can't go on without information only the user has (for example, which of several files they mean). Write one short question in `question`, in {language}. Never choose this for a gap that a critic or a search could fill.
+CONFLICTS:
+{conflicts}
+
+THE OTHER SIDE'S ANSWERS:
+{others}
+
+YOUR EARLIER ANSWER:
+{own}
+
+Check the point again with your own tools. Correct your answer if it was wrong, or say why it stands, with the source and as-of date of each figure. Return your whole answer, not only the change. Write in {language}."""
+
+# System prompt of the board call. {language}: the reply language, for the question.
+BOARD_PROMPT = """You are the board of a team that answers the user's latest message. Several agents answered it, each from its own sources. Sort their answers from what is in front of you: the user's message and the answers. Don't use outside knowledge to decide whether a fact is true.
+
+Fill in these lists:
+- agreements: points the answers agree on, one short sentence each.
+- differences: answers that differ, but both sides explain the difference (as-of date, definition, scope). Both are right. Give the `routes` involved and the explanation, with each side's value and source.
+- conflicts: answers that differ with no explanation that makes both right. Give the `routes` involved, the `claim` in dispute, and the `issue` in one sentence. Put in `fixable_by` the routes among them that can fix it with their own tools (a wrong query, a wrong name, a claim their data doesn't support). Leave `fixable_by` empty when nobody involved can settle it, for example when two sources of different kinds each hold a different value.
 
 Never decide that a source is right because of its kind (database, file, web page, model). Any source can be wrong.
 
-Leave `issues` empty unless the action is revise. Leave `question` empty unless the action is needs_human. Leave `explanation` empty unless the action is approve after a critique."""
+Set `question` only when the answers can't go on without information only the user has (for example, which of several files they mean). Write it as one short question in {language}. Leave it empty when an agent or a search could fill the gap.
 
-# Hidden message for the critic: the thread plus this, as the last message (name TEAM).
-CRITIQUE_MESSAGE = """CRITIQUE REQUEST (not visible to the user). Another agent drafted this answer to the user's latest message:
+Write every text field in {language}. Leave a list empty when it has no entry."""
 
-{draft}
+# Hidden message for the orchestrator's final write-up. {differences} and {conflicts} are "none" when empty.
+TEAM_MESSAGE = """TEAM RESULT for the user's latest message (not visible to the user). The team's work on it is done: write the answer from this now, without calling any tool. Write it in {language}, whatever language the answers are in.
 
-Check it with your own tools. For every figure or claim you check, give your source and its date, and say whether a difference from the draft could come from date, definition or scope. List each concrete problem with the evidence you found (the source, the figure or the passage). If it holds, say so in one sentence. Don't rewrite the answer. Write in {language}."""
+ANSWERS:
+{answers}
 
-# Hidden message for the author: the thread plus this, as the last message (name TEAM).
-REFINE_MESSAGE = """REVISION REQUEST (not visible to the user). Your draft of the answer to the user's latest message:
+EXPLAINED DIFFERENCES:
+{differences}
 
-{draft}
+OPEN CONFLICTS:
+{conflicts}
 
-A reviewer found these problems:
-{issues}
-
-Fix each problem, using your tools where a fix needs data. Return the whole corrected answer, not only the changes. Write in {language}."""
-
-# Hidden message for the orchestrator's final write-up; {issues} is "none" unless the debate was cut off.
-TEAM_MESSAGE = """TEAM RESULT for the user's latest message (not visible to the user). The team's work on it is done: write the answer from this now, without calling any tool. Write it in {language}, whatever language the draft and critiques are in.
-
-FINAL DRAFT:
-{draft}
-
-CRITIQUES:
-{critiques}
-
-OPEN ISSUES:
-{issues}
-
-EXPLANATIONS:
-{explanations}
-
-Use the final draft as the base, and correct it where a critique above shows it wrong. When EXPLANATIONS is not "none", give each source's value with its source and date, plus the explanation, so the user sees both. When EXPLANATIONS describes a conflict nobody settled, or OPEN ISSUES is not "none", show both sides, say plainly that the team could not settle it, and do not pick one."""
+Combine the answers into one answer to the user's message. Where sources gave different values and the differences are explained, give each source's value with its source and date, plus the explanation, so the user sees both. Where OPEN CONFLICTS is not "none", show both sides, say plainly that the team could not settle it, and do not pick one. When an answer says it failed, say plainly which part is missing."""
 
 # Results of tool calls the orchestrator may not make (`no_repeats` in orchestrator.py).
 REPEATED_CALL = "Not run: this exact call was already made for this message; its result is above. Use it, or write the answer."
 ALREADY_ASKED = "Not run: this specialist was already asked enough about this message and had nothing more. Write the answer with what you have, saying plainly what is missing."
-
-# What stayed open when the debate was cut short (the {issues} of TEAM_MESSAGE).
-UNREVIEWED = "The last revision of the draft was not reviewed."
-FAILED_STEP = "A team member failed, so the draft was not fully checked."
-CUT_SHORT = "The turn limit was reached before the draft was approved."

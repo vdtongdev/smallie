@@ -59,6 +59,18 @@
 - [ ] **Step 4:** `uv run pytest -q -rs`, expect PASS
 - [ ] **Step 5: Commit** `feat: tools carry a source; team requests limit them`
 
+### Task 2b: Testing rule (user request, 2026-10-25)
+
+**Files:**
+- Create: `.claude/rules/testing.md` (loaded like the other `.claude/rules/*.md`)
+
+The rule, in the user's words: "Never create a test, or adjust a test so that it can be passed." Meaning: a test states the behaviour the spec or the user asked for, written before or independent of the code; never write a test shaped around what the code happens to do, and never weaken, loosen, skip or delete a failing test (or its assertions, fixtures or inputs) to make it pass. When a test fails, fix the code; if the test itself contradicts the spec, stop and report it instead of changing it. Write it with `writing-llm-document`.
+
+- [ ] **Step 1:** write the rule file
+- [ ] **Step 2:** commit `docs: testing rule` (explicit path only)
+
+From this task on, every implementer and verifier brief quotes the rule, and verifiers check test diffs against it.
+
 ### Task 3: Round-table graph
 
 **Files:**

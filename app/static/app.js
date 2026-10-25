@@ -622,6 +622,7 @@ async function sendMessage(text) {
   let waiting = false; // showing "thinking" after a fallback
   let synthesized = false; // the team's write-up started
   const answerOf = (agent) => {
+    if (!act.rounds.length) act.rounds.push({ round: 1, max: 0, kind: "answer", agents: [agent], answers: [], board: null });
     const answers = act.rounds[act.rounds.length - 1].answers;
     return answers.find((a) => a.agent === agent) || answers[answers.push({ agent, text: "", tools: [] }) - 1];
   };
@@ -646,6 +647,7 @@ async function sendMessage(text) {
       buffer = events.pop();
       for (const raw of events) {
         if (!raw.startsWith("data: ")) continue;
+        try { // one bad event is skipped; a network or reader error still ends the stream below
         const event = JSON.parse(raw.slice(6));
         switch (event.type) {
           case "conversation":
@@ -741,6 +743,9 @@ async function sendMessage(text) {
           case "error":
             addError(event.message);
             break;
+        }
+        } catch (err) {
+          console.warn("Skipped a bad stream event", raw, err);
         }
       }
     }

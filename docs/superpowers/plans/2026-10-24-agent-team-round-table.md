@@ -87,6 +87,12 @@
 - [ ] **Step 4:** `uv run pytest -q -rs`, expect PASS (existing non-team suites unchanged)
 - [ ] **Step 5: Commit** `feat: team round table replaces the relay`
 
+### Task 1 findings (2026-10-25, spike scripts in the session scratchpad)
+
+- **Mapping works:** every chunk from a `speak` task has `namespace[0] == "speak:<task_id>"`, unique per parallel task. `speak` writes `{"type": "speaker", "agent": route, "ns": config["configurable"]["checkpoint_ns"]}` before invoking the agent; it reaches the stream at namespace `()` before any inner chunk. Local and real remote sql: 0 unmapped chunks. Match on `namespace[0]` only (inner depth varies: `(speak:T,)`, `(speak:T, gather:G)`, `(speak:T, run:R)`). The message-metadata namespace is useless for remote agents (it is the server's own).
+- **So in Task 4:** the `ns -> agent` dict lives in `_events_from` (stateful); strip the `speak:` segment before the `tools` / `SILENT_STEPS` / `_step` filters (`_step` would otherwise read `speak` as a route); remote `messages` chunks are dicts (`_message`/`as_message` already handle them; test it).
+- **Language drift cause:** the admin's memory fact "User prefers language Vietnamese" plus the first-draft prompts naming no language; the write-up (which names it) answered in English, but the draft's tokens had already streamed into the answer bubble. Round tokens going to the Activity popup (Task 5) and `ROUND_MESSAGE` naming `{language}` (Task 3) address both; whether a stored language preference should override the message language is a product decision for the user.
+
 ### Task 4: Round events
 
 **Files:**

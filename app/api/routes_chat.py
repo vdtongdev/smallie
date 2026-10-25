@@ -175,11 +175,13 @@ async def _events_from(stream) -> AsyncIterator[dict]:
     speakers: dict[str, str] = {}  # "speak:<task id>" -> route, from the team's internal speaker event
     async for namespace, mode, chunk in stream:
         if mode == "custom" and isinstance(chunk, dict) and chunk.get("type") == "speaker":
-            speakers[chunk["ns"]] = chunk["agent"]
+            speakers[chunk["ns"].rsplit("|", 1)[-1]] = chunk["agent"]  # ns is "team:<id>|speak:<task id>"
             continue
-        agent = speakers.get(namespace[0]) if namespace else None  # inner depth varies: match the first segment
+        # The team is a subgraph node, so `speak:<id>` sits after its parent segment; inner depth varies too.
+        at = next((i for i, segment in enumerate(namespace) if segment in speakers), None)
+        agent = speakers[namespace[at]] if at is not None else None
         if agent:
-            namespace = namespace[1:]
+            namespace = namespace[at:]  # keep `speak` so the chunk still counts as inside a subgraph
         else:
             step = _step(namespace)
             if step and step != current:

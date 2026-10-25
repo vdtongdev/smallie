@@ -246,12 +246,12 @@ async def test_round_events_carry_the_agent():
     call = AIMessage(content="", tool_calls=[{"name": "run_sql", "args": {"query": "SELECT 1"}, "id": "c1"}])
     result = {"type": "tool", "content": "rows", "name": "search", "tool_call_id": "c2"}
     events = await _collect([
-        speaker("sql", "speak:A"), speaker("research", "speak:B"),
-        (("speak:A",), "messages", (AIMessageChunk(content="sql says"), TOKEN)),
-        (("speak:B", "gather:1"), "messages", ({"type": "AIMessageChunk", "content": "notes"}, TOKEN)),
-        (("speak:A", "tools:2"), "updates", {"model": {"messages": [call]}}),
-        (("speak:B", "run:3"), "updates", {"tools": {"messages": [result]}}),
-        (("speak:A",), "messages", (AIMessageChunk(content=" more"), TOKEN)),
+        speaker("sql", "team:T|speak:A"), speaker("research", "team:T|speak:B"),
+        (("team:T", "speak:A"), "messages", (AIMessageChunk(content="sql says"), TOKEN)),
+        (("team:T", "speak:B", "gather:1"), "messages", ({"type": "AIMessageChunk", "content": "notes"}, TOKEN)),
+        (("team:T", "speak:A", "tools:2"), "updates", {"model": {"messages": [call]}}),
+        (("team:T", "speak:B", "run:3"), "updates", {"tools": {"messages": [result]}}),
+        (("team:T", "speak:A"), "messages", (AIMessageChunk(content=" more"), TOKEN)),
     ])
     assert events == [
         {"type": "token", "text": "sql says", "agent": "sql"},
@@ -278,3 +278,31 @@ def test_single_participant_reply_badge():
     from app.api.routes_conversations import _serialize
 
     assert _serialize(AIMessage("Answer.", name="sql_agent"))["agent"] == "sql"
+
+
+async def test_real_team_stream_tags_agents(monkeypatch):
+    """The live graph: the team is a subgraph node, so speakers sit at ("team:<id>", "speak:<id>", ...)."""
+    from tests import test_team
+    from tests.scripted import per_agent
+    from tests.test_orchestrator import _assistant
+
+    call = AIMessage(content="", tool_calls=[{"name": "run_sql", "args": {"query": "SELECT 1"}, "id": "c1"}])
+    model = per_agent(sql=[call, AIMessage("sql answer")], research=[AIMessage("research notes")],
+                      orchestrator=[AIMessage("final writeup")])
+    test_team._board(monkeypatch, test_team.Board())
+    assistant = _assistant(monkeypatch, model)
+    stream = assistant.astream(test_team._ask(), test_team.CONFIG, context=test_team.TEAM_CONTEXT,
+                               stream_mode=["messages", "updates", "custom"], subgraphs=True)
+    events = [e async for e in _events_from(stream)]
+
+    def text(agent):
+        return "".join(e["text"] for e in events if e["type"] == "token" and e.get("agent") == agent)
+
+    assert text("sql").split() == ["sql", "answer"] and text("research").split() == ["research", "notes"]
+    assert any(e["type"] == "tool_call" and e["name"] == "run_sql" and e["agent"] == "sql" for e in events)
+    assert any(e["type"] == "tool_result" and e["name"] == "run_sql" and e["agent"] == "sql" for e in events)
+    assert not [e for e in events if e["type"] == "speaker"]
+    after = events[[e["type"] for e in events].index("synthesize"):]
+    writeup = [e for e in after if e["type"] == "token"]
+    assert "".join(e["text"] for e in writeup).split() == ["final", "writeup"]
+    assert all("agent" not in e for e in writeup)

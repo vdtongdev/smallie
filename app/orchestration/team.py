@@ -145,8 +145,8 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         get_stream_writer()(event)
 
     def sends(routes: Sequence[str], rnd: int, kind: str, notes: Mapping[str, str], messages) -> list[Send]:
-        emit({"type": "round", "round": rnd, "max_rounds": get_settings().team_max_rounds, "kind": kind,
-              "agents": list(routes)})
+        emit({"type": "round", "round": rnd, "max_rounds": get_settings().team_max_rounds + 1,  # total: round 1 plus the conflict rounds allowed
+              "kind": kind, "agents": list(routes)})
         return [Send("speak", {"route": r, "round": rnd, "kind": kind, "note": notes[r], "messages": messages})
                 for r in routes]
 
@@ -198,7 +198,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         fixable = [c for c in board.conflicts if c.fixable_by]
         failed = team["forced"] or any(s["failed"] for s in speeches if s["round"] == rnd)
         asks = bool(board.question.strip())
-        again = bool(fixable) and not asks and not failed and rnd < settings.team_max_rounds
+        again = bool(fixable) and not asks and not failed and rnd <= settings.team_max_rounds  # round 1 is the answer round; conflict rounds are 2..cap+1
         forced = failed or (bool(fixable) and not asks and not again)
         record = {"round": rnd, **board.model_dump(), "forced": forced}
         emit({"type": "board", **record})

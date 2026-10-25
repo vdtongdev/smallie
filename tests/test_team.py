@@ -257,13 +257,14 @@ async def test_unfixable_conflict_goes_to_write_up(monkeypatch):
         assert (await _thread(assistant))[-1].additional_kwargs["team"]["forced"] is False
 
 
-async def test_cap_forces_write_up_at_the_round_limit(monkeypatch):
+async def test_cap_forces_write_up_after_the_conflict_round_limit(monkeypatch):
     _board(monkeypatch, then=_conflict(["sql"]))
     model, assistant, _ = _three(monkeypatch, [])
     chunks = await _stream(assistant, _ask(THREE))
 
-    limit = get_settings().team_max_rounds
-    assert [e["round"] for e in _events(chunks, "round")] == list(range(1, limit + 1))
+    limit = get_settings().team_max_rounds  # conflict rounds after round 1
+    assert [e["round"] for e in _events(chunks, "round")] == list(range(1, limit + 2))
+    assert all(e["max_rounds"] == limit + 1 for e in _events(chunks, "round"))
     assert _events(chunks, "board")[-1]["forced"] is True
     assert (await _thread(assistant))[-1].additional_kwargs["team"]["forced"] is True
     assert len(_events(chunks, "synthesize")) == 1 and len(_writeups(model)) == 1

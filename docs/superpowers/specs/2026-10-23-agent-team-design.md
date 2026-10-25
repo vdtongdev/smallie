@@ -174,7 +174,7 @@ Inside a round every `token`, `tool_call` and `tool_result` carries `"agent": "<
 {"type": "board", "round": 1, "agreements": ["…"],
  "differences": [{"routes": ["sql", "research"], "explanation": "…"}],
  "conflicts": [{"routes": ["sql", "docs"], "claim": "…", "fixable_by": ["sql"], "issue": "…"}], "forced": false}
-{"type": "synthesize"}
+{"type": "synthesize"}                          // only when the orchestrator write-up runs; a lone participant's standing answer sends none (its text arrives in `spoke`)
 {"type": "needs_human", "question": "…"}
 ```
 

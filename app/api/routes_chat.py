@@ -28,7 +28,7 @@ from app.core.usage import UsageCounter, add_usage
 router = APIRouter(tags=["chat"])
 log = logging.getLogger(__name__)
 
-TEAM_EVENTS = frozenset({"team", "verdict", "needs_human"})  # custom events of a team turn
+TEAM_EVENTS = frozenset({"round", "board", "synthesize", "needs_human"})  # custom events of a team turn
 
 
 class ChatRequest(BaseModel):
@@ -172,13 +172,21 @@ async def _events_from(stream) -> AsyncIterator[dict]:
     """SSE events for a `subgraphs=True` stream, plus a `step` event whenever a workflow
     moves to another of its steps listed in its spec's `steps`."""
     current = None
+    speakers: dict[str, str] = {}  # "speak:<task id>" -> route, from the team's internal speaker event
     async for namespace, mode, chunk in stream:
-        step = _step(namespace)
-        if step and step != current:
-            current = step
-            yield {"type": "step", "agent": step[0], "name": step[1]}
-        for event in _to_events(mode, chunk, namespace):
-            yield event
+        if mode == "custom" and isinstance(chunk, dict) and chunk.get("type") == "speaker":
+            speakers[chunk["ns"]] = chunk["agent"]
+            continue
+        agent = speakers.get(namespace[0]) if namespace else None  # inner depth varies: match the first segment
+        if agent:
+            namespace = namespace[1:]
+        else:
+            step = _step(namespace)
+            if step and step != current:
+                current = step
+                yield {"type": "step", "agent": step[0], "name": step[1]}
+        for event in _to_events(mode, chunk, namespace, in_round=bool(agent)):
+            yield {**event, "agent": agent} if agent and event["type"] in ("token", "tool_call", "tool_result") else event
 
 
 def _step(namespace: tuple[str, ...]) -> tuple[str, str] | None:
@@ -200,16 +208,17 @@ def _message(value):
         return None
 
 
-def _to_events(mode: str, chunk, namespace: tuple[str, ...] = ()) -> list[dict]:
+def _to_events(mode: str, chunk, namespace: tuple[str, ...] = (), in_round: bool = False) -> list[dict]:
     """SSE events for one stream chunk. `namespace` is () for the assistant graph itself and
-    non-empty for chunks from inside an agent subgraph."""
+    non-empty for chunks from inside an agent subgraph. `in_round`: the chunk is a team
+    speaker's, whose research notes are its answer, so silent steps stream too."""
     if mode == "messages":
         message, metadata = _message(chunk[0]), chunk[1]
         if isinstance(message, AIMessageChunk) and metadata.get("langgraph_node") == "model" and message.text:
             nodes = [segment.split(":", 1)[0] for segment in namespace]
             # A researcher's notes, or an agent the orchestrator called as a tool: the
             # orchestrator writes the answer from their results, so only it streams.
-            if "tools" in nodes or any(node in SILENT_STEPS for node in nodes):
+            if "tools" in nodes or (not in_round and any(node in SILENT_STEPS for node in nodes)):
                 return []
             return [{"type": "token", "text": message.text}]
         return []

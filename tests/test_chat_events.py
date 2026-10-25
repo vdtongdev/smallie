@@ -142,10 +142,15 @@ def test_remote_dict_chunks_become_events():
     ]
 
 
-def test_custom_team_events_pass_through():
-    for chunk in ({"type": "team", "phase": "delegate"}, {"type": "verdict", "action": "approve"},
-                  {"type": "needs_human", "question": "Which year?"}):
+def test_team_custom_events_pass_through():
+    for chunk in ({"type": "round", "round": 1, "kind": "first"}, {"type": "board", "round": 1},
+                  {"type": "synthesize"}, {"type": "needs_human", "question": "Which year?"}):
         assert _to_events("custom", chunk, SUBGRAPH) == [chunk]
+
+
+def test_relay_event_types_are_gone():
+    for chunk in ({"type": "team", "phase": "delegate"}, {"type": "verdict", "action": "approve"}):
+        assert _to_events("custom", chunk, SUBGRAPH) == []
 
 
 def test_other_custom_chunks_are_dropped():
@@ -224,3 +229,52 @@ async def test_paused_turn_is_not_remembered(monkeypatch):
     calls.clear()  # add_usage runs for the stream itself
     await response.background()
     assert calls == []
+
+
+TOKEN = {"langgraph_node": "model"}
+
+
+async def _collect(chunks):
+    async def stream():
+        for chunk in chunks:
+            yield chunk
+    return [e async for e in _events_from(stream())]
+
+
+async def test_round_events_carry_the_agent():
+    speaker = lambda agent, ns: ((), "custom", {"type": "speaker", "agent": agent, "ns": ns})  # noqa: E731
+    call = AIMessage(content="", tool_calls=[{"name": "run_sql", "args": {"query": "SELECT 1"}, "id": "c1"}])
+    result = {"type": "tool", "content": "rows", "name": "search", "tool_call_id": "c2"}
+    events = await _collect([
+        speaker("sql", "speak:A"), speaker("research", "speak:B"),
+        (("speak:A",), "messages", (AIMessageChunk(content="sql says"), TOKEN)),
+        (("speak:B", "gather:1"), "messages", ({"type": "AIMessageChunk", "content": "notes"}, TOKEN)),
+        (("speak:A", "tools:2"), "updates", {"model": {"messages": [call]}}),
+        (("speak:B", "run:3"), "updates", {"tools": {"messages": [result]}}),
+        (("speak:A",), "messages", (AIMessageChunk(content=" more"), TOKEN)),
+    ])
+    assert events == [
+        {"type": "token", "text": "sql says", "agent": "sql"},
+        {"type": "token", "text": "notes", "agent": "research"},
+        {"type": "tool_call", "name": "run_sql", "args": {"query": "SELECT 1"}, "agent": "sql"},
+        {"type": "tool_result", "name": "search", "content": "rows", "agent": "research"},
+        {"type": "token", "text": " more", "agent": "sql"},
+    ]
+
+
+async def test_events_outside_rounds_are_unchanged():
+    call = AIMessage(content="", tool_calls=[{"name": "run_sql", "args": {}, "id": "c1"}])
+    events = await _collect([
+        ((), "updates", {"router": {"route": "sql"}}),
+        (("sql:1",), "messages", (AIMessageChunk(content="Hi"), TOKEN)),
+        (("sql:1",), "updates", {"model": {"messages": [call]}}),
+        (("orchestrator:2", "tools:3"), "messages", (AIMessageChunk(content="dropped"), TOKEN)),
+    ])
+    assert events == [{"type": "agent", "name": "sql"}, {"type": "token", "text": "Hi"},
+                      {"type": "tool_call", "name": "run_sql", "args": {}}]
+
+
+def test_single_participant_reply_badge():
+    from app.api.routes_conversations import _serialize
+
+    assert _serialize(AIMessage("Answer.", name="sql_agent"))["agent"] == "sql"

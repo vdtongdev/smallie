@@ -319,3 +319,17 @@ async def test_orchestrator_answer_records_asked_routes(monkeypatch):
     await _run(assistant, "What is the AAPL market cap and what does handbook.pdf say?")
 
     assert (await _thread(assistant))[-1].additional_kwargs["asked"] == ["sql"]
+
+
+async def test_orchestrator_names_reply_language_every_call(monkeypatch):
+    model = per_agent(orchestrator=[AIMessage("Neither is better.")])
+    assistant = _assistant(monkeypatch, model)
+    context = AgentContext(user_id="u1", memories="- User prefers_language Vietnamese")
+    stream = assistant.astream(
+        {"messages": [HumanMessage("Which one is better?")]}, CONFIG, context=context,
+        stream_mode=["messages", "updates"], subgraphs=True,
+    )
+    [event async for event in _events_from(stream)]
+    system = model.prompts[0][0].content
+    assert "REPLY LANGUAGE for this message: English" in system
+    assert "CITATIONS" not in system  # still the short, non-composing call

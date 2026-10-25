@@ -54,6 +54,7 @@ from app.orchestration.prompts import (
     MENTIONS_NOTE,
     ORCHESTRATOR_SYSTEM,
     PREVIOUS_NOTE,
+    REPLY_LANGUAGE,
     REPEATED_CALL,
     UNAVAILABLE_NOTE,
 )
@@ -192,10 +193,11 @@ def is_composing(messages: Sequence[AnyMessage]) -> bool:
 def compose_section(request: ModelRequest) -> str:
     """This request's notes, plus the format and citation rules once there is something to write
     up: the first (deciding) call stays short, and plain chat doesn't get research formatting."""
+    question = [m for m in request.messages if not (isinstance(m, HumanMessage) and m.name in HIDDEN)]
     notes = f"\n\n{request.runtime.context.notes}" if request.runtime.context.notes else ""
+    notes += REPLY_LANGUAGE.format(language=reply_language(question))
     if not is_composing(request.messages):
         return notes
-    question = [m for m in request.messages if not (isinstance(m, HumanMessage) and m.name in HIDDEN)]
     tables = artifacts_from(request.messages, "tables")  # e.g. from ask_sql, for chart_table
     charts = artifacts_from(request.messages, "charts")
     tables = TABLES_SECTION.format(tables=table_note(tables, charts)) if tables else ""

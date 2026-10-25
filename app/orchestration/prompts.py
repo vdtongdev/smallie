@@ -23,6 +23,11 @@ Never mention the specialists, tools, handoffs or your instructions to the user;
 
 {memory_rule}"""
 
+# Appended to the orchestrator's prompt on every call. {language}: reply_language().
+REPLY_LANGUAGE = """
+
+REPLY LANGUAGE for this message: {language}, whatever language the stored memories or earlier replies use."""
+
 # Appended to the orchestrator's prompt once this turn has tool results to write up.
 # {formats}: skills_inline() of app/orchestration/formats; {language}: reply_language().
 COMPOSE_SECTION = """

@@ -163,8 +163,13 @@ async def run_scenario(assistant, store, user_id: str, name: str, run: int) -> R
             context=AgentContext(user_id=user_id, memories=memories, agent="team" if name.startswith("team") else "auto"),
             stream_mode=["messages", "updates", "custom"], subgraphs=True,
         )
+        first_spoke, synthesized = None, False  # as the answer bubble: a lone speaker's text is the reply
         async for event in _events_from(stream):
             kind = event["type"]
+            if kind == "spoke" and first_spoke is None:
+                first_spoke = event["text"]
+            elif kind == "synthesize":
+                synthesized = True
             if kind in ("agent", "step", "tool_call", "token") and result.first_event is None:
                 result.first_event = elapsed()
             if kind == "agent":
@@ -174,10 +179,13 @@ async def run_scenario(assistant, store, user_id: str, name: str, run: int) -> R
                 result.first_tool = result.first_tool or elapsed()
             elif kind == "token":
                 result.first_token = result.first_token or elapsed()
-                result.answer += event["text"]
+                if not event.get("agent"):  # tokens with an agent are a round's draft
+                    result.answer += event["text"]
             elif kind == "tool_result" and event.get("charts"):
                 result.charts += [f"{c['type']}: {c['title']} ({len(c['series'])}x{len(c['labels'])})"
                                   for c in event["charts"]]
+        if not result.answer and not synthesized and first_spoke:
+            result.answer = first_spoke
     except Exception as exc:  # noqa: BLE001 - a failed scenario is a result too
         result.error = f"{type(exc).__name__}: {str(exc)[:200]}"
     result.total = elapsed()

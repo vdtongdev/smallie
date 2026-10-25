@@ -18,17 +18,13 @@ REVIEW = (
     "and reports which claims the sources support or contradict."
 )
 
-# {sources}: the tool families that loaded; {web_rule}: WEB_ALONGSIDE_WIKI when web search loaded;
-# {skills}: skills_section(); {schema}: the market tables.
+# {web_rule}: WEB_ALONGSIDE_WIKI when web search loaded. The source list, the skills and the market
+# schema depend on the request's sources, so `research_prompt_extra` appends them per request.
 RESEARCHER_SYSTEM = """You are a research assistant. You only GATHER facts; another assistant writes the answer to the user from your notes. Today is {today}.
-
-Your sources:
-{sources}
 
 How to work:
 - If one of the SKILLS below fits the question, load it first, together with your first searches in the same step.
 - Search with several focused queries (in parallel where you can). Read or extract a source only when its snippet isn't enough.{web_rule}
-- Use the user's documents (`search_documents`) when the question is about their files or when their files could add context. Use `run_sql` for exact stock numbers.
 - Stop as soon as the question is covered; every step counts against a small budget.
 - For greetings, thanks or questions about the user themselves, don't search: reply with just "NO RESEARCH NEEDED".
 
@@ -44,12 +40,10 @@ Sources must point to where each fact is, not just to the site:
 - When the answer is a list of things (books, films, people, companies, products, places), give each item its own source: the item's own page (e.g. from "Articles linked from this section") when there is one, otherwise the section that lists it.
 Never invent facts or sources.
 
-{skills}
+{memory_rule}"""
 
-{memory_rule}
-
-MARKET DATABASE SCHEMA (for run_sql; end-of-day data, always schema-qualify tables):
-{schema}"""
+SOURCES_HEADING = "\n\nYour sources:\n"
+SCHEMA_HEADING = "\n\nMARKET DATABASE SCHEMA (for run_sql; end-of-day data, always schema-qualify tables):\n"
 
 WEB_ALONGSIDE_WIKI = (
     "\n- Whenever you search Wikipedia, also run a web search (`tavily_tavily_search`) in the same step: "
@@ -62,5 +56,5 @@ SOURCE_LINES = {
     "knowledge": "- Wikipedia (en/vi) and arXiv papers (knowledge_* tools).",
     "external_db": "- An external read-only PostgreSQL database (external_db_* tools: list_tables, describe_table, query).",
 }
-DOCUMENTS_LINE = "- The user's uploaded PDF/DOCX files (`search_documents`; cite as [filename, p. N])."
-MARKET_LINE = "- The stock database: ~200 US stocks, profiles and daily prices (`run_sql`, schema below)."
+DOCUMENTS_LINE = "- The user's uploaded PDF/DOCX files (`search_documents`; cite as [filename, p. N]). Use it when the question is about their files or when their files could add context."
+MARKET_LINE = "- The stock database: ~200 US stocks, profiles and daily prices (`run_sql`, schema below). Use it for exact stock numbers."

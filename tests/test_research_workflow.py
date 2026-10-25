@@ -272,3 +272,23 @@ def test_ids_are_expanded_however_the_model_wrote_them_and_unknown_ones_never_re
     assert expand('- f [source: Sffff | "q"]') == '- f [source: "q"]'
     assert expand("- f [Sffff] Sffff") == "- f  "
     assert expand("- SDEFA rose [source: report.pdf, p. 2]") == "- SDEFA rose [source: report.pdf, p. 2]"
+
+
+async def _research_system_prompt(monkeypatch, sources) -> str:
+    model = _turn(AIMessage("FINDINGS:\n- none\nGAPS: none"))
+    monkeypatch.setattr(factory, "get_chat_model", lambda *a, **k: model)
+    monkeypatch.setattr(research_agent, "describe_schema", lambda: "MARKET_SCHEMA_TEXT")
+    monkeypatch.setattr(research_agent, "_mcp_servers", ["tavily"])
+    workflow = research_agent.build_research_workflow()
+    await workflow.ainvoke({"messages": [HumanMessage("hi")]}, context=AgentContext(user_id="u", sources=sources))
+    return model.prompts[0][0].content
+
+
+async def test_research_prompt_omits_sources_outside_scope(monkeypatch):
+    scoped = await _research_system_prompt(monkeypatch, ("web",))
+    for left_out in ("run_sql", "MARKET_SCHEMA_TEXT", "search_documents", "uploaded PDF"):
+        assert left_out not in scoped
+    assert "tavily_*" in scoped
+    everything = await _research_system_prompt(monkeypatch, ())
+    for kept in ("run_sql", "MARKET_SCHEMA_TEXT", "search_documents", "uploaded PDF", "tavily_*"):
+        assert kept in everything

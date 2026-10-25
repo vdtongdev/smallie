@@ -35,7 +35,9 @@ from app.agents.research.prompts import (
     MARKET_LINE,
     RESEARCHER_SYSTEM,
     ROUTE_DESCRIPTION,
+    SCHEMA_HEADING,
     SOURCE_LINES,
+    SOURCES_HEADING,
     REVIEW,
     TOOL_DESCRIPTION,
     WEB_ALONGSIDE_WIKI,
@@ -99,10 +101,32 @@ class ResearchState(TypedDict):
     findings: str
 
 
-def sources(servers: list[str]) -> str:
-    """The researcher's source list: loaded MCP servers, then the user's files and the stock data."""
-    lines = [SOURCE_LINES.get(name, f"- Tools of the {name!r} MCP server ({name}_* tools).") for name in servers]
-    return "\n".join([*lines, DOCUMENTS_LINE, MARKET_LINE])
+# The `TOOL_SOURCE` tag of each MCP server's tools and of the market-data skill.
+SERVER_SOURCE = {"tavily": "web", "knowledge": "web", "external_db": "external_db"}
+SKILL_SOURCE = {"market-data": "market_db"}
+
+
+def sources(servers: list[str], allowed: tuple[str, ...] = ()) -> str:
+    """The researcher's source list: loaded MCP servers, then the user's files and the stock data.
+    `allowed` (a team request's sources) leaves out the others; empty lists all."""
+    def ok(tag: str | None) -> bool:
+        return not allowed or tag is None or tag in allowed
+
+    lines = [SOURCE_LINES.get(name, f"- Tools of the {name!r} MCP server ({name}_* tools).")
+             for name in servers if ok(SERVER_SOURCE.get(name))]
+    return "\n".join([*lines, *([DOCUMENTS_LINE] if ok("user_files") else []), *([MARKET_LINE] if ok("market_db") else [])])
+
+
+def research_prompt_extra(schema: str):
+    """The per-request prompt part: the sources, skills and market schema the request may use.
+    Appended, not formatted into a template, because the schema contains braces."""
+    def extra(request) -> str:
+        allowed = request.runtime.context.sources
+        skills = {n: s for n, s in RESEARCHER_SKILLS.items()
+                  if not allowed or SKILL_SOURCE.get(n) is None or SKILL_SOURCE[n] in allowed}
+        text = SOURCES_HEADING + sources(_mcp_servers, allowed) + "\n\n" + skills_section(skills)
+        return text + (SCHEMA_HEADING + schema if not allowed or "market_db" in allowed else "")
+    return extra
 
 
 
@@ -403,12 +427,10 @@ def build_research_workflow():
         name="research_agent",
         system_prompt=RESEARCHER_SYSTEM.format(
             today=date.today().isoformat(),
-            sources=sources(_mcp_servers),
             web_rule=WEB_ALONGSIDE_WIKI if "tavily" in _mcp_servers else "",
-            skills=skills_section(RESEARCHER_SKILLS),
             memory_rule=MEMORY_RULE,
-            schema=describe_schema(),
         ),
+        prompt_extra=research_prompt_extra(describe_schema()),
         tools=[*mcp_tools, search_documents, run_sql, make_load_skill_tool(RESEARCHER_SKILLS)],
         middleware=[cite_by_id],
         max_model_calls=get_settings().research_max_model_calls,

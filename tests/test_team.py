@@ -15,7 +15,7 @@ from app.core.memory import AgentContext
 from app.orchestration import graph as graph_module
 from app.orchestration import team
 from app.orchestration.router import build_router
-from app.orchestration.team import Board, Conflict, Difference, participants
+from app.orchestration.team import Board, Conflict, Difference, Side, clean, participants
 from tests.scripted import per_agent
 from tests.test_orchestrator import _assistant
 
@@ -398,8 +398,29 @@ async def test_only_the_answer_joins_the_thread(monkeypatch):
     assert not any("secret" in m.text for m in messages)
 
 
+SIDES = [Side(route="sql", value="v1", source="db", as_of="2024-01-01"),
+         Side(route="research", value="v2", source="a page", as_of="2024-02-01")]
+
+
+def test_difference_without_source_or_date_becomes_conflict():
+    for gap in ({"source": ""}, {"as_of": ""}):
+        undated = SIDES[1].model_copy(update=gap)
+        board = Board(differences=[Difference(routes=["sql", "research"], explanation="x", sides=[SIDES[0], undated])])
+        cleaned = clean(board, ["sql", "research"])
+        assert cleaned.differences == []
+        (conflict,) = cleaned.conflicts
+        assert conflict.routes == ["sql", "research"] and conflict.fixable_by == []
+        assert "v1" in conflict.claim and "v2" in conflict.claim and conflict.issue
+
+
+def test_dated_sourced_difference_stays_explained():
+    board = Board(differences=[Difference(routes=["sql", "research"], explanation="x", sides=SIDES)])
+    cleaned = clean(board, ["sql", "research"])
+    assert len(cleaned.differences) == 1 and cleaned.conflicts == []
+
+
 async def test_transcript_holds_rounds_tools_and_boards(monkeypatch):
-    board = Board(agreements=["same figure"], differences=[Difference(routes=["sql", "research"], explanation="as-of date")])
+    board = Board(agreements=["same figure"], differences=[Difference(routes=["sql", "research"], explanation="as-of date", sides=SIDES)])
     _board(monkeypatch, board)
     _, assistant = _two(monkeypatch, [], tools=True)
     await _stream(assistant, _ask())
@@ -416,7 +437,7 @@ async def test_transcript_holds_rounds_tools_and_boards(monkeypatch):
 
 
 async def test_write_up_names_differences_and_the_message_language(monkeypatch):
-    _board(monkeypatch, Board(differences=[Difference(routes=["sql", "research"], explanation="AS-OF-DATE")]))
+    _board(monkeypatch, Board(differences=[Difference(routes=["sql", "research"], explanation="AS-OF-DATE", sides=SIDES)]))
     model, assistant = _two(monkeypatch, [])
     await _stream(assistant, _ask("Vốn hóa của AAPL là bao nhiêu?"))
 

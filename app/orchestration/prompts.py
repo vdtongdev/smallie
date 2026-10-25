@@ -103,8 +103,8 @@ BOARD_PROMPT = """You are the board of a team that answers the user's latest mes
 
 Fill in these lists:
 - agreements: points the answers agree on, one short sentence each.
-- differences: answers that differ, but both sides explain the difference (as-of date, definition, scope). Both are right. Give the `routes` involved and the explanation, with each side's value and source.
-- conflicts: answers that differ with no explanation that makes both right. Give the `routes` involved, the `claim` in dispute, and the `issue` in one sentence. Put in `fixable_by` the routes among them that can fix it with their own tools (a wrong query, a wrong name, a claim their data doesn't support). Leave `fixable_by` empty when nobody involved can settle it, for example when two sources of different kinds each hold a different value.
+- differences: answers that differ, where both sides give a source and an as-of date and the explanation (as-of date, definition, scope) fits the size of the gap. A date gap explains a small move, not a multiple. Give the `routes` involved, the explanation, and in `sides` each side's route, value, source and as-of date.
+- conflicts: answers that differ and don't meet that test: a side without a source or date, or an explanation that doesn't fit the gap. Give the `routes` involved, the `claim` in dispute, and the `issue` in one sentence. Put in `fixable_by` the routes among them that can fix it with their own tools (a wrong query, a wrong name, a claim their data doesn't support). Leave `fixable_by` empty when nobody involved can settle it, for example when two sources of different kinds each hold a different value. When several independent dated sources agree against one, say so in the `issue`.
 
 Never decide that a source is right because of its kind (database, file, web page, model). Any source can be wrong.
 
@@ -124,7 +124,7 @@ EXPLAINED DIFFERENCES:
 OPEN CONFLICTS:
 {conflicts}
 
-Combine the answers into one answer to the user's message. Where sources gave different values and the differences are explained, give each source's value with its source and date, plus the explanation, so the user sees both. Where OPEN CONFLICTS is not "none", show both sides, say plainly that the team could not settle it, and do not pick one. When an answer says it failed, say plainly which part is missing."""
+Combine the answers into one answer to the user's message. Where sources gave different values and the differences are explained, give each source's value with its source and date, plus the explanation, so the user sees both. Where OPEN CONFLICTS is not "none", show every value, say plainly that the team could not settle it, and do not pick one. Where the issue says several independent dated sources agree against one, say which values agree and which stands alone, without calling a source right because of its kind. When an answer says it failed, say plainly which part is missing."""
 
 # Results of tool calls the orchestrator may not make (`no_repeats` in orchestrator.py).
 REPEATED_CALL = "Not run: this exact call was already made for this message; its result is above. Use it, or write the answer."

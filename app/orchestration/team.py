@@ -40,9 +40,17 @@ TEAM = TEAM_MODE
 RESET = {"reset": True}  # first entry of `speeches` at the start of a message: forget the earlier message's
 
 
+class Side(BaseModel):
+    route: str
+    value: str
+    source: str
+    as_of: str
+
+
 class Difference(BaseModel):
     routes: list[str]
     explanation: str
+    sides: list[Side] = []
 
 
 class Conflict(BaseModel):
@@ -78,7 +86,14 @@ def clean(board: Board, speakers: Sequence[str]) -> Board:
     for conflict in board.conflicts:
         routes = keep(conflict.routes, speakers)
         conflicts.append(conflict.model_copy(update={"routes": routes, "fixable_by": keep(conflict.fixable_by, routes)}))
-    differences = [d.model_copy(update={"routes": keep(d.routes, speakers)}) for d in board.differences]
+    differences = []
+    for d in board.differences:
+        routes = keep(d.routes, speakers)
+        if d.sides and all(side.source.strip() and side.as_of.strip() for side in d.sides):
+            differences.append(d.model_copy(update={"routes": routes}))
+        else:  # explained only when every side gives a source and a date
+            claim = "; ".join(f"{side.route}: {side.value}" for side in d.sides) or d.explanation
+            conflicts.append(Conflict(routes=routes, claim=claim, issue="a side has no source or date"))
     return board.model_copy(update={"conflicts": conflicts, "differences": differences})
 
 
@@ -247,7 +262,8 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         else:
             note = TEAM_MESSAGE.format(
                 answers="\n\n".join(f"{a['agent']}:\n{a['text']}" for a in answers),
-                differences=_bullets([f"{', '.join(d.routes)}: {d.explanation}" for d in board.differences]),
+                differences=_bullets([f"{', '.join(d.routes)}: {d.explanation} ({'; '.join(f'{x.route}: {x.value}, {x.source}, {x.as_of}' for x in d.sides)})"
+                                   for d in board.differences]),
                 conflicts=_bullets([f"{c.claim} ({', '.join(c.routes)}): {c.issue}" for c in board.conflicts]),
                 language=reply_language(messages))
             command = await ask_orchestrator(state, runtime, note)

@@ -339,7 +339,8 @@ function boardBlock(b) {
     div.append(el("div", "act-label", title), ul);
   };
   section(t("agreements"), b.agreements);
-  section(t("differences"), b.differences.map((d) => `${routes(d.routes)}: ${d.explanation}`));
+  section(t("differences"), b.differences.map((d) => `${routes(d.routes)}: ${d.explanation}`
+    + (d.sides || []).map((x) => ` [${agentLabel(x.route)}: ${x.value}, ${x.source}, ${x.as_of}]`).join("")));
   section(t("conflicts"), b.conflicts.map((c) => `${routes(c.routes)}: ${c.claim}${c.issue ? ` — ${c.issue}` : ""}`
     + (c.fixable_by.length ? ` (${t("fixableBy")} ${routes(c.fixable_by)})` : "")));
   return div;

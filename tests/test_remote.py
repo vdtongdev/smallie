@@ -345,3 +345,10 @@ def test_engines_use_the_pool_size(monkeypatch):
     monkeypatch.setattr(get_settings(), "db_pool_size", 2)
     engine = db.readonly_engine("postgresql+psycopg://u:p@localhost:5433/smallie")
     assert engine.pool.size() == 2
+
+
+async def test_tool_calls_reported_by_the_server_pass_through():
+    tools = [{"name": "run_sql", "args": {}, "result": "1 row"}]
+    remote = FakeRemote(output={"messages": [HUMAN], "tools": tools})
+    result = await agent(remote).ainvoke({"messages": []}, {}, context=CTX)
+    assert result["tools"] == tools

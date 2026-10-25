@@ -19,6 +19,7 @@ from typing import Annotated
 import openai
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
+from langchain_core.runnables.config import merge_configs
 from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 from langgraph.runtime import Runtime
@@ -26,7 +27,7 @@ from langgraph.types import Command, Send, interrupt
 from pydantic import BaseModel
 
 from app.agents.artifacts import KINDS, collect
-from app.agents.base import MEMORY_TOOL_NAMES, TOOL_RESULT_PREVIEW, AgentSpec, RouteInfo, turn_messages
+from app.agents.base import MEMORY_TOOL_NAMES, TOOL_RESULT_PREVIEW, AgentSpec, RouteInfo, ToolRecorder, turn_messages
 from app.core.config import get_settings
 from app.core.llm import get_chat_model
 from app.core.memory import TEAM_MODE, AgentContext
@@ -195,15 +196,22 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         context = dataclasses.replace(runtime.context, sources=tuple(sorted(spec.sources)))
         messages = [*job["messages"], HumanMessage(job["note"], name=TEAM)]
         entry = {"round": job["round"], "kind": job["kind"], "agent": route, "tools": [], "artifacts": {}, "failed": False}
+        recorder = ToolRecorder()
         try:
-            result = await agents[route].ainvoke({"messages": messages}, config, context=context)
+            result = await agents[route].ainvoke({"messages": messages}, merge_configs(config, {"callbacks": [recorder]}),
+                                                 context=context)
         except (openai.RateLimitError, openai.AuthenticationError):
             raise
         except Exception as exc:  # noqa: BLE001 - the user still gets an answer from the others
             log.exception("Team step by %s failed", route)
             return {"speeches": [{**entry, "text": f"failed: {type(exc).__name__}", "failed": True}]}
         turn = turn_messages(result.get("messages", []))
-        return {"speeches": [{**entry, "text": spec.result(result), "tools": _tools(turn), "artifacts": collect(turn)}]}
+        # A server reports every tool call, a workflow's inner ones too; in-process the recorder sees them;
+        # the message scan is what agents without callbacks leave.
+        tools = result["tools"] if "tools" in result else recorder.tools or _tools(turn)
+        entry = {**entry, "text": spec.result(result), "tools": tools, "artifacts": collect(turn)}
+        emit({"type": "spoke", **{k: entry[k] for k in ("agent", "round", "text", "tools")}})
+        return {"speeches": [entry]}
 
     async def judge(state: TeamState, runtime: Runtime[AgentContext], config: RunnableConfig) -> Command:
         team, speeches, settings = state["team"], state["speeches"], get_settings()

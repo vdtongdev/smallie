@@ -306,3 +306,8 @@ async def test_real_team_stream_tags_agents(monkeypatch):
     writeup = [e for e in after if e["type"] == "token"]
     assert "".join(e["text"] for e in writeup).split() == ["final", "writeup"]
     assert all("agent" not in e for e in writeup)
+
+
+def test_spoke_event_passes_through():
+    chunk = {"type": "spoke", "agent": "sql", "round": 1, "text": "x", "tools": []}
+    assert _to_events("custom", chunk, SUBGRAPH) == [chunk]

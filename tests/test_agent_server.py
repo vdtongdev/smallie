@@ -190,3 +190,23 @@ async def test_server_run_hides_tools_outside_sources(monkeypatch):
     await graph.ainvoke({"messages": [HumanMessage("Research LangGraph", id="h1")]}, context=context)
     offered = {t["function"]["name"] for t in model.tools[-1]}
     assert "run_sql" not in offered and "search_documents" not in offered
+
+
+async def test_server_result_carries_every_tool_call(monkeypatch):
+    """The researcher's tool calls never reach the workflow's messages; the server reports them as `tools`."""
+    from langchain_core.tools import tool
+
+    @tool
+    def tavily_tavily_search(query: str) -> str:
+        """Web search."""
+        return "Apple cap 3T"
+
+    model = scripted(AIMessage("", tool_calls=[{"name": "tavily_tavily_search", "args": {"query": "AAPL"}, "id": "w1"},
+                                               {"name": "search_memory", "args": {"query": "x"}, "id": "m1"}]),
+                     AIMessage(NOTES))
+    monkeypatch.setattr(factory, "get_chat_model", lambda *a, **k: model)
+    monkeypatch.setattr(research_agent, "_mcp_tools", [tavily_tavily_search])
+    monkeypatch.setattr(research_agent, "describe_schema", lambda: "")
+    graph = server.reporting_graph(research_agent.build_research_workflow())
+    result = await graph.ainvoke({"messages": [HumanMessage("Research AAPL", id="h1")]}, context=CTX)
+    assert result["tools"] == [{"name": "tavily_tavily_search", "args": {"query": "AAPL"}, "result": "Apple cap 3T"}]

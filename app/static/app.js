@@ -689,6 +689,13 @@ async function sendMessage(text) {
             touch(turn);
             break;
           }
+          case "spoke": { // the speaker's final entry: what a reload shows
+            const answers = act.rounds.find((r) => r.round === event.round)?.answers;
+            const mine = answers?.find((x) => x.agent === event.agent) || answers?.[answers.push({ agent: event.agent }) - 1];
+            if (mine) { mine.text = event.text; mine.tools = event.tools.map((x, i) => ({ ...x, charts: mine.tools?.[i]?.name === x.name ? mine.tools[i].charts : undefined })); }
+            touch(turn);
+            break;
+          }
           case "synthesize":
             synthesized = true;
             turn.step = { writing: true };

@@ -11,6 +11,7 @@ from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from typing import Literal
 
+from langchain_core.callbacks import AsyncCallbackHandler
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import Runnable
 
@@ -19,6 +20,31 @@ from app.core.memory import MEMORY_TOOLS
 LIMIT_MESSAGE = "Model call limits exceeded"  # ModelCallLimitMiddleware's closing message
 MEMORY_TOOL_NAMES = frozenset(t.name for t in MEMORY_TOOLS)
 TOOL_RESULT_PREVIEW = 4000  # characters of a tool result shown in the UI and kept in a team transcript
+
+
+class ToolRecorder(AsyncCallbackHandler):
+    """Records every tool run of one request as `{name, args, result}` (result capped), in start
+    order, across nested runs (a workflow's inner agent), without the memory tools. Passed in the
+    run's `callbacks`, like `UsageCounter`."""
+
+    def __init__(self):
+        self.runs: dict = {}
+
+    async def on_tool_start(self, serialized, input_str, *, run_id, inputs=None, **kwargs) -> None:
+        name = kwargs.get("name") or (serialized or {}).get("name", "")
+        self.runs[run_id] = {"name": name, "args": inputs if isinstance(inputs, dict) else {"input": input_str}, "result": ""}
+
+    async def on_tool_end(self, output, *, run_id, **kwargs) -> None:
+        if run := self.runs.get(run_id):
+            run["result"] = (output.text if isinstance(output, ToolMessage) else str(output))[:TOOL_RESULT_PREVIEW]
+
+    async def on_tool_error(self, error, *, run_id, **kwargs) -> None:
+        if run := self.runs.get(run_id):
+            run["result"] = f"error: {error}"[:TOOL_RESULT_PREVIEW]
+
+    @property
+    def tools(self) -> list[dict]:
+        return [r for r in self.runs.values() if r["name"] not in MEMORY_TOOL_NAMES]
 GAVE_UP_CHARS = 600  # longer replies count as answers (often partial ones), whatever they say
 # A reply that only says the search came up empty (not a negative answer such as "pays no dividend").
 NOT_FOUND = re.compile(

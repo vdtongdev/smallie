@@ -163,8 +163,9 @@ class RemoteAgent:
         new = [as_message(m) for m in output.get("messages", [])][len(input.get("messages", [])):]
         # Only these keys: anything else (route, direct, failed) could steer the parent graph.
         result = {"messages": new}
-        if "findings" in output:
-            result["findings"] = output["findings"]
+        for key in ("findings", "tools"):
+            if key in output:
+                result[key] = output[key]
         return result
 
 

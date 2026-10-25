@@ -6,10 +6,12 @@ from types import SimpleNamespace
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import Runnable
+from langchain_core.tools import tool
 from langgraph.types import Command
 
 from app.agents.base import RouteInfo
 from app.agents.registry import AGENTS, get
+from app.agents.research import agent as research_agent
 from app.core.config import get_settings
 from app.core.memory import AgentContext
 from app.orchestration import graph as graph_module
@@ -468,3 +470,39 @@ def test_prompts_format():
     prompts.ROUND_MESSAGE.format(language="English")
     prompts.CONFLICT_MESSAGE.format(conflicts="", others="", own="", language="English")
     prompts.TEAM_MESSAGE.format(answers="", differences="none", conflicts="none", language="English")
+
+
+async def test_transcript_holds_research_tool_calls(monkeypatch):
+    """Research's researcher runs inside its workflow: its tool calls are not in the workflow's messages."""
+    @tool
+    def tavily_tavily_search(query: str) -> str:
+        """Web search."""
+        return "Apple cap 3T"
+
+    monkeypatch.setattr(research_agent, "_mcp_tools", [tavily_tavily_search])
+    _board(monkeypatch, Board())
+    model = per_agent(
+        research=[AIMessage("", tool_calls=[{"name": "tavily_tavily_search", "args": {"query": "AAPL cap"}, "id": "w1"}]),
+                  AIMessage("FINDINGS:\n- 3T\nGAPS: none")],
+        orchestrator=[AIMessage("Final.")])
+    assistant = _assistant(monkeypatch, model, sql=Fake("sql", "Cap is 3T.", log=[]))
+    await _stream(assistant, _ask())
+
+    transcript = (await _thread(assistant))[-1].additional_kwargs["team"]
+    research = next(a for a in transcript["rounds"][0]["answers"] if a["agent"] == "research")
+    assert research["tools"] == [{"name": "tavily_tavily_search", "args": {"query": "AAPL cap"}, "result": "Apple cap 3T"}]
+
+
+async def test_spoke_event_carries_the_final_entry(monkeypatch):
+    _board(monkeypatch, Board())
+    _, assistant = _two(monkeypatch, [], tools=True)
+    chunks = await _stream(assistant, _ask())
+
+    transcript = (await _thread(assistant))[-1].additional_kwargs["team"]
+    spoke = _events(chunks, "spoke")
+    assert {e["agent"] for e in spoke} == {"sql", "research"}
+    for event in spoke:
+        entry = next(a for a in transcript["rounds"][0]["answers"] if a["agent"] == event["agent"])
+        assert event == {"type": "spoke", "round": 1, **entry}
+    assert next(e for e in spoke if e["agent"] == "sql")["tools"] == [
+        {"name": "run_sql", "args": {"query": "SELECT 1"}, "result": "1 row"}]

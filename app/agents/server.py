@@ -19,6 +19,7 @@ from langgraph.graph.message import add_messages
 from langgraph.runtime import Runtime
 
 from app.agents import registry
+from app.agents.base import ToolRecorder
 from app.agents.remote import RUN_NODE
 from app.core.memory import AgentContext, open_history_store, set_history_store
 from app.core.usage import UsageCounter
@@ -33,6 +34,7 @@ class ServerState(TypedDict, total=False):
     messages: Annotated[list[AnyMessage], add_messages]
     findings: str
     usage: dict
+    tools: list
 
 
 def reporting_graph(agent):
@@ -40,13 +42,13 @@ def reporting_graph(agent):
     `tools`: the main app's event filter reads those names in the namespace (AP-004)."""
 
     async def run(state: ServerState, config: RunnableConfig, runtime: Runtime[AgentContext]) -> dict:
-        counter = UsageCounter()
+        counter, recorder = UsageCounter(), ToolRecorder()
         # merge, not replace: the run's stream handlers stay, so tokens and tool events still flow.
-        result = await agent.ainvoke({"messages": state["messages"]}, merge_configs(config, {"callbacks": [counter]}),
+        result = await agent.ainvoke({"messages": state["messages"]}, merge_configs(config, {"callbacks": [counter, recorder]}),
                                      context=runtime.context)
         # Only the new messages: `add_messages` already holds the input, and a whole-thread update
         # would be streamed to the main app as tool events again.
-        update = {"messages": result["messages"][len(state["messages"]):], "usage": counter.totals()}
+        update = {"messages": result["messages"][len(state["messages"]):], "usage": counter.totals(), "tools": recorder.tools}
         if "findings" in result:
             update["findings"] = result["findings"]
         return update

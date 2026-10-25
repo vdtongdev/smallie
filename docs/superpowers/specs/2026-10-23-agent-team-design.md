@@ -163,14 +163,14 @@ message ─► pick ─┬─ nobody picked ────────────
 - **judge** (one structured call, orchestrator model): `Board = {agreements: [str], differences: [{routes, explanation}], conflicts: [{routes, claim, fixable_by, issue}], question: str}`. Rules kept: a difference both sides explain is not a conflict; no source is right because of its kind; only a conflict with someone in `fixable_by` (an involved route that can fix it with its own tools) gets another round; `question` only for information only the user has. Code drops `fixable_by` routes outside the conflict's `routes`.
 - **write-up.** One participant and no conflict → its answer is the reply (no synthesis call). Otherwise the orchestrator writes one answer from the board (`TEAM_MESSAGE`): each source's value with its source and date, the explanations, open conflicts without picking a winner.
 - **Language.** Every reply follows the language of the message it answers; when the user switches language mid-conversation, the next reply switches too (user decision, 2026-10-25). A stored preference such as a remembered "prefers Vietnamese" never overrides it. `ROUND_MESSAGE`, `CONFLICT_MESSAGE` and `TEAM_MESSAGE` name the reply language from `reply_language(messages)`, and the memories section says a stored language preference doesn't change the reply language. Traced cause of the drift: such a memory fact plus draft prompts that named no language; the draft's tokens then streamed into the answer bubble (fixed by round tokens going to the Activity popup).
-- **Caps.** `TEAM_MAX_ROUNDS=4` conflict rounds after round 1 (replaces `TEAM_MAX_TURNS`); the evaluation measures what it costs. `TEAM_MAX_MESSAGE_MODEL_CALLS=30` stays the backstop: a call refused by it fails that agent's turn, and a failed turn forces the write-up with what stayed open.
+- **Caps.** `TEAM_MAX_ROUNDS=4` conflict rounds after round 1 (replaces `TEAM_MAX_TURNS`); the evaluation measures what it costs. `TEAM_MAX_MESSAGE_MODEL_CALLS=30` stays the backstop: a call refused by it fails that agent's turn, and a failed turn forces the write-up with what stayed open. `round` numbers all rounds (1 = the answer round) and `max_rounds` is the total possible, `TEAM_MAX_ROUNDS + 1`. A failed board call (other than rate limit or auth errors) also forces the write-up from the answers so far. A team reply carries the tables and charts of every participant's answers (as `additional_kwargs`, like charts today).
 
 ### Events
 
 Inside a round every `token`, `tool_call` and `tool_result` carries `"agent": "<route>"` (from the `speak` task's namespace); outside rounds they keep today's shape. If per-task namespaces can't be mapped to agents reliably, the fallback is: tool events live, each answer sent whole when its task ends.
 
 ```jsonc
-{"type": "round", "round": 1, "max_rounds": 4, "kind": "answer|conflict", "agents": ["sql", "research"]}
+{"type": "round", "round": 1, "max_rounds": 5, "kind": "answer|conflict", "agents": ["sql", "research"]}
 {"type": "board", "round": 1, "agreements": ["…"],
  "differences": [{"routes": ["sql", "research"], "explanation": "…"}],
  "conflicts": [{"routes": ["sql", "docs"], "claim": "…", "fixable_by": ["sql"], "issue": "…"}], "forced": false}
@@ -182,7 +182,7 @@ Inside a round every `token`, `tool_call` and `tool_result` carries `"agent": "<
 
 ### UI: minimal chat, activity popup (every chat, team or not)
 
-- **Main window:** while running, one status line above the reply (agent badges, spinner, e.g. `Round 2 of 4 · resolving a conflict · sql, docs`; in normal mode the agent and its step). When done it becomes a short summary (e.g. `Team · 2 rounds · sql, research · 1 difference explained`), then the answer with charts and citations, and an "Activity" button with a step count.
+- **Main window:** while running, one status line above the reply (agent badges, spinner, e.g. `Round 2 of 5 · resolving a conflict · sql, docs`; in normal mode the agent and its step). When done it becomes a short summary (e.g. `Team · 2 rounds · sql, research · 1 difference explained`), then the answer with charts and citations, and an "Activity" button with a step count.
 - **Activity popup** (`<dialog>`, like the Readme dialog): the full log of that reply. Team mode, per round and agent: answer text, tool calls (name, arguments), tool results, then the board; the pause question if any. Normal mode: the tool calls and results that today render inline.
 - **Reload matches live:** team transcript in `additional_kwargs["team"]` = `{rounds: [{round, kind, answers: [{agent, text, tools: [{name, args, result}]}]}], boards: [...], participants, forced}`; normal mode rebuilds from the thread's tool messages. The reply's badge is whoever answered (orchestrator, or the single participant).
 - Relay-era transcripts (two dev chats) may render without a discussion.

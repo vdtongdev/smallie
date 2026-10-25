@@ -194,9 +194,16 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         team, speeches, settings = state["team"], state["speeches"], get_settings()
         rnd, messages = team["round"], state["messages"]
         answers = _latest(speeches, team["participants"])
-        board = clean(await ask_board(messages, answers, config), [a["agent"] for a in answers])
+        broken = False
+        try:
+            board = clean(await ask_board(messages, answers, config), [a["agent"] for a in answers])
+        except (openai.RateLimitError, openai.AuthenticationError):
+            raise
+        except Exception:  # noqa: BLE001 - the user still gets a write-up of the answers so far
+            log.exception("Team board failed")
+            board, broken = Board(), True
         fixable = [c for c in board.conflicts if c.fixable_by]
-        failed = team["forced"] or any(s["failed"] for s in speeches if s["round"] == rnd)
+        failed = broken or team["forced"] or any(s["failed"] for s in speeches if s["round"] == rnd)
         asks = bool(board.question.strip())
         again = bool(fixable) and not asks and not failed and rnd <= settings.team_max_rounds  # round 1 is the answer round; conflict rounds are 2..cap+1
         forced = failed or (bool(fixable) and not asks and not again)

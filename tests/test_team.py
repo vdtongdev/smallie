@@ -78,8 +78,8 @@ async def test_ask_board_calls_the_model_once(monkeypatch):
 class Fake(Runnable):
     """An agent that logs when it runs and answers with scripted texts (the last one repeats)."""
 
-    def __init__(self, name, *texts, log, delay=0.0, tools=False):
-        self.name, self.texts, self.log, self.delay, self.tools = name, list(texts), log, delay, tools
+    def __init__(self, name, *texts, log, delay=0.0, tools=False, chart=None):
+        self.name, self.texts, self.log, self.delay, self.tools, self.chart = name, list(texts), log, delay, tools, chart
         self.calls = 0
 
     def invoke(self, input, config=None, **kwargs):
@@ -97,6 +97,8 @@ class Fake(Runnable):
             out = [AIMessage("", tool_calls=[{"name": "run_sql", "args": {"query": "SELECT 1"}, "id": "k1"}]),
                    ToolMessage("1 row", tool_call_id="k1", name="run_sql"), *out]
         self.log.append({"event": "end", "agent": self.name, "at": loop.time()})
+        if self.chart:
+            out = [ToolMessage("drawn", tool_call_id="k2", name="chart_data", artifact={"charts": [{"id": self.chart}]}), *out]
         return {"messages": [*input["messages"], *out], "findings": text}
 
 
@@ -281,6 +283,52 @@ async def test_failed_speaker_forces_write_up(monkeypatch):
     assert last.text == "Final." and last.additional_kwargs["team"]["forced"] is True
     answers = last.additional_kwargs["team"]["rounds"][0]["answers"]
     assert {a["agent"]: a["text"] for a in answers}["research"] == "failed: RuntimeError"
+
+
+async def test_failed_board_forces_write_up(monkeypatch):
+    async def broken(messages, answers, config):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(team, "ask_board", broken)
+    model, assistant = _two(monkeypatch, [])
+    chunks = await _stream(assistant, _ask())
+
+    last = (await _thread(assistant))[-1]
+    assert last.text == "Final." and last.additional_kwargs["team"]["forced"] is True
+    assert _events(chunks, "board")[-1]["forced"] is True
+    assert "Cap is 3T." in _writeups(model)[0]
+
+
+async def test_failed_board_rate_limit_still_propagates(monkeypatch):
+    import httpx
+    import openai
+
+    async def limited(messages, answers, config):
+        raise openai.RateLimitError("slow", response=httpx.Response(429, request=httpx.Request("POST", "http://x")), body=None)
+
+    monkeypatch.setattr(team, "ask_board", limited)
+    _, assistant = _two(monkeypatch, [])
+    with pytest.raises(openai.RateLimitError):
+        await _stream(assistant, _ask())
+
+
+async def test_team_reply_carries_participants_artifacts(monkeypatch):
+    # The single participant's reply.
+    _research_does_not_join(monkeypatch)
+    _board(monkeypatch, Board())
+    assistant = _assistant(monkeypatch, per_agent(sql=[AIMessage("unused")]), sql=Fake("sql", "Cap.", log=[], chart="chart-sql"))
+    await _stream(assistant, _ask())
+    assert (await _thread(assistant))[-1].additional_kwargs["charts"] == [{"id": "chart-sql"}]
+
+
+async def test_team_write_up_carries_participants_artifacts(monkeypatch):
+    # The orchestrator's write-up with two participants, one of which drew a chart.
+    _board(monkeypatch, Board())
+    model = per_agent(orchestrator=[AIMessage("Final.")])
+    assistant = _assistant(monkeypatch, model, sql=Fake("sql", "Cap.", log=[], chart="chart-sql"),
+                           research=Fake("research", "Notes.", log=[]))
+    await _stream(assistant, _ask())
+    assert (await _thread(assistant))[-1].additional_kwargs["charts"] == [{"id": "chart-sql"}]
 
 
 async def test_rate_limit_still_propagates(monkeypatch):

@@ -174,3 +174,19 @@ def test_agent_server_does_not_import_fastapi():
     code = "import sys, app.agents.server; print('fastapi' in sys.modules)"
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
     assert out.stdout.strip() == "False"
+
+
+async def test_server_run_hides_tools_outside_sources(monkeypatch):
+    """The context reaches an agent server as JSON (RemoteAgent sends asdict(context)); a team
+    request's sources must still hide the tools of other sources from the nested researcher."""
+    import json
+    from dataclasses import asdict
+
+    model = scripted(AIMessage(NOTES))
+    monkeypatch.setattr(factory, "get_chat_model", lambda *a, **k: model)
+    monkeypatch.setattr(research_agent, "describe_schema", lambda: "")
+    graph = server.reporting_graph(research_agent.build_research_workflow())
+    context = json.loads(json.dumps(asdict(AgentContext(user_id="u1", sources=("web",)))))
+    await graph.ainvoke({"messages": [HumanMessage("Research LangGraph", id="h1")]}, context=context)
+    offered = {t["function"]["name"] for t in model.tools[-1]}
+    assert "run_sql" not in offered and "search_documents" not in offered

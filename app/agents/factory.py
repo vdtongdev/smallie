@@ -7,7 +7,9 @@ from langchain.agents.middleware import (
     ModelRequest,
     dynamic_prompt,
     wrap_model_call,
+    wrap_tool_call,
 )
+from langchain_core.messages import ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.store.base import BaseStore
@@ -18,14 +20,25 @@ from app.core.memory import MEMORY_TOOLS, TOOL_SOURCE, AgentContext
 from app.core.prompts import MEMORIES_SECTION, RECENT_CHATS_SECTION, USER_SECTION
 
 
+def _in_scope(tool, sources) -> bool:
+    tag = (getattr(tool, "metadata", None) or {}).get(TOOL_SOURCE)
+    return not sources or tag is None or tag in sources
+
+
 @wrap_model_call
 async def scope_tools(request: ModelRequest, handler):
     """Team requests limit an agent to the tools of its sources; untagged tools stay."""
     sources = request.runtime.context.sources
-    if sources:
-        request = request.override(tools=[
-            t for t in request.tools
-            if (tag := (getattr(t, "metadata", None) or {}).get(TOOL_SOURCE)) is None or tag in sources])
+    return await handler(request.override(tools=[t for t in request.tools if _in_scope(t, sources)]))
+
+
+@wrap_tool_call
+async def refuse_hidden_tools(request, handler):
+    """The model may call a tool it was not offered (the prompt names it); the tool node would
+    still run it, so refuse here."""
+    if not _in_scope(request.tool, request.runtime.context.sources):
+        return ToolMessage(f"Tool {request.tool_call['name']} is not available for this request.",
+                           tool_call_id=request.tool_call["id"], name=request.tool_call["name"], status="error")
     return await handler(request)
 
 
@@ -70,7 +83,7 @@ def build_agent(
     return create_agent(
         get_chat_model(model),
         tools=[*tools, *MEMORY_TOOLS],
-        middleware=[prompt_with_memories, call_limit, scope_tools, *middleware],
+        middleware=[prompt_with_memories, call_limit, scope_tools, refuse_hidden_tools, *middleware],
         context_schema=AgentContext,
         checkpointer=checkpointer,
         store=store,

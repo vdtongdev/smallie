@@ -42,6 +42,24 @@ async def test_no_sources_hides_nothing(monkeypatch):
     assert {"db", "web", "plain"} <= await _bound_tools(monkeypatch, ())
 
 
+async def test_a_call_to_a_hidden_tool_is_not_run(monkeypatch):
+    """A weak model calls tools it was not offered (the prompt names them); the call must not run."""
+    ran = []
+
+    @tool("db", description="db")
+    def db() -> str:
+        ran.append("db")
+        return "ROWS"
+
+    db.metadata = {TOOL_SOURCE: "market_db"}
+    model = scripted(AIMessage("", tool_calls=[{"name": "db", "args": {}, "id": "c1"}]), AIMessage("done"))
+    monkeypatch.setattr(factory, "get_chat_model", lambda *a, **k: model)
+    agent = factory.build_agent(name="t", system_prompt="x", tools=[db, _tagged("web", "web")])
+    result = await agent.ainvoke({"messages": [HumanMessage("hi")]}, context=AgentContext(user_id="u", sources=("web",)))
+    assert ran == []
+    assert "ROWS" not in "".join(m.text for m in result["messages"])
+
+
 def test_every_data_tool_has_a_source():
     for t, source in [(run_sql, "market_db"), (chart_sql, "market_db"), (search_documents, "user_files")]:
         assert t.metadata[TOOL_SOURCE] == source

@@ -185,7 +185,7 @@ Reload: `additional_kwargs["team"]` holds the workspace instead of `rounds`/`boa
 | Plan call fails, plan invalid, every task dropped | fallback plan (`participants()`, independent tasks), `plan.fallback: true` |
 | Plan legitimately empty | no specialist: the orchestrator answers as in normal mode |
 | A follow-up is invalid or over the cap | dropped; over the cap it is named in `synthesis.not_done` |
-| A task fails or withdraws | as now: `failed`/`withdrew`, left out of reviews and write-up |
+| A task fails or withdraws | as now: a withdrawn task is left out of reviews and the write-up; a failed task stays in them with its failure text and forces the write-up (`forced`) |
 | Every input of a task failed or withdrew | task `skipped`, no call; with some inputs missing it runs and its note names the missing ones |
 | Review call fails | empty review with `forced` (as the board now), no follow-ups; dispatch continues |
 | `TEAM_MAX_MESSAGE_MODEL_CALLS` reached (`CallBudgetExceeded`) | no new waves; the write-up runs on what finished and names the tasks that never ran and the open disputes. Check the counter between waves explicitly if `work` swallows the exception as a normal failure |

@@ -144,6 +144,8 @@ Agent: implementer
 
 Agent: implementer
 
+> **Revised 2026-10-26 (user decision):** the chart task depends on the write-up (`depends_on: ["answer"]`), runs after `synthesize` on the final answer, and charts the answer's table (`chart_table`, `chart_data` denied) or, with no table, the figures written in the answer (`chart_data`). It is skipped only when the answer holds no data. This supersedes "depends on the task producing its table" below; see spec section 1.
+
 **Files:**
 - Modify: `app/orchestration/team.py` (remove `draw`, `_drawing` uses, `fed_by` handling in `plan`/`pause`), `app/orchestration/prompts.py` (remove `DRAW_MESSAGE` if unused; keep `DRAWING_NOTE` only if still formatted somewhere)
 - Test: `tests/test_team.py`

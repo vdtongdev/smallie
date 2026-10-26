@@ -68,7 +68,7 @@ Trade-off accepted for v1: a fast task waits for the slowest task of its wave (i
 
 ### The drawer is a task
 
-chart becomes a normal task that depends on the task producing its table (usually sql). This replaces the `draw` step and `fed_by`. The single-chart rule stays: the write-up orchestrator gets `chart_table`/`chart_data` denied (`deny_tools`) when the workspace has a chart task, and the chart task gets `chart_data` denied when its input carries tables.
+chart becomes a task that depends on the write-up: its `depends_on` is the fixed id `answer`, and `dispatch` sends it after `synthesize` with the final answer as its input. It charts only data that survived the reviews: the answer's table (from sql) with `chart_table`, or, when the answer has no table, the figures written in the answer (e.g. research's figures when sql found nothing) with `chart_data`. An answer with no data gets one line saying so and no chart. Its charts merge into the final answer (same message id). This replaces the separate `draw` step and the drawer's `fed_by`; the cost stays one chart-agent run. The single-chart rule stays: the write-up orchestrator gets `chart_table`/`chart_data` denied (`deny_tools`) when the workspace has a chart task, and the chart task gets `chart_data` denied when the answer carries tables.
 
 ## 2. Review after each wave
 

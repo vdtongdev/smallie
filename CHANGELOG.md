@@ -116,7 +116,7 @@ Versions are `major.minor.patch`: the major version stays 0 for now, each minor 
 
 ## 0.4.0 - Remote agents
 - **Remote agents**: the docs, sql, chart and research agents each run as their own private LangGraph Agent Server; the main app keeps the router, orchestrator, chats and memory and calls them over HTTP
-  - One image (`Dockerfile.agent`) serves every agent; `AGENT_ROUTE` picks which. Locally `docker compose up -d` runs all four on ports 2101–2104 next to Postgres and Redis; on Cloud Run each is its own private service (`smallie-<route>`, built with `cloudbuild.agent.yaml`), steps in README "Deploying"
+  - One image (`Dockerfile.agent`) serves every agent; `AGENT_ROUTE` picks which. Locally `docker compose up -d` runs all four on ports 2101–2104 next to Postgres and Redis; on Cloud Run each is its own private service (`smallie-<route>`, built with `cloudbuild.agent.yaml`), steps in `DEPLOYING.md`
   - New settings: `AGENT_URLS` (route → server URL; the app doesn't start without one for every agent), `SERVICE_TOKEN` (shared secret the servers check; a server with none refuses every call), `AGENT_TIMEOUT_S` (default 300), `MAX_MESSAGE_MODEL_CALLS` (default 30, a per-message backstop on top of the existing per-agent limits; parallel questions in one step can go one step over it)
   - Calls carry no conversation id: the main app's chat stays the only copy, and a call the app stops waiting for (timeout, chat closed) is cancelled on the server instead of spending calls nobody sees
   - On Cloud Run the services also require Google's ID token (`roles/run.invoker` for the main app's service account), so an agent URL can't be called from outside

@@ -33,7 +33,7 @@ The app runs as a container on **Cloud Run** (free tier, scales to zero). All da
    gcloud projects add-iam-policy-binding <project-id> --role="roles/run.builder" --condition=None `
      --member="serviceAccount:$num-compute@developer.gserviceaccount.com"
    ```
-4. Create `cloudrun.env.yaml` (gitignored). It's your `.env` as YAML, with the Neon URLs and `SESSION_HTTPS_ONLY: "true"`. All values must be quoted strings. Add `TAVILY_API_KEY` (and `MCP_SERVERS` / `EXTERNAL_DATABASE_URL` if you use them) for the research agent. `MCP_SERVERS` is JSON, so wrap it in single quotes in YAML.
+4. Create `cloudrun.env.yaml` (gitignored). It's your `.env` as YAML, with the Neon URLs and `SESSION_HTTPS_ONLY: "true"`. All values must be quoted strings. Add `TAVILY_API_KEY` for the orchestrator's web search. `MCP_SERVERS` and `EXTERNAL_DATABASE_URL` belong only in `cloudrun.agent.research-secrets.yaml` (section 3, step 3); `MCP_SERVERS` is JSON, so wrap it in single quotes in YAML.
 5. Deploy from the project folder (Cloud Build builds the `Dockerfile`; `.gcloudignore` keeps `.env` and `.venv` out):
    ```powershell
    gcloud run deploy smallie --source . --region asia-southeast1 --allow-unauthenticated `
@@ -117,28 +117,13 @@ Each specialist runs as its own private Cloud Run service, all from one image (`
    SERVICE_TOKEN: "..."
    ```
 
-## 4. Upgrading a database from before the knowledge graph
-
-Do this once. The app creates the graph tables at startup, but old memories and files need converting.
-1. Back up first: in the Neon console create a branch (an instant copy), e.g. `pre-graph-<date>`. Delete it after a week or so.
-2. Deploy the new version.
-3. From your PC, with the same embedding settings as the deployment, run:
-   ```powershell
-   $env:DATABASE_URL="<neon owner url>"; uv run python -m scripts.build_graph
-   ```
-   For each user it turns the old memory sentences into graph facts (one model call per 5 memories, then deletes them) and reads every turn of their past chats for facts (one call per 4 turns of a chat; short chats still take one call each, so expect roughly one call per chat). Then it writes a card for every file that has none (one call each, read from the stored chunks). It prints the number of calls first. Each user is built once: a finished user is skipped on later runs, and a run stopped by the rate limit resumes where it stopped. New accounts never need it.
-
-## 5. Current deployment
+## 4. Current deployment
 
 Project `smallie-review`, region `asia-southeast1`, https://smallie-976519788978.asia-southeast1.run.app, database on Neon (Singapore, Postgres 18). App logs:
 ```powershell
 gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=smallie" --limit 50 --freshness 1h
 ```
 
-## 6. Limits
+## 5. Limits
 
 The first request after ~15 min idle cold-starts the container (10–20 s), and the first call to an idle agent server cold-starts that one too. The OpenRouter free quota is shared by everyone using the deployment. The images are stored in Artifact Registry as `asia-southeast1-docker.pkg.dev/smallie-review/cloud-run-source-deploy/smallie` and `.../smallie-agent` (0.5 GB free for both; delete old images if you redeploy often). An agent server that is awake polls Redis about once a second, so watch the Upstash command count in the first week (its free tier has a monthly cap). Neon only hosts the database; a deploy never touches it unless the schema changes.
-
-## 7. Using your own database
-
-Point `READONLY_DATABASE_URL` at a read-only role on your database and set `SCHEMAS` in `app/agents/sql/tools.py`. The agent reads the schema at startup and puts it in its prompt. Table and column comments help it a lot.

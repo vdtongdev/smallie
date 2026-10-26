@@ -2,7 +2,7 @@
 
 A FastAPI multi-agent AI app. A rule-based router sends each message to one specialist agent, or to an orchestrator that answers itself, hands off to a specialist, or asks several specialists and writes the answer. In team mode (section 11) the agents answer independently and a judge compares them.
 
-This file describes `main` plus the 0.4.0 work in progress (remote agents, section 10) and the 0.5.0 agent team (section 11). Code-level detail lives in `CLAUDE.md`; the 0.4.0 design is in `docs/superpowers/specs/2026-10-20-remote-agents-design.md`.
+This file describes `main` plus the 0.4.0 remote agents (section 10) and the 0.5.0 agent team (section 11). Code-level detail lives in `CLAUDE.md`; the 0.4.0 design is in `docs/superpowers/specs/2026-10-20-remote-agents-design.md`.
 
 ---
 
@@ -107,7 +107,7 @@ This file describes `main` plus the 0.4.0 work in progress (remote agents, secti
    - Load or create the conversation
    - Recall the newest 20 facts from the knowledge graph
    - Load the last turns of the 3 most recent other chats (cross-chat memory)
-   - Build `AgentContext(user_id, user, memories, recent_chats, agent=kind)`
+   - Build `AgentContext(user_id, user, memories, recent_chats, agent=kind, ...)` (also `notes`, `mentioned`, `sources`, `failed`)
 3. **Stream start**
    - Begin the SSE stream and emit a `conversation` event with id + title
    - Start the LangGraph assistant on the conversation's thread (loads prior messages from the checkpointer)
@@ -274,7 +274,6 @@ When the orchestrator calls `handoff(agent)`:
 - **General question**: 1 model call (+1 for fact extraction after the reply)
 - **Obvious specialist question**: 2–5 calls
 - **Composed answer**: 1 + each specialist's calls + 1
-- **Free tier cost**: ~$0.000005–$0.00003 per message
 
 ---
 
@@ -413,7 +412,7 @@ One-node StateGraph:
 ### Performance
 
 - Researcher: up to 8 model calls per message (default)
-- Total: roughly 5–20 s depending on sources
+- Total: 126–156 s per question when research took part (relay measurement, 2026-10-24; see section 11)
 
 ### Special Features
 
@@ -541,7 +540,7 @@ Every agent prompt ends with `LANGUAGE_RULE` + `MEMORY_RULE`:
 
 ---
 
-## 10. Remote Agents (0.4.0, in progress)
+## 10. Remote Agents (0.4.0)
 
 ### Goal
 
@@ -671,22 +670,22 @@ The servers never write app data. Every login below has only what its job needs:
 
 Why: a bug or a prompt injection in a specialist can then read at most what it already searches, and cannot change or delete user data. Code on a server must not write: no DDL, no TTL refresh, PGVector with `create_extension=False` (the documents feature's `start` creates its tables).
 
-### Messages and context: before and after
+### Messages and context
 
-Before 0.4.0 every specialist was a compiled graph inside the main app's process. Now each is a `RemoteAgent` (`app/agents/remote.py`) that calls a server. The graph in `orchestration/graph.py` is the same; what a node does and what travels differ.
+Each specialist is a `RemoteAgent` (`app/agents/remote.py`) that calls a server. The graph in `orchestration/graph.py` builds one node per agent from it.
 
-| Topic | Before (in-process, 0.3.x) | After (remote) |
-|---|---|---|
-| The agent node | `add_node(route, compiled_graph)`: the specialist is a subgraph | `add_node(route, RemoteAgent.node)` (`build_assistant`). `node` sends `state["messages"]` and `runtime.context` through `RemoteAgent.ainvoke` |
-| How the specialist sees the conversation | Shares the `messages` state of the parent graph | Gets the thread's messages in the request body on each call (a direct route) or only a self-contained question (`ask_<route>`). The main app's thread stays the only copy |
-| Per-request context (`AgentContext`) | Passed as the runtime context; tools read it with `ToolRuntime` | Sent as `asdict(context)` in the body; the server rebuilds the dataclass and tools read it the same way. The user id also goes in the header `x-smallie-user-id` |
-| Thread and state | The parent's `thread_id` and checkpointer | `thread_id` is removed from the config, so the run is stateless and leaves no thread behind. `checkpoint_ns` is kept: `RemoteGraph` uses it to prefix streamed chunks with the parent's namespace, which `_to_events` relies on |
-| What comes back | Message objects in the parent state | JSON. `as_message` turns each dict back into a message object (LangGraph's own conversion would move `usage_metadata` into `additional_kwargs`). The server returns only new messages, and `ainvoke` also slices the result by the input length. Only the keys `messages` and `findings` reach the parent state, so a remote answer cannot steer routing (`route`, `direct`, `failed`) |
-| Artifacts (tables, charts) | `ToolMessage.artifact` and `additional_kwargs` in the shared state | They survive the JSON round trip (`artifact`, `additional_kwargs`), so a later "plot that" still finds the table in the thread (spike 2) |
-| Streaming | Subgraph events arrive directly in the parent stream | Remote chunks arrive as dicts with the parent namespace in front and the server's `run:` segment inside. `_to_events` converts them with `_message` and skips the `run` node's update; `_step` ignores the `run` segment when it finds a workflow step |
-| Model calls and limits | One `UsageCounter` in the request's callbacks sees every call | The main app can't see server-side calls, so each server reports `usage` and `RemoteAgent` adds it to the `UsageCounter`s in the config (`UsageCounter.add`). Before each call, `CallBudgetExceeded` is raised once a counter reaches `MAX_MESSAGE_MODEL_CALLS` (30): a soft backstop, since parallel asks in one step can overshoot. Per-agent caps are unchanged |
-| Errors | The exception itself | The server reports an error by name only (`RemoteException`). `_openai_error` raises `RateLimitError` and `AuthenticationError` again as `openai` exceptions, so the chat route's messages still work. `asyncio.timeout(AGENT_TIMEOUT_S)` limits a call (the client's own timeout is per read). `RuntimeError` when a run ends without a final state. Other errors reach the caller as they are; `ask_<route>` turns them into "the agent failed" text |
-| `ask_<route>` vs. a direct route | `ask` called `agent.ainvoke(...)` on the compiled graph | Both go through `RemoteAgent.ainvoke`: `ask` (`delegation.py:make_ask_tool`) passes `runtime.config` so the stream hook and the usage counter reach the call. Only a direct route sends the whole thread |
+| Topic | How it works |
+|---|---|
+|  The agent node | `add_node(route, RemoteAgent.node)` (`build_assistant`). `node` sends `state["messages"]` and `runtime.context` through `RemoteAgent.ainvoke`  |
+|  How the specialist sees the conversation | Gets the thread's messages in the request body on each call (a direct route) or only a self-contained question (`ask_<route>`). The main app's thread stays the only copy  |
+|  Per-request context (`AgentContext`) | Sent as `asdict(context)` in the body; the server rebuilds the dataclass and tools read it the same way. The user id also goes in the header `x-smallie-user-id`  |
+|  Thread and state | `thread_id` is removed from the config, so the run is stateless and leaves no thread behind. `checkpoint_ns` is kept: `RemoteGraph` uses it to prefix streamed chunks with the parent's namespace, which `_to_events` relies on  |
+|  What comes back | JSON. `as_message` turns each dict back into a message object (LangGraph's own conversion would move `usage_metadata` into `additional_kwargs`). The server returns only new messages, and `ainvoke` also slices the result by the input length. Only the keys `messages`, `findings` and `tools` reach the parent state, so a remote answer cannot steer routing (`route`, `direct`, `failed`)  |
+|  Artifacts (tables, charts) | They survive the JSON round trip (`artifact`, `additional_kwargs`), so a later "plot that" still finds the table in the thread (spike 2)  |
+|  Streaming | Remote chunks arrive as dicts with the parent namespace in front and the server's `run:` segment inside. `_to_events` converts them with `_message` and skips the `run` node's update; `_step` ignores the `run` segment when it finds a workflow step  |
+|  Model calls and limits | The main app can't see server-side calls, so each server reports `usage` and `RemoteAgent` adds it to the `UsageCounter`s in the config (`UsageCounter.add`). Before each call, `CallBudgetExceeded` is raised once a counter reaches `MAX_MESSAGE_MODEL_CALLS` (30): a soft backstop, since parallel asks in one step can overshoot. Per-agent caps are unchanged  |
+|  Errors | The server reports an error by name only (`RemoteException`). `_openai_error` raises `RateLimitError` and `AuthenticationError` again as `openai` exceptions, so the chat route's messages still work. `asyncio.timeout(AGENT_TIMEOUT_S)` limits a call (the client's own timeout is per read). `RuntimeError` when a run ends without a final state. Other errors reach the caller as they are; `ask_<route>` turns them into "the agent failed" text  |
+|  `ask_<route>` vs. a direct route | Both go through `RemoteAgent.ainvoke`: `ask` (`delegation.py:make_ask_tool`) passes `runtime.config` so the stream hook and the usage counter reach the call. Only a direct route sends the whole thread  |
 
 A routed sql message (router picks sql, no model call) end to end:
 
@@ -712,19 +711,6 @@ sequenceDiagram
     App->>App: thread updated in the checkpointer
     App-->>UI: SSE done
 ```
-
-### Status
-
-| Phase | State |
-|---|---|
-| 0. Spikes (feasibility) | done |
-| 1. Local Postgres in Docker | done |
-| 2. LangSmith tracing | done |
-| 3. Agent server image + compose stack | done (plan Tasks 4–5: one image, 4 servers in compose, end-to-end checked) |
-| 4. `RemoteAgent` wrapper in the main app | done (plan Tasks 1–3: `RemoteAgent`, the main app calls every specialist through it) |
-| 5. Security (service token, IAM, read-only roles) | done (plan Tasks 6–7: Cloud Run ID tokens; `agent_reader` for the app's data, `agent_server` for the servers' own databases; calls the main app gave up on are cancelled) |
-| 6. Cloud Run deployment | config and steps written (plan Task 8: `cloudbuild.agent.yaml`, `DEPLOYING.md`); first deploy pending |
-| Loop audit (plan Task 9) | done: on a subset of 6 `bench_chat` scenarios, `main` and this branch used the same number of model calls (17 vs 17), and the worst case was 6 calls for one message against `MAX_MESSAGE_MODEL_CALLS` = 30 |
 
 ---
 
@@ -791,7 +777,7 @@ The board is one structured model call per round. It is set with `OPENROUTER_JUD
 
 ### Measured cost and latency
 
-| Scenario | Normal relay (replaced design) | Round table, DeepSeek judge |
+| Scenario | Relay (replaced design) | Round table, DeepSeek judge |
 |---|---|---|
 | Stock question (AAPL vs MSFT) | 7 calls, 38 s | 1 round, 6 calls, 49 s |
 | File and database disagree (planted wrong figure) | not measured | 1 round, 9 calls, 99 s |

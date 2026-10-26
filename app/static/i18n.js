@@ -72,6 +72,7 @@ const I18N = {
     conflicts: "Conflicts",
     fixableBy: "fixable by",
     otherSteps: "Other steps",
+    drawing: "Drawing",
     yourQuestion: "Question for you",
   },
   vi: {
@@ -147,6 +148,7 @@ const I18N = {
     conflicts: "Mâu thuẫn",
     fixableBy: "có thể sửa bởi",
     otherSteps: "Các bước khác",
+    drawing: "Vẽ biểu đồ",
     yourQuestion: "Câu hỏi dành cho bạn",
   },
 };

@@ -233,7 +233,7 @@ const el = (tag, cls, text) => Object.assign(document.createElement(tag), { clas
 function newTurn(team = false) {
   const turn = {
     el: el("div", "status-line"), badges: [], running: true, step: {}, opener: null,
-    act: { team, rounds: [], tools: [], question: null },
+    act: { team, rounds: [], tools: [], drawn: [], question: null },
   };
   turn.el.turn = turn;
   turn.head = el("span");
@@ -251,7 +251,7 @@ function newTurn(team = false) {
 }
 
 const stepCount = (act) => act.rounds.reduce((n, r) => n + r.answers.reduce((m, a) => m + 1 + a.tools.length, 0), 0)
-  + act.tools.length + (act.question ? 1 : 0);
+  + act.drawn.reduce((n, d) => n + 1 + d.tools.length, 0) + act.tools.length + (act.question ? 1 : 0);
 
 const roundTitle = (r) => `${t(r.max ? "roundOf" : "roundN").replace("{n}", r.round).replace("{max}", r.max)} · ${t(r.kind === "conflict" ? "kindConflict" : "kindAnswer")}`;
 
@@ -367,6 +367,22 @@ function renderActivity() {
     if (r.board) sec.append(boardBlock(r.board));
     body.append(sec);
   }
+  if (act.drawn.length) {
+    const sec = el("section", "act-round");
+    sec.append(el("h3", "", t("drawing")));
+    for (const d of act.drawn) {
+      const div = el("div", "act-agent");
+      div.append(agentBadge(d.agent));
+      if (d.text) {
+        const text = el("div", "act-text");
+        text.innerHTML = renderMarkdown(d.text);
+        div.append(text);
+      }
+      for (const tool of d.tools) toolBlock(div, tool);
+      sec.append(div);
+    }
+    body.append(sec);
+  }
   if (act.tools.length) {
     const sec = el("section", "act-round");
     if (act.rounds.length) sec.append(el("h3", "", t("otherSteps")));
@@ -390,7 +406,7 @@ $("activityDialog").addEventListener("close", () => activityTurn?.opener?.focus(
 
 // A finished team reply's transcript (message.team) as popup data.
 const teamActivity = (team) => ({
-  team: true, tools: [], question: null,
+  team: true, tools: [], drawn: team.drawn || [], question: null,
   rounds: team.rounds.map((r) => ({
     ...r, agents: r.answers.map((a) => a.agent), board: team.boards.find((b) => b.round === r.round) || null,
   })),
@@ -622,6 +638,11 @@ async function sendMessage(text) {
   let finished = false;
   let waiting = false; // showing "thinking" after a fallback
   let synthesized = false; // the team's write-up started
+  // A drawer runs after the rounds, so an agent that spoke in none of them is one.
+  const drawerOf = (agent) => {
+    if (!act.rounds.length || act.rounds[0].agents.includes(agent)) return null;
+    return act.drawn.find((d) => d.agent === agent) || act.drawn[act.drawn.push({ agent, text: "", tools: [] }) - 1];
+  };
   const answerOf = (agent) => {
     if (!act.rounds.length) act.rounds.push({ round: 1, max: 0, kind: "answer", agents: [agent], answers: [], board: null });
     const answers = act.rounds[act.rounds.length - 1].answers;
@@ -701,6 +722,9 @@ async function sendMessage(text) {
             turn.step = { writing: true };
             touch(turn);
             break;
+          case "charts": // the team's final answer charts, drawn after the write-up; deduped by chart id
+            addCharts(event.charts, current.el);
+            break;
           case "needs_human":
             if (!started || waiting) { current.update(""); started = true; waiting = false; }
             current.update(event.question);
@@ -721,12 +745,12 @@ async function sendMessage(text) {
             }
             break;
           case "token":
-            if (event.agent) { answerOf(event.agent).text += event.text; touch(turn); break; } // a round's draft: popup only
+            if (event.agent) { (drawerOf(event.agent) || answerOf(event.agent)).text += event.text; touch(turn); break; } // a round's draft: popup only
             if (!started || waiting) { current.update(""); started = true; waiting = false; }
             current.append(event.text);
             break;
           case "tool_call":
-            if (event.agent) { answerOf(event.agent).tools.push({ name: event.name, args: event.args, result: null }); touch(turn); break; }
+            if (event.agent) { (drawerOf(event.agent) || answerOf(event.agent)).tools.push({ name: event.name, args: event.args, result: null }); touch(turn); break; }
             if (!started || waiting) current.remove();
             waiting = false;
             act.tools.push({ name: event.name, args: event.args, result: null });
@@ -737,7 +761,7 @@ async function sendMessage(text) {
             break;
           case "tool_result":
             if (event.agent) { // its charts stay out of the answer
-              const tools = answerOf(event.agent).tools;
+              const tools = (drawerOf(event.agent) || answerOf(event.agent)).tools;
               closeTool(tools, event.name, event.content).charts = event.charts;
               touch(turn);
               break;

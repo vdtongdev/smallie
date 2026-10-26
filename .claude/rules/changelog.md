@@ -10,7 +10,7 @@
   - `0.2.0`: research agent and writer agent
   - `0.3.0`: orchestrator and chart agent
   - `0.4.0`: remote agents (each specialist its own Agent Server), with its foundation: local Postgres in Docker and LangSmith tracing
-  - `0.5.0`: agent team (team mode, round table)
+  - `0.5.0`: agent team (team mode: round table, then task graph)
   - `0.6.0`: image agent
   - Later agents or architecture changes get `0.7.0`.
 - **Patch** is for bug fixes and small features (anything that isn't a new agent or an architecture change), and restarts at `.1` after each new minor (`0.4.0` → `0.4.1`).

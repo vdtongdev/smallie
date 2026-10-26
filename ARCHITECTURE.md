@@ -1,6 +1,6 @@
 # Smallie Architecture
 
-A FastAPI multi-agent AI app. A rule-based router sends each message to one specialist agent, or to an orchestrator that answers itself, hands off to a specialist, or asks several specialists and writes the answer. In team mode (section 11) the agents answer independently and a judge compares them.
+A FastAPI multi-agent AI app. A rule-based router sends each message to one specialist agent, or to an orchestrator that answers itself, hands off to a specialist, or asks several specialists and writes the answer. In team mode (section 11) a plan splits the work into tasks for the agents and a judge checks the results.
 
 This file describes `main` plus the 0.4.0 remote agents (section 10) and the 0.5.0 agent team (section 11). Code-level detail lives in `CLAUDE.md` and `.claude/rules/`; the 0.4.0 design is in `docs/superpowers/specs/2026-10-20-remote-agents-design.md`.
 
@@ -115,7 +115,7 @@ This file describes `main` plus the 0.4.0 remote agents (section 10) and the 0.5
 ### Routing Phase
 
 4. **Router decides (rule-based, no model)**
-   - If `kind == "team"`: go to the team round table (section 11)
+   - If `kind == "team"`: go to the team task graph (section 11)
    - If `kind` is an agent route: use the forced route (e.g. `/api/chat/docs` → docs agent)
    - Otherwise check whether the message obviously points to one agent:
      - Hints: keyword regex ("documents", "stock", "research", ...)
@@ -143,7 +143,7 @@ This file describes `main` plus the 0.4.0 remote agents (section 10) and the 0.5
    - `token`: text as it is generated
    - `tool_call`: which tool is called with which arguments
    - `tool_result`: tool output, plus charts
-   - Team mode adds `round`, `board`, `spoke`, `synthesize` and `needs_human` events
+   - Team mode adds `plan`, `plan_updated`, `wave`, `spoke`, `review`, `synthesize`, `needs_human` and `charts` events
    - The UI renders as events arrive
 
 ### Completion Phase
@@ -718,45 +718,63 @@ sequenceDiagram
 
 ### What it is
 
-Normal mode sends a message to one specialist or lets the orchestrator ask several. **Team mode** is a second way to answer: the agents whose data the question touches each answer **on their own, from their own sources**, a judge ("the board") compares the answers, and the agents that disagree check their point again. The user sees one answer in which differences between sources are shown, not hidden.
+Normal mode sends a message to one specialist or lets the orchestrator ask several. **Team mode** is a second way to answer: the orchestrator **plans the work as tasks**, the agents do them from their own sources (at the same time when the tasks are independent, one after another when one needs another's result), a judge checks the results as they come in, and the plan can grow when a result calls for more work. The user sees one answer in which differences between sources and open doubts are shown, not hidden.
 
-It is a switch next to the message box. It applies to a new chat (an opened chat keeps the mode it started with), and a team chat is marked in the sidebar. The API call is `POST /api/chat/team`. Design: `docs/superpowers/specs/2026-10-23-agent-team-design.md`.
+It is a switch next to the message box. It applies to a new chat (an opened chat keeps the mode it started with), and a team chat is marked in the sidebar. The API call is `POST /api/chat/team`. Design: `docs/superpowers/specs/2026-10-26-team-task-graph-design.md`. The first version of team mode was a "round table" (every agent answered the same question and a board compared the answers); the task graph replaced it, and chats saved by the round table still open with their rounds.
 
-### The round table
+### Three layers
+
+1. **Planning.** The orchestrator reads the request, splits it into tasks and picks only the agents it needs, possibly none. After each step the judge may add follow-up tasks.
+2. **Agents.** The sql, research, docs and chart agents run their tasks, from their own sources only, and question the input they receive.
+3. **Shared workspace.** One state object holds the tasks, their results and evidence, and what the checks found. The plan, the reviews and the write-up all read it. It starts empty for every message.
+
+### How a message flows
 
 ```
-message ──► pick ─── nobody's data is touched ──► orchestrator answers as usual
+message ──► plan ─── nobody's data is needed ──► orchestrator answers as usual
               │
               ▼
-        round 1: each participant answers alone (parallel, own sources only)
+        wave 1: tasks with no input run in parallel
               │
               ▼
-            board ─── user's input needed ──► pause ──► user answers ──► board
+           review ─── user's input needed ──► pause ──► user answers ──► review
               │
-              ├─ agreed, or differences explained ──► write-up ──► chart agent draws (if charts were asked for)
-              │
-              └─ conflict an agent can fix, and rounds left (up to TEAM_MAX_ROUNDS)
-                      │
-                      ▼
-                conflict round: only the agents involved check again ──► board
+              ├─ challenge or conflict an agent can fix, rounds left ──► that agent checks again ──► review
+              ├─ follow-up tasks added ──► next wave
+              └─ clean ──► next wave (tasks whose inputs are ready) ... until nothing is pending
+                                  │
+                                  ▼
+                              write-up ──► chart task draws from the final answer (if there is one)
 ```
 
-- **Who takes part:** a message that names no source brings in every agent available to the user (docs only when the user has files), so each looks in its own sources. Naming a source ("SQL agent", "the database", "my documents", a file name, "search the web") limits the table to the named agents; a topic word such as "stocks" or a ticker is not a name. The research agent also joins whenever another agent does, as an outside check. Small talk (at most 5 words, no question mark, no data words) goes to the orchestrator alone. The chart agent takes part only when the message asks for a chart.
-- **Withdrawal:** an agent whose sources hold nothing on the question withdraws, and the others go on. A withdrawn agent is left out of the board, the conflict rounds and the write-up. When at most one answer is left after a withdrawal, the board is not called (no extra model call). When every agent withdraws, the orchestrator answers as in normal mode and says plainly that those agents found nothing; the chart agent still draws if it was asked.
-- **Write-up:** the orchestrator writes one answer from the agents' answers, the explained differences and the open conflicts. When a single agent took part and nothing disagrees, its own answer is shown as is, with no extra model call.
-- **Charts:** the chart agent does not answer in the rounds and does not query. When the message names it, sql joins to fetch the data; after the write-up the chart agent runs once and draws from the final answer's table (or from figures written in the answer). It never adds or changes a figure. If it fails, the answer is shown without a chart. The chart appears in the chat as soon as it is drawn.
-- **Pause:** if the answers cannot go on without something only the user knows (for example which of two files they mean), the board asks one short question and the chat waits. The user's next message resumes the same turn; if the answer names an agent that is not taking part yet, that agent answers one round before the board looks again (a free-text answer that names nobody brings nobody in; a withdrawal in that round applies as usual).
+- **The plan:** one model call returns the tasks, each with an agent, a goal and the tasks it depends on. Tasks for agents that are not available are dropped, and there are at most `TEAM_MAX_TASKS` (default 6). If the call fails or the plan is unusable (a cycle, or every task dropped), the team falls back to the simple plan: every agent the message points to answers on its own. An empty plan means no specialist is needed and the orchestrator answers as in normal mode. Small talk (at most 5 words, no question mark, no data words) and a message that names exactly one agent skip the plan call.
+- **Waves:** a wave is the set of tasks that are ready (their inputs are done). They run at the same time, and the next wave starts when the whole wave is back, so a fast task waits for the slowest one in its wave. A task receives the user's message, its goal and the results of the tasks it depends on (the text and the tables, so no model copies data). If every input of a task failed or found nothing, the task is skipped; if only some did, it runs and is told which are missing.
+- **Withdrawal:** an agent whose sources hold nothing on its task withdraws, and the others go on. When every agent withdraws, the orchestrator answers as in normal mode and says plainly that those agents found nothing.
+- **Write-up:** the orchestrator writes one answer from the results. When a single agent took part and nothing is in doubt, its own answer is shown as is, with no extra model call. The write-up names the cause of a difference (definition, date, source, error or unknown), keeps what was observed in the data apart from a possible explanation, and lists open doubts and any task that never ran.
+- **Chart task:** the chart agent works last, on the final answer, because it should chart only data that survived the checks. It draws from the answer's table, or from figures written in the answer when there is no table, and never adds or changes a figure. If it fails, the answer is shown without a chart. Nothing waits for a chart task.
+- **Pause:** if the answers cannot go on without something only the user knows (for example which of two files they mean), the judge asks one short question and the chat waits. The user's next message resumes the same turn. If it names an agent that is not taking part yet, that agent gets a task and runs one wave before the judge looks again; a free-text answer brings nobody in.
 
-### Independent sources and the conflict rules
+### Checks
+
+After a wave the judge reads the results next to the inputs they came from (one model call; no call when a wave took no input and meets nothing yet, or when only one answer is left because the other agents found nothing). It looks for two kinds of problems:
+
+- **Hand-off challenge:** an agent that received another's output compared it with its own source and found a mismatch (for example a price that is not adjusted for a split). The agent that produced the output gets one round to re-check its source. If it revises, only the tasks that used the old output run again on the new one. If it stands by its output, the disagreement goes into the write-up as an open point.
+- **Meeting conflict:** parallel results that meet (at the next task or at the write-up) are compared. A difference is **explained** only when every side gives a source and an as-of date and the explanation fits the size of the gap (a date gap explains a small move, not a multiple). Otherwise it is a **conflict**. The judge never trusts a source because of its kind: a database, a file, a web page and a model can each be wrong, and it uses no outside knowledge. A conflict that an involved agent can fix with its own tools (a wrong query, a wrong name) goes to another round for those agents only.
+
+Each place where a check happens (a hand-off, or a point where results meet) gets at most `TEAM_MAX_ROUNDS` extra rounds (default 2). Past that, the open points go into the write-up, which shows every value and says plainly that the team could not settle it.
+
+### Follow-ups
+
+The same review call can add tasks the results call for: a document reveals a revenue claim and sql checks it, research mentions an internal memo and docs searches for it, sql finds a pattern and the chart agent draws it. A follow-up passes the same checks as the plan, counts toward `TEAM_MAX_TASKS`, and costs no extra call. Follow-ups that do not fit under the cap are dropped and the write-up names them as not done. A repeated task (same agent, same goal) is dropped.
+
+### Independent sources
 
 - Each agent only gets the tools of its own data source (stock database, uploaded files, web). A tool it is not offered is also refused if the model asks for it anyway. So two agents cannot quietly repeat one source's mistake.
-- A difference between answers is **explained** only when every side gives a source and an as-of date and the explanation fits the size of the gap (a date gap explains a small move, not a multiple). Otherwise it is a **conflict**.
-- The board never trusts a source because of its kind: a database, a file, a web page and a model can each be wrong. It does not use outside knowledge.
-- A conflict that one of the involved agents can fix with its own tools (a wrong query, a wrong name) goes to another round. When it cannot be settled (or the round cap is reached), the answer shows every value and says plainly that the team could not settle it.
+- When the plan makes one agent's result the input of another, the second still checks it against its own source.
 
 ### The judge model
 
-The board is one structured model call per round. It is set with `OPENROUTER_JUDGE_MODEL` and is used exactly (no provider quantization filter, no fallback model). Three judges were measured on the same scenarios:
+The judge is one structured model call per reviewed wave. It is set with `OPENROUTER_JUDGE_MODEL` and is used exactly (no provider quantization filter, no fallback model). The plan call uses the orchestrator's model. Three judges were measured on the round table's board, on the same scenarios:
 
 | Judge | Result |
 |---|---|
@@ -766,33 +784,41 @@ The board is one structured model call per round. It is set with `OPENROUTER_JUD
 
 ### In the UI
 
-- **Status line** under each reply (all chats): a spinner while it runs, the round (for example "Round 2 of 5 · resolving a conflict") with the agents' badges, "using <tool>" or "writing"; afterwards the number of rounds and explained differences.
-- **Activity popup** (button on the status line): the rounds, each agent's answer and the tools it called with their results, the board's findings and a pending question. It is rebuilt from the saved conversation, so it is still there after a reload.
+- **Status line** under each reply (all chats): a spinner while it runs, the wave (for example "Wave 2 of 3") with the agents' badges, a note when one agent questions another or a follow-up is added, "using <tool>" or "writing"; afterwards the number of waves and resolved challenges.
+- **Activity popup** (button on the status line): the plan as a list of tasks, then each wave with every task's answer and the tools it called with their results, each review (challenges, differences, conflicts and the outcome) and a pending question. It is rebuilt from the saved conversation, so it is still there after a reload.
 - Tool calls no longer appear as lines inside the chat; they live in the popup.
 
 ### Guardrails
 
-- **Round cap:** `TEAM_MAX_ROUNDS` conflict rounds after the first answer round (default 4).
-- **Call budget:** `TEAM_MAX_MESSAGE_MODEL_CALLS` model calls per message across the app and all agent servers (default 30). Past it, no further agent is called.
-- **Failures:** an agent that fails does not stop the others; the write-up says which part is missing. A failed board call ends the debate with the answers so far.
-- **Pause for the user:** the debate never guesses information only the user has.
+- **Task cap:** `TEAM_MAX_TASKS` tasks per message, follow-ups included (default 6).
+- **Round cap:** `TEAM_MAX_ROUNDS` extra rounds per check point (default 2).
+- **Call budget:** `TEAM_MAX_MESSAGE_MODEL_CALLS` model calls per message across the app and all agent servers (default 30). Past it, no further agent is called; the write-up uses what finished and names the tasks that never ran.
+- **Failures:** an agent that fails does not stop the others; the write-up says which part is missing. A failed judge call ends the checking with the answers so far.
+- **Pause for the user:** the team never guesses information only the user has.
 
 ### Measured cost and latency
 
-| Scenario | Relay (replaced design) | Round table, DeepSeek judge |
+These numbers are from the round table (the task graph is not re-measured here; its benchmark scenarios are in `scripts/bench_chat.py`).
+
+| Scenario | Relay (first design) | Round table, DeepSeek judge |
 |---|---|---|
 | Stock question (AAPL vs MSFT) | 7 calls, 38 s | 1 round, 6 calls, 49 s |
 | File and database disagree (planted wrong figure) | not measured | 1 round, 9 calls, 99 s |
 | Chart request | not measured | 1 round, 6 calls, 74 s |
 | Research question | 126-156 s | not re-measured |
 
-The board costs under $0.01 per message. All numbers are from the free-tier chat models; latency varies with their load.
+The judge costs under $0.01 per message. All numbers are from the free-tier chat models; latency varies with their load. A task graph adds one plan call and about one review call per reviewed wave to the agents' own calls; a challenge adds one call for the producer plus one per task that must run again.
 
 ### Limits
 
-- The chat models are free ones, so answers vary; the board's quality depends on the judge model.
+- The chat models are free ones, so answers vary; the judge's quality depends on the judge model.
+- A challenge exists only if the receiving agent wrote the mismatch down. Weak models may skip it.
+- One review call returns the checks and the follow-ups together, which is a large structured output; it has not been measured on the judge model. If it drops follow-ups or misses planted errors, follow-ups would move to their own call (one more call per wave).
+- A wave waits for its slowest task, so a fast task can sit idle. This costs time, not model calls.
+- With 2 rounds per check point, a large plan can reach the 30-call limit before it finishes; the write-up then says what is missing.
+- Checks run only through the judge call; there are no checks in code (for example that a ticker exists in the database).
 - `needs_human` (the pause) rarely fires in practice; it is covered by tests, not by many real runs.
-- Team mode costs more calls and time than a normal answer. Use it when sources may disagree.
+- Team mode costs more calls and time than a normal answer. Use it when the work needs several sources or they may disagree.
 - **Shared rooms (phase A of the design) are not built**: team mode is for one user's chat.
 
 ---

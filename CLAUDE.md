@@ -15,7 +15,7 @@ Layout of `app/`: `core/` (config, llm, db, memory, auth, accounts, conversation
 - `.claude/rules/`: path-scoped files that load when you read a matching path; open one deliberately for its area.
   - `agents.md`: `AgentSpec`, registry, `build_agent`, adding an agent or workflow.
   - `orchestration.md`: startup, routing, fallback, orchestrator, chat stream and SSE events.
-  - `team-mode.md`: round table, board, pause and resume, independent sources.
+  - `team-mode.md`: task graph (plan, waves, reviews, follow-ups, chart task), pause and resume, independent sources.
   - `remote-agents.md`: `RemoteAgent`, agent servers, auth, database logins, compose settings.
   - `memory.md`: knowledge graph, fact extraction, cross-chat history.
   - `research.md`: research workflow, citations, MCP, skills.

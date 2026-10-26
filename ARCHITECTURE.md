@@ -798,22 +798,41 @@ The judge is one structured model call per reviewed wave. It is set with `OPENRO
 
 ### Measured cost and latency
 
-These numbers are from the round table (the task graph is not re-measured here; its benchmark scenarios are in `scripts/bench_chat.py`).
+First measurement of the task graph (2026-10-26, `scripts/bench_chat.py` on the real models: judge and orchestrator `deepseek/deepseek-v4.1-flash`, chat model `google/gemma-4-31b-it`). 15 team scenarios, 100 model calls in all, no errors, and the plan never fell back.
 
-| Scenario | Relay (first design) | Round table, DeepSeek judge |
+| Scenario | Calls | Seconds |
 |---|---|---|
-| Stock question (AAPL vs MSFT) | 7 calls, 38 s | 1 round, 6 calls, 49 s |
-| File and database disagree (planted wrong figure) | not measured | 1 round, 9 calls, 99 s |
-| Chart request | not measured | 1 round, 6 calls, 74 s |
-| Research question | 126-156 s | not re-measured |
+| No specialist needed | 2 | 3.8 |
+| Documents only | 4 | 9.6 |
+| Stock question (AAPL vs MSFT) | 4 | 26.1 |
+| Vietnamese question | 4 | 17.2 |
+| Ambiguous question | 2 | 19.0 |
+| File and database conflict | 7 | 18.7 |
+| Research | 5 | 60.4 |
+| Chart | 8 | 63.8 |
+| Compound question | 7 | 97.0 |
+| Scenario A (topic) | 7 | 79.1 |
+| Scenario B (report) | 10 | 122.0 |
+| Scenario C (all agents) | 15 | 118.9 |
+| Scenario D (files) | 8 | 67.6 |
+| Scenario E (follow-up) | 10 | 86.5 |
+| Planted wrong figure | 7 | 222.4 |
 
-The judge costs under $0.01 per message. All numbers are from the free-tier chat models; latency varies with their load. A task graph adds one plan call and about one review call per reviewed wave to the agents' own calls; a challenge adds one call for the producer plus one per task that must run again.
+- **Choice of agents:** precision 1.00 and recall 1.00 in all 15 scenarios.
+- **Planted error:** the wrong MSFT market cap in an uploaded file was flagged.
+- **Plan ids:** before the fix in commit 0333ee0 the planner left out task ids in 2 of 4 scenarios, the whole plan was rejected and the turn fell back to every agent (the stock question: 11 calls, 72.1 s instead of 4 calls, 26.1 s).
+- **Slow outlier:** in the planted-error scenario one call took 200.1 s; which agent made it was not recorded.
+- The earlier round table needed 6 calls for the stock question and 9 for a planted conflict (judge under $0.01 per message). Those numbers are history.
+
+Latency varies with the free-tier models' load. A task graph adds one plan call and about one review call per reviewed wave to the agents' own calls; a challenge adds one call for the producer plus one per task that must run again.
 
 ### Limits
 
 - The chat models are free ones, so answers vary; the judge's quality depends on the judge model.
 - A challenge exists only if the receiving agent wrote the mismatch down. Weak models may skip it.
-- One review call returns the checks and the follow-ups together, which is a large structured output; it has not been measured on the judge model. If it drops follow-ups or misses planted errors, follow-ups would move to their own call (one more call per wave).
+- One review call returns the checks and the follow-ups together, which is a large structured output. The planted error was flagged on the judge model, but a follow-up has not been seen live: in the follow-up scenario the planner already put sql in the plan, so none was needed. If it drops follow-ups, they would move to their own call (one more call per wave).
+- The file-versus-database conflict scenario did not exercise a conflict: docs withdrew because it found nothing in the test file (cause not investigated).
+- `contribution.used` reads "unused" for most sql and docs answers, because evidence is recorded only from differences and challenges and agreeing answers leave none. The ablation run (`--ablate`) has not been done.
 - A wave waits for its slowest task, so a fast task can sit idle. This costs time, not model calls.
 - With 2 rounds per check point, a large plan can reach the 30-call limit before it finishes; the write-up then says what is missing.
 - Checks run only through the judge call; there are no checks in code (for example that a ticker exists in the database).

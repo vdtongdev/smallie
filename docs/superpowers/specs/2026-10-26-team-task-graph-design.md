@@ -231,3 +231,38 @@ Docs in the same branch: `ARCHITECTURE.md` section 11 and the **Team mode** sect
 - `TEAM_MAX_TASKS` (new, default 6, follow-ups included).
 - `TEAM_MAX_ROUNDS` (default 4 -> 2; now per meeting point).
 - `TEAM_MAX_MESSAGE_MODEL_CALLS` (30, unchanged), `OPENROUTER_JUDGE_MODEL` (used for the review call, unchanged).
+
+## Benchmark results (2026-10-26)
+
+Setup: `uv run python -m scripts.bench_chat --only <15 team scenarios>`, judge and orchestrator `deepseek/deepseek-v4.1-flash`, chat model `google/gemma-4-31b-it`. 15 scenarios, 100 model calls, 0 errors; the plan never fell back.
+
+| Scenario | Calls | Seconds |
+|---|---|---|
+| team | 4 | 26.1 |
+| team_research | 5 | 60.4 |
+| team_compound | 7 | 97.0 |
+| team_vi | 4 | 17.2 |
+| team_ambiguous | 2 | 19.0 |
+| team_conflict | 7 | 18.7 |
+| team_chart | 8 | 63.8 |
+| team_none | 2 | 3.8 |
+| team_docs | 4 | 9.6 |
+| team_a_topic | 7 | 79.1 |
+| team_b_report | 10 | 122.0 |
+| team_c_all | 15 | 118.9 |
+| team_d_files | 8 | 67.6 |
+| team_e_followup | 10 | 86.5 |
+| team_planted | 7 | 222.4 |
+
+Findings:
+- Choice: precision 1.00 and recall 1.00 in all 15.
+- Planted error (wrong MSFT market cap in an uploaded file): flagged.
+- Before commit 0333ee0 the planner omitted task ids in 2 of 4 scenarios, the whole plan was rejected and the turn fell back to every agent (`team`: 11 calls, 72.1 s, against 4 calls, 26.1 s after the fix).
+- `team_e_followup` saw no follow-up (the planner put sql in the plan up front).
+
+Open items:
+1. `team_conflict`: docs withdrew (found nothing in `bench_team_conflict.docx`), so the file-versus-database conflict was not exercised; cause not investigated.
+2. `contribution.used` reads "unused" for most sql and docs answers: evidence is recorded only from differences and challenges, so agreeing answers leave none. A metric limit; `--ablate` not run yet.
+3. In `team_planted` one call took 200.1 s; the agent was not identified.
+4. `team_e_followup` needs a request whose need for sql appears only from docs' answer.
+5. The first attempt crashed in the bench script printing a Vietnamese scenario name with redirected stdout on Windows (cp1252); run with `PYTHONIOENCODING=utf-8` (now noted in the script's docstring).

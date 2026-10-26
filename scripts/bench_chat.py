@@ -12,6 +12,7 @@ per scenario: time to the first visible event and first answer token, total time
 (the orchestrator's; the agent servers' calls run elsewhere). Every call spends free-tier quota (one scenario: 1-10 requests), so
 scenarios are spaced out to stay under ~20 requests/min. Threads and memories it creates are
 deleted afterwards. The app may keep running.
+On Windows with redirected output, set PYTHONIOENCODING=utf-8 (Vietnamese scenario names).
 """
 
 import argparse

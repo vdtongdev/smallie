@@ -346,8 +346,8 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
                 conflicts=_bullets([f"{c.claim} ({', '.join(c.routes)}): {c.issue}" for c in board.conflicts]),
                 language=reply_language(messages), drawing=_drawing(team["drawers"]))
             command = await ask_orchestrator(state, runtime, note)
-            handed_off = command.goto in by_route  # it handed off: the answers stand
-            answer = AIMessage("\n\n".join(a["text"] for a in answers), name=ORCHESTRATOR) if handed_off \
+            did_handoff = command.goto in by_route  # it handed off: the answers stand
+            answer = AIMessage("\n\n".join(a["text"] for a in answers), name=ORCHESTRATOR) if did_handoff \
                 else command.update["messages"][0]
         kwargs = {**answer.additional_kwargs, **_merge([team["artifacts"], collect([answer])]), "team": transcript}
         if kwargs.get("charts") and not team["drawers"]:

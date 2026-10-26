@@ -93,7 +93,7 @@ async def test_ask_board_calls_the_model_once(monkeypatch):
     config = {"callbacks": []}
     answers = [{"round": 1, "agent": "sql", "text": "SQL SAYS 3T"}, {"round": 1, "agent": "docs", "text": "DOCS SAYS 2T"}]
     await team.ask_board([HumanMessage("question?")], answers, config)
-    assert len(calls) == 1 and calls[0][1] is config and schemas == [(Board, "function_calling")]
+    assert len(calls) == 1 and calls[0][1] is config and schemas == [(Review, "function_calling")]
     human = calls[0][0][1].content
     assert "question?" in human and "SQL SAYS 3T" in human and "DOCS SAYS 2T" in human
 

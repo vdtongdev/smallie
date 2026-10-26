@@ -9,14 +9,14 @@ from langchain.agents.middleware import (
     wrap_model_call,
     wrap_tool_call,
 )
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.store.base import BaseStore
 
 from app.core.config import get_settings
 from app.core.llm import get_chat_model
-from app.core.memory import MEMORY_TOOLS, TOOL_SOURCE, AgentContext
+from app.core.memory import MEMORY_TOOLS, TEAM_MODE, TOOL_SOURCE, AgentContext
 from app.core.prompts import MEMORIES_SECTION, RECENT_CHATS_SECTION, USER_SECTION
 
 
@@ -30,6 +30,22 @@ async def scope_tools(request: ModelRequest, handler):
     """Team requests limit an agent to the tools of its sources; untagged tools stay."""
     sources = request.runtime.context.sources
     return await handler(request.override(tools=[t for t in request.tools if _in_scope(t, sources)]))
+
+
+@wrap_model_call
+async def source_first(request: ModelRequest, handler):
+    """In a team request an agent with source tools in scope must call one on its first model call
+    of the turn, so it cannot answer without looking in its sources. A request without scope (the
+    orchestrator) or without a source tool (the drawer) is left free. The tool is named when there
+    is only one, else any tool is required."""
+    context = request.runtime.context
+    last_human = max((i for i, m in enumerate(request.messages) if isinstance(m, HumanMessage)), default=-1)
+    first_call = not any(isinstance(m, ToolMessage) for m in request.messages[last_human + 1:])
+    names = [t.name for t in request.tools if (getattr(t, "metadata", None) or {}).get(TOOL_SOURCE)
+             and _in_scope(t, context.sources)]
+    if context.agent != TEAM_MODE or not context.sources or not first_call or not names:
+        return await handler(request)
+    return await handler(request.override(tool_choice=names[0] if len(names) == 1 else "required"))
 
 
 @wrap_tool_call
@@ -83,7 +99,7 @@ def build_agent(
     return create_agent(
         get_chat_model(model),
         tools=[*tools, *MEMORY_TOOLS],
-        middleware=[prompt_with_memories, call_limit, scope_tools, refuse_hidden_tools, *middleware],
+        middleware=[prompt_with_memories, call_limit, scope_tools, source_first, refuse_hidden_tools, *middleware],
         context_schema=AgentContext,
         checkpointer=checkpointer,
         store=store,

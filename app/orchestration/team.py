@@ -178,6 +178,12 @@ def _withdrawn(speeches: Sequence[dict], routes: Sequence[str]) -> list[str]:
     return [a["agent"] for a in _latest(speeches, routes) if a["withdrew"]]
 
 
+def _round_notes(routes: Sequence[str], available: Sequence[tuple[AgentSpec, RouteInfo]], base: str) -> dict[str, str]:
+    """Each speaker's round note: `base` plus its own `RouteInfo.prompt_note` (docs: the user's file names)."""
+    notes = {spec.route: info.prompt_note for spec, info in available}
+    return {r: f"{base}\n{notes[r]}" if notes.get(r) else base for r in routes}
+
+
 def _bullets(lines: Sequence[str]) -> str:
     return "\n".join(f"- {line}" for line in lines) or "none"
 
@@ -200,9 +206,10 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         return [Send("speak", {"route": r, "round": rnd, "kind": kind, "note": notes[r], "messages": messages})
                 for r in routes]
 
-    async def ask_orchestrator(state: AssistantState, runtime: Runtime[AgentContext], note: str = ""):
-        """The orchestrator node's Command for this thread (`note` as its hidden team message)."""
-        return await orchestrator({**state, "team_note": note} if note else state, runtime)
+    async def ask_orchestrator(state: AssistantState, runtime: Runtime[AgentContext], note: str = "", drawn: bool = False):
+        """The orchestrator node's Command for this thread (`note` as its hidden team message;
+        `drawn`: a drawer charts the answer, so the orchestrator may not)."""
+        return await orchestrator({**state, "team_note": note, "team_drawn": drawn} if note else state, runtime)
 
     async def handed_off(command: Command, messages, runtime: Runtime[AgentContext], config: RunnableConfig) -> AIMessage:
         """The orchestrator handed off: that agent answers on the thread, as in normal mode."""
@@ -226,7 +233,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         team = {"participants": chosen, "drawers": drawers, "round": 1, "rounds": [], "boards": [], "forced": False, "withdrawn": [], "artifacts": {},
                 "question": ""}  # a fresh debate: nothing of an earlier message's carries over
         return Command(update={"team": team, "speeches": [RESET]},
-                       goto=sends(chosen, 1, "answer", {r: note for r in chosen}, messages))
+                       goto=sends(chosen, 1, "answer", _round_notes(chosen, available, note), messages))
 
     async def speak(job, runtime: Runtime[AgentContext], config: RunnableConfig) -> dict:
         route, spec = job["route"], by_route[job["route"]]
@@ -323,7 +330,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         note = ROUND_MESSAGE.format(language=reply_language(messages), drawing=_drawing(drawers))
         team = {**team, "participants": [*team["participants"], *new], "round": rnd}
         return Command(update={"messages": messages[-1:], "team": team},
-                       goto=sends(new, rnd, "answer", {r: note for r in new}, messages))
+                       goto=sends(new, rnd, "answer", _round_notes(new, available, note), messages))
 
     async def synthesize(state: TeamState, runtime: Runtime[AgentContext], config: RunnableConfig) -> dict:
         team, messages = state["team"], state["messages"]
@@ -335,7 +342,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
             emit({"type": "synthesize"})
             note = NOTHING_FOUND_MESSAGE.format(withdrawn=", ".join(team["withdrawn"]),
                                                 language=reply_language(messages), drawing=_drawing(team["drawers"]))
-            command = await ask_orchestrator(state, runtime, note)
+            command = await ask_orchestrator(state, runtime, note, bool(team["drawers"]))
             answer = await handed_off(command, messages, runtime, config) if command.goto in by_route \
                 else command.update["messages"][0]
         elif len(answers) == 1 and not board.conflicts and not team["forced"] and only.answers_directly:
@@ -348,7 +355,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
                                    for d in board.differences]),
                 conflicts=_bullets([f"{c.claim} ({', '.join(c.routes)}): {c.issue}" for c in board.conflicts]),
                 language=reply_language(messages), drawing=_drawing(team["drawers"]))
-            command = await ask_orchestrator(state, runtime, note)
+            command = await ask_orchestrator(state, runtime, note, bool(team["drawers"]))
             did_handoff = command.goto in by_route  # it handed off: the answers stand
             answer = AIMessage("\n\n".join(a["text"] for a in answers), name=ORCHESTRATOR) if did_handoff \
                 else command.update["messages"][0]

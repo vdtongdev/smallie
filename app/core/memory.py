@@ -50,6 +50,7 @@ class AgentContext:
     mentioned: tuple[str, ...] = ()  # routes the latest message points to (hints, matches, mentions)
     sources: tuple[str, ...] = ()  # sources the agent may use (team mode); empty = no limit
     failed: str = ""  # route that already gave up on the latest message (the orchestrator's fallback)
+    drawn: bool = False  # team mode: a drawer charts the final answer, so the orchestrator draws nothing
 
 
 def memory_namespace(user_id: str) -> tuple[str, ...]:

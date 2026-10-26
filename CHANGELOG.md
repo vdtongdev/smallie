@@ -149,10 +149,10 @@ Versions are `major.minor.patch`: the major version stays 0 for now, each minor 
   - A remembered preference ("prefers Vietnamese") in the orchestrator's memories outweighed the language of the message
   - The orchestrator now names the reply language, taken from the latest message, on every call, even over a remembered preference
 - **Fix: the reloaded chat looked different from the live one**
-  - A reloaded team chat lacked steps the live view showed, and its answer could lose its charts
+  - A reloaded team chat lacked steps the live view showed (research's tool calls), and research's text showed short source ids live but full links after a reload
   - Live and reload now hold the same steps, and team answers keep their tables and charts
-- **Fix: one odd stream event ended the whole reply**
-  - A single stream event the server could not convert stopped the answer. It is now skipped and the reply goes on
+- **Fix: one unexpected stream event ended the whole reply**
+  - In the browser, a single malformed or unexpected stream event stopped the rest of the reply from showing. It is now skipped and the reply goes on
 - **Fix: opened chats kept the mode they were started with**
   - Continuing an older chat sent its message with the mode the chat began with (for example a single agent) instead of auto routing
   - Only team chats stay team; every other opened chat uses auto (`chatKind` in `app.js`)

@@ -69,10 +69,13 @@ class Board(BaseModel):
 
 
 def participants(available: list[tuple[AgentSpec, RouteInfo]], message: str) -> list[AgentSpec]:
-    """Who takes part: agents the message points to (of an `overrides` pair only the winner), plus
-    the `joins == "with_others"` agents when any other takes part. Registry order."""
+    """Who takes part: agents the message points to (one that another mentioned agent `overrides`
+    is dropped unless its own `hints` match), plus the `joins == "with_others"` agents when any
+    other takes part. Registry order."""
     mentioned = [spec for spec, info in available if spec.is_mentioned(message, info)]
-    chosen = [spec for spec in mentioned if not any(spec.route in other.overrides for other in mentioned)]
+    chosen = [spec for spec in mentioned
+              if (spec.hints and spec.hints.search(message))
+              or not any(spec.route in other.overrides for other in mentioned)]
     return [spec for spec, _ in available if spec in chosen
             or (chosen and spec.joins == "with_others" and any(c.route != spec.route for c in chosen))]
 

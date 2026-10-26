@@ -3,6 +3,7 @@
     uv run python -m scripts.bench_chat                       # all scenarios, once
     uv run python -m scripts.bench_chat --runs 2 --out bench.json
     uv run python -m scripts.bench_chat --only generic,sql_obvious
+    uv run python -m scripts.bench_chat --only team_planted --ablate   # reruns without each agent that took part; a judge compares
 
 Runs the assistant in-process exactly like `POST /api/chat/auto` (same graph, memories and
 SSE events), as BENCH_USER (default: the admin, who owns the uploaded test documents). Reports
@@ -17,6 +18,8 @@ import argparse
 import asyncio
 import json
 import os
+import random
+import re
 import statistics
 import sys
 import time
@@ -25,14 +28,22 @@ from pathlib import Path
 from contextlib import AsyncExitStack
 from dataclasses import asdict, dataclass, field
 
+from typing import Literal, Sequence
+from unittest.mock import patch
+
 from langchain_core.callbacks import AsyncCallbackHandler
+from langchain_core.messages import HumanMessage, SystemMessage
+from pydantic import BaseModel
 
 from app.agents.registry import AGENTS
 from app.api.routes_chat import _events_from
+from app.core.config import get_settings
 from app.core.db import init_db
 from app.core.graph import recall_facts
+from app.core.llm import get_chat_model
 from app.core.memory import AgentContext, open_persistence
 from app.core.usage import UsageCounter
+from app.orchestration import team as team_module
 from app.orchestration.graph import build_assistant
 
 SCENARIOS = {
@@ -69,8 +80,48 @@ SCENARIOS = {
     "team_conflict": ("What is AAPL's market cap according to the file bench_team_conflict.docx, and what does the stock database say?",
                       "team mode: the uploaded file and the database disagree"),
     "team_chart": ("Chart AAPL closing prices over the last month", "team mode: a chart request, a small gap should settle fast"),
+    "team_none": ("Write a two-line poem about the sea.", "team mode: no specialist needed, the orchestrator answers"),
+    "team_docs": ("Summarize my notes in bench_team_notes.docx.", "team mode: docs only"),
+    "team_a_topic": ("Explain sleep hygiene using my notes in bench_team_notes.docx and what other sources say.",
+                     "scenario A: a topic from the user's notes plus outside sources"),
+    "team_b_report": ("Review bench_team_report.docx and tell me whether its claims are supported.",
+                      "scenario B: claims from a file, checked externally"),
+    "team_c_all": ("Find interesting patterns in the tech stocks' market caps, chart them, explain them with recent news "
+                   "and relate them to my files.", "scenario C: sql, chart, research and docs"),
+    "team_d_files": ("The files bench_team_d_a.docx and bench_team_d_b.docx disagree on a figure. Determine why.",
+                     "scenario D: two files disagree on a figure"),
+    "team_e_followup": ("Investigate bench_team_e_note.docx: is what it says about NVDA right?",
+                        "scenario E: a document's numerical claim needs a database check (follow-up)"),
+    "team_planted": ("What is MSFT's market cap according to bench_team_planted.docx, and is it right?",
+                     "team mode: a wrong stock figure planted in an uploaded file"),
 }
-FIXTURES ={"team_conflict": ("team_conflict.md", "bench_team_conflict.docx")}  # scenario -> (source, uploaded name)
+EXPECTED = {  # team scenario -> agents that must / may take part
+    "team": {"required": ["sql"], "optional": ["research"]},
+    "team_research": {"required": ["research"], "optional": []},
+    "team_compound": {"required": ["sql"], "optional": ["research"]},
+    "team_vi": {"required": ["sql"], "optional": ["research"]},
+    "team_ambiguous": {"required": [], "optional": ["docs", "sql", "research"]},
+    "team_conflict": {"required": ["docs", "sql"], "optional": ["research"]},
+    "team_chart": {"required": ["sql", "chart"], "optional": []},
+    "team_none": {"required": [], "optional": []},
+    "team_docs": {"required": ["docs"], "optional": []},
+    "team_a_topic": {"required": ["docs", "research"], "optional": ["sql", "chart"]},
+    "team_b_report": {"required": ["docs", "research"], "optional": ["sql", "chart"]},
+    "team_c_all": {"required": ["sql", "chart", "research", "docs"], "optional": []},
+    "team_d_files": {"required": ["docs"], "optional": ["research", "sql"]},
+    "team_e_followup": {"required": ["docs", "sql"], "optional": ["research"]},
+    "team_planted": {"required": ["docs", "sql"], "optional": ["research"]},
+}
+CHECKS = {"team_planted": ("planted", "docs"), "team_e_followup": ("follow_up", "sql")}  # scenario -> (check, agent)
+FIXTURES = {  # scenario -> [(source, uploaded name)]
+    "team_conflict": [("team_conflict.md", "bench_team_conflict.docx")],
+    "team_docs": [("team_notes.md", "bench_team_notes.docx")],
+    "team_a_topic": [("team_notes.md", "bench_team_notes.docx")],
+    "team_b_report": [("team_report.md", "bench_team_report.docx")],
+    "team_d_files": [("team_d_a.md", "bench_team_d_a.docx"), ("team_d_b.md", "bench_team_d_b.docx")],
+    "team_e_followup": [("team_e_note.md", "bench_team_e_note.docx")],
+    "team_planted": [("team_planted.md", "bench_team_planted.docx")],
+}
 PAUSE_SECONDS = 20  # between scenarios, so bursts stay under the free tier's ~20 requests/min
 
 
@@ -98,6 +149,64 @@ class Result:
     answer: str = ""
     charts: list[str] = field(default_factory=list)  # charts drawn: "type: title (series x points)"
     error: str = ""
+    team: dict = field(default_factory=dict)  # the answer's workspace (team scenarios)
+    scores: dict = field(default_factory=dict)  # choice, contribution, check (team scenarios)
+    ablation: dict = field(default_factory=dict)  # agent -> {"better", "why"} (--ablate)
+
+
+class Comparison(BaseModel):
+    better: Literal["A", "B", "tie"]
+    why: str
+
+
+def choice(expected: dict, took_part: Sequence[str]) -> dict:
+    """Agents that took part against `required` + `optional`: an optional one is not an error, an unlisted one is."""
+    got, listed = set(took_part), set(expected["required"]) | set(expected["optional"])
+    missing = [a for a in expected["required"] if a not in got]
+    return {"precision": len(got & listed) / len(got) if got else 1.0,
+            "recall": 1 - len(missing) / len(expected["required"]) if expected["required"] else 1.0,
+            "missing_required": missing}
+
+
+def contribution(transcript: dict, answer: str) -> dict[str, dict]:
+    """Per agent: `live` (a task of it finished, none withdrawn), `used` (an evidence claim of its tasks or a link its results cite is in the answer)."""
+    out = {}
+    for agent in {t["agent"] for t in transcript["tasks"]}:
+        mine = [t for t in transcript["tasks"] if t["agent"] == agent]
+        ids = {t["id"] for t in mine}
+        claims = [e["claim"] for e in transcript.get("evidence", []) if e.get("task") in ids and e.get("claim")]
+        links = [u for i in ids for u in re.findall(r"https?://[^\s)\]>]+", transcript["results"].get(i, {}).get("text", ""))]
+        out[agent] = {"live": any(t["status"] in ("done", "failed") for t in mine),
+                      "used": any(c in answer for c in claims + links)}
+    return out
+
+
+def has_follow_up(transcript: dict, agent: str) -> bool:
+    return any(t["agent"] == agent and t.get("origin") == "follow_up" for t in transcript["tasks"])
+
+
+def planted_flagged(transcript: dict, agent: str) -> bool:
+    """A review challenged a task of `agent`, or named the agent in a conflict."""
+    ids = {t["id"] for t in transcript["tasks"] if t["agent"] == agent}
+    reviews = [e for e in transcript.get("history", []) if e["type"] == "review"]
+    return any(c["to_task"] in ids for r in reviews for c in r["challenges"]) or any(
+        agent in c["routes"] for r in reviews for c in r["conflicts"])
+
+
+async def judge(question: str, full: str, without: str) -> dict:
+    """One structured call on OPENROUTER_JUDGE_MODEL (the pattern of `ask_board`); the order is shuffled. better: with | without | tie."""
+    settings = get_settings()
+    swap = random.random() < 0.5
+    first, second = (without, full) if swap else (full, without)
+    model = settings.openrouter_judge_model
+    board = get_chat_model(model or settings.openrouter_orchestrator_model or None,
+                           **({"exact_model": True} if model else {})).with_structured_output(Comparison, method="function_calling")
+    human = f"QUESTION:\n{question}\n\nANSWER A:\n{first}\n\nANSWER B:\n{second}"
+    verdict = await board.ainvoke([SystemMessage("Compare two answers to the question. Say which is better (more correct, complete and "
+                                                 "better supported): A, B or tie. Give the reason in one sentence."),
+                                   HumanMessage(human)])
+    better = verdict.better if verdict.better == "tie" else ("with" if (verdict.better == "A") != swap else "without")
+    return {"better": better, "why": verdict.why}
 
 
 AGENT_PHRASES = {
@@ -187,6 +296,9 @@ async def run_scenario(assistant, store, user_id: str, name: str, run: int) -> R
                                   for c in event["charts"]]
         if not result.answer and not synthesized and first_spoke:
             result.answer = first_spoke
+        if name in EXPECTED:  # the answer carries the workspace
+            last = (await assistant.aget_state(config)).values["messages"][-1]
+            result.team = last.additional_kwargs.get("team", {})
     except Exception as exc:  # noqa: BLE001 - a failed scenario is a result too
         result.error = f"{type(exc).__name__}: {str(exc)[:200]}"
     result.total = elapsed()
@@ -233,6 +345,29 @@ def delete_fixture(user_id: str, doc_id: str) -> None:
         Path(row["path"]).unlink(missing_ok=True)
 
 
+def score(name: str, result: Result) -> None:
+    """Choice, contribution and the scenario's check, from the answer's workspace."""
+    team = result.team or {"tasks": [], "results": {}}
+    took_part = list(dict.fromkeys(t["agent"] for t in team["tasks"]))
+    result.scores = {"choice": choice(EXPECTED[name], took_part), "contribution": contribution(team, result.answer)}
+    if name in CHECKS:
+        kind, agent = CHECKS[name]
+        result.scores["check"] = {kind: planted_flagged(team, agent) if kind == "planted" else has_follow_up(team, agent)}
+
+
+async def ablate(assistant, store, user_id: str, name: str, result: Result) -> None:
+    """Rerun without each agent that took part (it is unavailable to the plan) and let the judge compare the answers."""
+    real = team_module.available_agents
+    for agent in dict.fromkeys(t["agent"] for t in result.team.get("tasks", [])):
+        async def without(user, specs, agent=agent):
+            return [(s, i) for s, i in await real(user, specs) if s.route != agent]
+
+        with patch.object(team_module, "available_agents", without):
+            rerun = await run_scenario(assistant, store, user_id, name, 1)
+        result.ablation[agent] = ({"better": "error", "why": rerun.error} if rerun.error
+                                  else await judge(messages_of(name)[-1], result.answer, rerun.answer))
+
+
 def messages_of(name: str) -> list[str]:
     message = SCENARIOS[name][0]
     return message if isinstance(message, list) else [message]
@@ -250,6 +385,16 @@ def report(results: list[Result]) -> None:
         route = "->".join(r.route) or "?"
         print(f"{r.scenario:<16} {route[:26]:<26} {r.model_calls:>5} {fmt(r.first_event):>7} "
               f"{fmt(r.first_token):>7} {r.total:>6.1f}  {calls}{'  ERROR ' + r.error if r.error else ''}")
+    for r in results:
+        if r.scores:
+            c = r.scores["choice"]
+            used = " ".join(f"{a}:{'live' if v['live'] else 'withdrew'}/{'used' if v['used'] else 'unused'}"
+                            for a, v in r.scores["contribution"].items())
+            print(f"{r.scenario:<16} precision {c['precision']:.2f} recall {c['recall']:.2f}"
+                  f"{' MISSING ' + ','.join(c['missing_required']) if c['missing_required'] else ''}  {used}"
+                  f"  {r.scores.get('check', '')}")
+        for agent, v in r.ablation.items():
+            print(f"{'':<16} without {agent}: {v['better']} - {v['why']}")
     print(f"\nmodel calls: {sum(r.model_calls for r in results)}")
     seconds = [c.seconds for r in results for c in r.calls if not c.error]
     if seconds:
@@ -274,11 +419,15 @@ async def main(args) -> None:
                 if results:
                     await asyncio.sleep(PAUSE_SECONDS)
                 print(f"[run {run}] {name}: {' / '.join(messages_of(name))}", flush=True)
-                doc_id = await upload_fixture(store, user_id, *FIXTURES[name]) if name in FIXTURES else None
+                doc_ids = [await upload_fixture(store, user_id, *f) for f in FIXTURES.get(name, [])]
                 try:
                     results.append(await run_scenario(assistant, store, user_id, name, run))
+                    if name in EXPECTED and not results[-1].error:
+                        score(name, results[-1])
+                        if args.ablate:
+                            await ablate(assistant, store, user_id, name, results[-1])
                 finally:
-                    if doc_id:
+                    for doc_id in doc_ids:
                         delete_fixture(user_id, doc_id)
                 r = results[-1]
                 print(f"  {'->'.join(r.route)}  {r.model_calls} calls  {r.total:.1f}s  {r.error}", flush=True)
@@ -294,6 +443,8 @@ if __name__ == "__main__":
     parser.add_argument("--runs", type=int, default=1)
     parser.add_argument("--only", help="comma-separated scenario names: " + ", ".join(SCENARIOS))
     parser.add_argument("--out", help="write all results as JSON")
+    parser.add_argument("--ablate", action="store_true",
+                        help="team scenarios: rerun without each agent that took part and have the judge compare (multiplies the calls)")
     args = parser.parse_args()
     if sys.platform == "win32":
         asyncio.run(main(args), loop_factory=asyncio.SelectorEventLoop)

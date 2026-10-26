@@ -43,6 +43,7 @@ SPEC = AgentSpec(
     build=build_chart_agent,
     message_names=("chart_agent",),
     hints=HINTS,
+    names=HINTS,  # chart words only; topic words never ask for a chart
     overrides=("sql",),
     review=REVIEW,
     sources=frozenset({"market_db"}),

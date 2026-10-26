@@ -123,6 +123,11 @@ class AgentSpec:
     draws: bool = False
     # Team mode: routes brought into the turn whenever this entry takes part (the data it draws from).
     fed_by: tuple[str, ...] = ()
+    # Team mode: words that name this agent or its source ("SQL agent", "the database"), English and Vietnamese.
+    # A topic word or a ticker is not a name.
+    names: re.Pattern | None = None
+    # True: the user's file names and resume/CV words (`RouteInfo.matches`/`mentions`) also name this source.
+    names_via_info: bool = False
 
     async def info(self, user_id: str) -> RouteInfo | None:
         return await self.route_info(user_id) if self.route_info else RouteInfo()
@@ -132,6 +137,10 @@ class AgentSpec:
 
     def is_mentioned(self, message: str, info: RouteInfo) -> bool:
         return self.is_obvious(message, info) or info.mentions(message)
+
+    def is_named(self, message: str, info: RouteInfo) -> bool:
+        return bool(self.names and self.names.search(message)) or (
+            self.names_via_info and (info.matches(message) or info.mentions(message)))
 
     def gave_up(self, messages: Sequence[AnyMessage]) -> bool:
         """True when this entry's reply (`turn_messages`) has no answer: no final text (e.g. it

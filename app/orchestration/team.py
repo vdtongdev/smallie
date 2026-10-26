@@ -29,16 +29,18 @@ from pydantic import BaseModel
 
 from app.agents.artifacts import KINDS, collect
 from app.agents.base import MEMORY_TOOL_NAMES, TOOL_RESULT_PREVIEW, AgentSpec, RouteInfo, ToolRecorder, turn_messages
+from app.agents.registry import AGENTS
 from app.core.config import get_settings
 from app.core.llm import get_chat_model
 from app.core.memory import TEAM_MODE, AgentContext
 from app.core.prompts import reply_language
-from app.orchestration.prompts import BOARD_PROMPT, CONFLICT_MESSAGE, DRAW_MESSAGE, DRAWING_NOTE, ROUND_MESSAGE, TEAM_MESSAGE
+from app.orchestration.prompts import BOARD_PROMPT, CONFLICT_MESSAGE, DRAW_MESSAGE, DRAWING_NOTE, NOTHING_FOUND_MESSAGE, ROUND_MESSAGE, TEAM_MESSAGE
 from app.orchestration.router import ORCHESTRATOR, AssistantState, available_agents
 
 log = logging.getLogger(__name__)
 
 TEAM = TEAM_MODE
+SMALL_TALK_WORDS = 5
 NO_SOURCES = ("none",)  # empty sources means unscoped, so the drawer gets a source no tool carries
 RESET = {"reset": True}  # first entry of `speeches` at the start of a message: forget the earlier message's
 
@@ -70,12 +72,25 @@ class Board(BaseModel):
     question: str = ""
 
 
+def is_small_talk(message: str, available: Sequence[tuple[AgentSpec, RouteInfo]] | None = None) -> bool:
+    """A short message with no question and no data words: the orchestrator answers it alone."""
+    if len(message.split()) > SMALL_TALK_WORDS or "?" in message:
+        return False
+    return not any(spec.is_mentioned(message, info) or bool(spec.names and spec.names.search(message))
+                   for spec, info in available or [(s, RouteInfo()) for s in AGENTS])
+
+
 def participants(available: list[tuple[AgentSpec, RouteInfo]], message: str) -> list[AgentSpec]:
-    """Who takes part: agents the message points to, their available `fed_by` routes, plus the
-    `joins == "with_others"` agents when any other takes part. Registry order."""
-    mentioned = [spec for spec, info in available if spec.is_mentioned(message, info)]
-    fed = {route for spec in mentioned for route in spec.fed_by}
-    chosen = [spec for spec, _ in available if spec in mentioned or spec.route in fed]
+    """Who takes part. Small talk: nobody. Speakers named in the message (agent or source): those;
+    none named: every available speaker. Plus the drawers the message names with their available
+    `fed_by` routes, plus the `joins == "with_others"` agents when any other takes part. Registry order."""
+    if is_small_talk(message, available):
+        return []
+    named = [spec for spec, info in available if spec.is_named(message, info)]
+    speakers = [spec for spec in named if not spec.draws] or [spec for spec, _ in available if not spec.draws]
+    drawers = [spec for spec in named if spec.draws]
+    fed = {route for spec in drawers for route in spec.fed_by}
+    chosen = [spec for spec, _ in available if spec in speakers or spec in drawers or spec.route in fed]
     return [spec for spec, _ in available if spec in chosen
             or (chosen and spec.joins == "with_others" and any(c.route != spec.route for c in chosen))]
 
@@ -124,7 +139,7 @@ def merge_speeches(old: list[dict] | None, new: list[dict]) -> list[dict]:
 
 
 class TeamState(AssistantState):
-    speeches: Annotated[list[dict], merge_speeches]  # {round, kind, agent, text, tools, artifacts, failed}
+    speeches: Annotated[list[dict], merge_speeches]  # {round, kind, agent, text, tools, artifacts, failed, withdrew}
 
 
 def _merge(artifacts: Sequence[dict]) -> dict:
@@ -144,7 +159,7 @@ def _rounds(speeches: Sequence[dict]) -> list[dict]:
     rounds: dict[int, dict] = {}
     for s in speeches:
         entry = rounds.setdefault(s["round"], {"round": s["round"], "kind": s["kind"], "answers": []})
-        entry["answers"].append({"agent": s["agent"], "text": s["text"], "tools": s["tools"]})
+        entry["answers"].append({"agent": s["agent"], "text": s["text"], "tools": s["tools"], "withdrew": s["withdrew"]})
     return list(rounds.values())
 
 
@@ -152,6 +167,15 @@ def _latest(speeches: Sequence[dict], routes: Sequence[str]) -> list[dict]:
     """Each listed agent's newest entry, in the order of `routes`."""
     newest = {s["agent"]: s for s in speeches}
     return [newest[r] for r in routes if r in newest]
+
+
+def _live(speeches: Sequence[dict], routes: Sequence[str]) -> list[dict]:
+    """The newest entries of agents that did not withdraw: the only ones the board and the write-up see."""
+    return [a for a in _latest(speeches, routes) if not a["withdrew"]]
+
+
+def _withdrawn(speeches: Sequence[dict], routes: Sequence[str]) -> list[str]:
+    return [a["agent"] for a in _latest(speeches, routes) if a["withdrew"]]
 
 
 def _bullets(lines: Sequence[str]) -> str:
@@ -180,6 +204,13 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         """The orchestrator node's Command for this thread (`note` as its hidden team message)."""
         return await orchestrator({**state, "team_note": note} if note else state, runtime)
 
+    async def handed_off(command: Command, messages, runtime: Runtime[AgentContext], config: RunnableConfig) -> AIMessage:
+        """The orchestrator handed off: that agent answers on the thread, as in normal mode."""
+        spec = by_route[command.goto]
+        result = await agents[spec.route].ainvoke({"messages": messages}, config, context=runtime.context)
+        turn = turn_messages(result.get("messages", []))
+        return AIMessage(spec.result(result), name=spec.message_names[0], additional_kwargs=collect(turn))
+
     async def pick(state: TeamState, runtime: Runtime[AgentContext], config: RunnableConfig) -> Command:
         messages = state["messages"]
         available = await available_agents(runtime.context.user_id, specs)
@@ -190,14 +221,9 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
             command = await ask_orchestrator(state, runtime)
             if command.goto not in by_route:
                 return Command(goto=END, update=command.update)
-            # It handed off: that agent answers on the thread, as in normal mode.
-            spec = by_route[command.goto]
-            result = await agents[spec.route].ainvoke({"messages": messages}, config, context=runtime.context)
-            turn = turn_messages(result.get("messages", []))
-            answer = AIMessage(spec.result(result), name=spec.message_names[0], additional_kwargs=collect(turn))
-            return Command(goto=END, update={"messages": [answer]})
+            return Command(goto=END, update={"messages": [await handed_off(command, messages, runtime, config)]})
         note = ROUND_MESSAGE.format(language=reply_language(messages), drawing=_drawing(drawers))
-        team = {"participants": chosen, "drawers": drawers, "round": 1, "rounds": [], "boards": [], "forced": False, "artifacts": {},
+        team = {"participants": chosen, "drawers": drawers, "round": 1, "rounds": [], "boards": [], "forced": False, "withdrawn": [], "artifacts": {},
                 "question": ""}  # a fresh debate: nothing of an earlier message's carries over
         return Command(update={"team": team, "speeches": [RESET]},
                        goto=sends(chosen, 1, "answer", {r: note for r in chosen}, messages))
@@ -207,7 +233,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         emit({"type": "speaker", "agent": route, "ns": config["configurable"]["checkpoint_ns"]})
         context = dataclasses.replace(runtime.context, sources=tuple(sorted(spec.sources)))
         messages = [*job["messages"], HumanMessage(job["note"], name=TEAM)]
-        entry = {"round": job["round"], "kind": job["kind"], "agent": route, "tools": [], "artifacts": {}, "failed": False}
+        entry = {"round": job["round"], "kind": job["kind"], "agent": route, "tools": [], "artifacts": {}, "failed": False, "withdrew": False}
         recorder = ToolRecorder()
         try:
             result = await agents[route].ainvoke({"messages": messages}, merge_configs(config, {"callbacks": [recorder]}),
@@ -221,30 +247,41 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         # A server reports every tool call, a workflow's inner ones too; in-process the recorder sees them;
         # the message scan is what agents without callbacks leave.
         tools = result["tools"] if "tools" in result else recorder.tools or _tools(turn)
-        entry = {**entry, "text": spec.result(result), "tools": tools, "artifacts": collect(turn)}
-        emit({"type": "spoke", **{k: entry[k] for k in ("agent", "round", "text", "tools")}})
+        # Research keeps its notes outside `messages`: it withdraws on empty findings, the others when `gave_up`.
+        withdrew = spec.gave_up(turn) if spec.answers_directly else not result.get("findings")
+        entry = {**entry, "text": spec.result(result), "tools": tools, "artifacts": collect(turn), "withdrew": withdrew}
+        emit({"type": "spoke", **{k: entry[k] for k in ("agent", "round", "text", "tools", "withdrew")}})
         return {"speeches": [entry]}
 
     async def judge(state: TeamState, runtime: Runtime[AgentContext], config: RunnableConfig) -> Command:
         team, speeches, settings = state["team"], state["speeches"], get_settings()
         rnd, messages = team["round"], state["messages"]
-        answers = _latest(speeches, team["participants"])
+        answers = _live(speeches, team["participants"])
+        live = [a["agent"] for a in answers]
         broken = False
-        try:
-            board = clean(await ask_board(messages, answers, config), [a["agent"] for a in answers])
-        except (openai.RateLimitError, openai.AuthenticationError):
-            raise
-        except Exception:  # noqa: BLE001 - the user still gets a write-up of the answers so far
-            log.exception("Team board failed")
-            board, broken = Board(), True
+        board = Board()
+        withdrawn = _withdrawn(speeches, team["participants"])
+        compare = len(answers) > 1 or not withdrawn  # a lone participant still goes to the board; withdrawals leave nothing to compare
+        if compare:
+            try:
+                board = clean(await ask_board(messages, answers, config), live)
+            except (openai.RateLimitError, openai.AuthenticationError):
+                raise
+            except Exception:  # noqa: BLE001 - the user still gets a write-up of the answers so far
+                log.exception("Team board failed")
+                broken = True
         fixable = [c for c in board.conflicts if c.fixable_by]
         failed = broken or team["forced"] or any(s["failed"] for s in speeches if s["round"] == rnd)
         asks = bool(board.question.strip())
         again = bool(fixable) and not asks and not failed and rnd <= settings.team_max_rounds  # round 1 is the answer round; conflict rounds are 2..cap+1
         forced = failed or (bool(fixable) and not asks and not again)
-        record = {"round": rnd, **board.model_dump(), "forced": forced}
-        emit({"type": "board", **record})
-        team = {**team, "rounds": _rounds(speeches), "boards": [*team["boards"], record], "forced": forced,
+        boards = team["boards"]
+        if compare:
+            record = {"round": rnd, **board.model_dump(), "forced": forced}
+            emit({"type": "board", **record})
+            boards = [*boards, record]
+        team = {**team, "rounds": _rounds(speeches), "boards": boards, "forced": forced,
+                "withdrawn": withdrawn,
                 "artifacts": _merge([s["artifacts"] for s in speeches])}
         if asks:
             emit({"type": "needs_human", "question": board.question})
@@ -252,11 +289,11 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
                                    "messages": [AIMessage(board.question, name=ORCHESTRATOR)]}, goto="pause")
         if not again:
             return Command(update={"team": team}, goto="synthesize")
-        routes = [r for r in team["participants"] if any(r in c.routes for c in fixable)]
+        routes = [r for r in live if any(r in c.routes for c in fixable)]
         language, notes = reply_language(messages), {}
         for r in routes:
             mine = [c for c in fixable if r in c.routes]
-            others = [o for o in _latest(speeches, team["participants"]) if o["agent"] != r
+            others = [o for o in answers if o["agent"] != r
                       and any(o["agent"] in c.routes for c in mine)]
             notes[r] = CONFLICT_MESSAGE.format(
                 conflicts=_bullets([f"{c.claim} ({c.issue})" for c in mine]),
@@ -269,7 +306,10 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         reply = interrupt({"question": state["team"]["question"]})
         team, messages = state["team"], [*state["messages"], HumanMessage(reply)]
         available = await available_agents(runtime.context.user_id, specs)
-        named = participants(available, reply)
+        # Only an agent the reply names joins (a drawer brings its `fed_by`); a free-text answer brings nobody in.
+        hits = [s for s, i in available if s.is_named(reply, i)]
+        named = participants(available, reply) if any(not s.draws for s in hits) else [
+            s for s, _ in available if s in hits or any(s.route in h.fed_by for h in hits)]
         new = [s.route for s in named if not s.draws and s.route not in team["participants"]]
         drawers = [*team["drawers"], *(s.route for s in named if s.draws and s.route not in team["drawers"])]
         team = {**team, "drawers": drawers}
@@ -282,14 +322,20 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         return Command(update={"messages": messages[-1:], "team": team},
                        goto=sends(new, rnd, "answer", {r: note for r in new}, messages))
 
-    async def synthesize(state: TeamState, runtime: Runtime[AgentContext]) -> dict:
+    async def synthesize(state: TeamState, runtime: Runtime[AgentContext], config: RunnableConfig) -> dict:
         team, messages = state["team"], state["messages"]
-        answers = _latest(state["speeches"], team["participants"])
-        board = Board(**team["boards"][-1])
-        transcript = {key: team[key] for key in ("participants", "drawers", "rounds", "boards", "forced")}
-        only = by_route[team["participants"][0]]
-        if len(answers) == 1 and len(team["participants"]) == 1 and not board.conflicts and not team["forced"] \
-                and only.answers_directly:
+        answers = _live(state["speeches"], team["participants"])
+        board = Board(**team["boards"][-1]) if team["boards"] else Board()
+        transcript = {key: team[key] for key in ("participants", "drawers", "rounds", "boards", "forced", "withdrawn")}
+        only = by_route[answers[0]["agent"]] if answers else None
+        if not answers:  # every agent withdrew: the orchestrator answers as in normal mode and says so
+            emit({"type": "synthesize"})
+            note = NOTHING_FOUND_MESSAGE.format(withdrawn=", ".join(team["withdrawn"]),
+                                                language=reply_language(messages), drawing=_drawing(team["drawers"]))
+            command = await ask_orchestrator(state, runtime, note)
+            answer = await handed_off(command, messages, runtime, config) if command.goto in by_route \
+                else command.update["messages"][0]
+        elif len(answers) == 1 and not board.conflicts and not team["forced"] and only.answers_directly:
             answer = AIMessage(answers[0]["text"], name=only.message_names[0])
         else:
             emit({"type": "synthesize"})  # only a write-up announces itself

@@ -67,6 +67,12 @@ HINTS = re.compile(
     re.IGNORECASE,
 )
 
+NAMES = re.compile(
+    r"\bresearch(?:er)? agent\b|\b(?:search|look (?:it )?up|browse) (?:the )?(?:web|internet|online)\b|\b(?:web|internet) search\b"
+    r"|\bwikipedia\b|\barxiv\b|\btrợ lý nghiên cứu\b|tìm (?:trên )?(?:web|mạng|internet)",
+    re.IGNORECASE,
+)
+
 # MCP tools loaded by `prepare` at startup, and the servers they came from; `build` runs after it.
 _mcp_tools: list[BaseTool] = []
 _mcp_servers: list[str] = []
@@ -457,6 +463,7 @@ SPEC = AgentSpec(
     build=build_research_workflow,
     message_names=("research_agent",),
     hints=HINTS,
+    names=NAMES,
     prepare=prepare,
     silent_steps=("gather",),
     tool_description=TOOL_DESCRIPTION,

@@ -18,6 +18,7 @@ HINTS = re.compile(
     r"cổ phiếu|cổ tức|vốn hóa|chứng khoán|mã ck)\b",
     re.IGNORECASE,
 )
+NAMES = re.compile(r"\b(sql|database|cơ sở dữ liệu)\b", re.IGNORECASE)
 TICKER_LIKE = re.compile(r"\b[A-Z]{2,5}(?:[.-][A-Z])?\b")
 _tickers: frozenset[str] = frozenset()
 
@@ -62,6 +63,7 @@ SPEC = AgentSpec(
     build=build_sql_agent,
     message_names=("sql_agent",),
     hints=HINTS,
+    names=NAMES,
     route_info=route_info,
     tool_description=TOOL_DESCRIPTION,
     review=REVIEW,

@@ -113,8 +113,9 @@ async def test_board_uses_the_judge_model(monkeypatch, judge, orchestrator, expe
 class Fake(Runnable):
     """An agent that logs when it runs and answers with scripted texts (the last one repeats)."""
 
-    def __init__(self, name, *texts, log, delay=0.0, tools=False, chart=None):
+    def __init__(self, name, *texts, log, delay=0.0, tools=False, chart=None, table=None):
         self.name, self.texts, self.log, self.delay, self.tools, self.chart = name, list(texts), log, delay, tools, chart
+        self.table = table
         self.calls = 0
 
     def invoke(self, input, config=None, **kwargs):
@@ -132,6 +133,8 @@ class Fake(Runnable):
             out = [AIMessage("", tool_calls=[{"name": "run_sql", "args": {"query": "SELECT 1"}, "id": "k1"}]),
                    ToolMessage("1 row", tool_call_id="k1", name="run_sql"), *out]
         self.log.append({"event": "end", "agent": self.name, "at": loop.time()})
+        if self.table:
+            out = [ToolMessage("1 row", tool_call_id="k3", name="run_sql", artifact={"tables": [self.table]}), *out]
         if self.chart:
             out = [ToolMessage("drawn", tool_call_id="k2", name="chart_data", artifact={"charts": [{"id": self.chart}]}), *out]
         return {"messages": [*input["messages"], *out], "findings": text}
@@ -382,7 +385,7 @@ async def test_drawer_does_not_speak_in_rounds(monkeypatch):
     chunks = await _stream(assistant, _ask("chart AAPL"))
 
     assert [e["agents"] for e in _events(chunks, "round")] == [["sql", "research"]]
-    assert boards == [["sql", "research"]] and chart.calls == 0
+    assert boards == [["sql", "research"]] and chart.calls == 1  # the draw only
     transcript = (await _thread(assistant))[-1].additional_kwargs["team"]
     assert transcript["drawers"] == ["chart"] and transcript["participants"] == ["sql", "research"]
 
@@ -454,13 +457,15 @@ async def test_reply_to_question_naming_a_new_agent_brings_it_in(monkeypatch):
 async def test_reply_without_new_agent_goes_straight_to_judge(monkeypatch):
     assistant, agents, second = await _chart_asks(monkeypatch, "2024 please")
 
-    assert not _events(second, "round") and agents["sql"].calls == 1 and agents["chart"].calls == 0
+    assert not _events(second, "round") and agents["sql"].calls == 1 and agents["chart"].calls == 1  # the draw only
+    assert all(a["agent"] != "chart" for r in (await _thread(assistant))[-1].additional_kwargs["team"]["rounds"] for a in r["answers"])
 
 
 async def test_reply_naming_an_agent_already_taking_part_does_not_run_it_again(monkeypatch):
     assistant, agents, second = await _chart_asks(monkeypatch, "make it a bar chart")
 
-    assert not _events(second, "round") and agents["chart"].calls == 0
+    assert not _events(second, "round") and agents["chart"].calls == 1  # the draw only
+    assert all(a["agent"] != "chart" for r in (await _thread(assistant))[-1].additional_kwargs["team"]["rounds"] for a in r["answers"])
     assert (await _thread(assistant))[-1].additional_kwargs["team"]["drawers"] == ["chart"]
 
 
@@ -609,3 +614,92 @@ async def test_spoke_event_carries_the_final_entry(monkeypatch):
         assert event == {"type": "spoke", "round": 1, **entry}
     assert next(e for e in spoke if e["agent"] == "sql")["tools"] == [
         {"name": "run_sql", "args": {"query": "SELECT 1"}, "result": "1 row"}]
+
+
+# --- the draw step: the chart agent draws from the final answer ---
+
+TABLE = {"id": "t1", "query": "SELECT ticker, cap FROM x", "columns": ["ticker", "cap"],
+         "rows": [["AAPL", 3.0], ["MSFT", 2.5]], "truncated": False}
+DRAW = [AIMessage("", tool_calls=[{"name": "chart_table", "args": {
+            "table_id": "t1", "type": "bar", "title": "Caps", "x_column": "ticker", "y_columns": ["cap"]}, "id": "d1"}]),
+        AIMessage("Chart drawn.")]
+
+
+async def test_drawer_charts_the_final_answers_table(monkeypatch):
+    _board(monkeypatch, Board())
+    model = per_agent(orchestrator=[AIMessage("Final.")], chart=DRAW)
+    assistant = _assistant(monkeypatch, model, sql=Fake("sql", "Cap.", log=[], table=TABLE),
+                           research=Fake("research", "Notes.", log=[]))
+    chunks = await _stream(assistant, _ask("chart AAPL"))
+
+    final = (await _thread(assistant))[-1]
+    charts = final.additional_kwargs["charts"]
+    assert len(charts) == 1 and charts[0]["table_id"] == "t1" and final.text == "Final."
+    assert [e["charts"] for e in _events(chunks, "charts")] == [charts]
+    assert "chart_sql" not in {t["function"]["name"] for t in model.tools[-1]}  # no data sources: the drawer cannot query
+    drawn = final.additional_kwargs["team"]["drawn"]
+    assert [d["agent"] for d in drawn] == ["chart"] and drawn[0]["tools"][0]["name"] == "chart_table"
+    assert {e["agent"] for e in _events(chunks, "speaker")} >= {"chart"}
+
+
+async def test_drawer_failure_keeps_the_answer(monkeypatch):
+    _board(monkeypatch, Board())
+    model = per_agent(orchestrator=[AIMessage("Final.")])
+    assistant = _assistant(monkeypatch, model, sql=Fake("sql", "Cap.", log=[], table=TABLE),
+                           research=Fake("research", "Notes.", log=[]), chart=_Failing())
+    chunks = await _stream(assistant, _ask("chart AAPL"))
+
+    final = (await _thread(assistant))[-1]
+    assert final.text == "Final." and "charts" not in final.additional_kwargs and not _events(chunks, "charts")
+
+
+async def test_no_drawer_no_draw(monkeypatch):
+    _board(monkeypatch, Board())
+    chart = Fake("chart", "drawn", log=[])
+    model = per_agent(orchestrator=[AIMessage("Final.")])
+    assistant = _assistant(monkeypatch, model, sql=Fake("sql", "Cap.", log=[]), research=Fake("research", "n", log=[]),
+                           chart=chart)
+    chunks = await _stream(assistant, _ask())
+
+    assert chart.calls == 0 and not _events(chunks, "charts")
+    assert "drawn" not in (await _thread(assistant))[-1].additional_kwargs["team"]
+
+
+async def test_charts_event_for_a_write_up_that_already_has_charts(monkeypatch):
+    _board(monkeypatch, Board())
+    model = per_agent(orchestrator=[AIMessage("Final.")])
+    assistant = _assistant(monkeypatch, model, sql=Fake("sql", "Cap.", log=[], chart="chart-sql"),
+                           research=Fake("research", "Notes.", log=[]))
+    chunks = await _stream(assistant, _ask())
+    assert [e["charts"] for e in _events(chunks, "charts")] == [[{"id": "chart-sql"}]]
+
+
+async def test_single_speaker_answer_stands_then_chart_draws(monkeypatch):
+    _research_does_not_join(monkeypatch)
+    _board(monkeypatch, Board())
+    model = per_agent(chart=DRAW)  # no orchestrator script: a call to it fails the test
+    assistant = _assistant(monkeypatch, model, sql=Fake("sql", "Cap is 3T.", log=[], table=TABLE))
+    chunks = await _stream(assistant, _ask("chart AAPL"))
+
+    final = (await _thread(assistant))[-1]
+    assert (final.name, final.text) == ("sql_agent", "Cap is 3T.")
+    assert final.additional_kwargs["charts"][0]["table_id"] == "t1" and _events(chunks, "charts")
+    assert not _events(chunks, "synthesize")
+
+
+async def test_answer_without_data_draws_nothing(monkeypatch):
+    _research_does_not_join(monkeypatch)
+    _board(monkeypatch, Board())
+    model = per_agent(chart=[AIMessage("The answer holds no data to chart.")])
+    assistant = _assistant(monkeypatch, model, sql=Fake("sql", "No rows.", log=[]))
+    chunks = await _stream(assistant, _ask("chart AAPL"))
+
+    final = (await _thread(assistant))[-1]
+    assert final.text == "No rows." and "charts" not in final.additional_kwargs and not _events(chunks, "charts")
+
+
+def test_draw_message_formats_with_language():
+    from app.orchestration.prompts import DRAW_MESSAGE
+
+    text = DRAW_MESSAGE.format(language="English")
+    assert "English" in text and "{" not in text and "}" not in text

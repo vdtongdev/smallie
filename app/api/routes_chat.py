@@ -28,7 +28,7 @@ from app.core.usage import UsageCounter, add_usage
 router = APIRouter(tags=["chat"])
 log = logging.getLogger(__name__)
 
-TEAM_EVENTS = frozenset({"round", "board", "synthesize", "needs_human", "spoke"})  # custom events of a team turn
+TEAM_EVENTS = frozenset({"round", "board", "synthesize", "needs_human", "spoke", "charts"})  # custom events of a team turn
 
 
 class ChatRequest(BaseModel):

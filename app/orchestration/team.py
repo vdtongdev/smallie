@@ -13,6 +13,7 @@ on its `additional_kwargs["team"]`. Progress goes out as `custom` stream events:
 import asyncio
 import dataclasses
 import logging
+import uuid
 from collections.abc import Mapping, Sequence
 from typing import Annotated
 
@@ -32,12 +33,13 @@ from app.core.config import get_settings
 from app.core.llm import get_chat_model
 from app.core.memory import TEAM_MODE, AgentContext
 from app.core.prompts import reply_language
-from app.orchestration.prompts import BOARD_PROMPT, CONFLICT_MESSAGE, ROUND_MESSAGE, TEAM_MESSAGE
+from app.orchestration.prompts import BOARD_PROMPT, CONFLICT_MESSAGE, DRAW_MESSAGE, ROUND_MESSAGE, TEAM_MESSAGE
 from app.orchestration.router import ORCHESTRATOR, AssistantState, available_agents
 
 log = logging.getLogger(__name__)
 
 TEAM = TEAM_MODE
+NO_SOURCES = ("none",)  # empty sources means unscoped, so the drawer gets a source no tool carries
 RESET = {"reset": True}  # first entry of `speeches` at the start of a message: forget the earlier message's
 
 
@@ -298,6 +300,36 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
             answer = AIMessage("\n\n".join(a["text"] for a in answers), name=ORCHESTRATOR) if handed_off \
                 else command.update["messages"][0]
         kwargs = {**answer.additional_kwargs, **_merge([team["artifacts"], collect([answer])]), "team": transcript}
+        if kwargs.get("charts") and not team["drawers"]:
+            emit({"type": "charts", "charts": kwargs["charts"]})
+        # An id, so the `draw` step's version replaces this message instead of joining it.
+        return {"messages": [answer.model_copy(update={"additional_kwargs": kwargs, "id": answer.id or str(uuid.uuid4())})]}
+
+    async def draw(state: TeamState, runtime: Runtime[AgentContext], config: RunnableConfig) -> dict:
+        """Each drawer runs once on the thread plus the final answer, with no data source, and its charts join the answer."""
+        messages, answer = state["messages"], state["messages"][-1]
+        drawn, artifacts = [], [collect([answer])]
+        for route in state["team"]["drawers"]:
+            emit({"type": "speaker", "agent": route, "ns": config["configurable"]["checkpoint_ns"]})
+            context = dataclasses.replace(runtime.context, sources=NO_SOURCES)
+            note = HumanMessage(DRAW_MESSAGE.format(language=reply_language(messages)), name=TEAM)
+            recorder = ToolRecorder()
+            try:
+                result = await agents[route].ainvoke({"messages": [*messages, note]},
+                                                     merge_configs(config, {"callbacks": [recorder]}), context=context)
+            except (openai.RateLimitError, openai.AuthenticationError):
+                raise
+            except Exception:  # noqa: BLE001 - the final answer stands without the chart
+                log.exception("Team drawer %s failed", route)
+                continue
+            turn = turn_messages(result.get("messages", []))
+            tools = result["tools"] if "tools" in result else recorder.tools or _tools(turn)
+            drawn.append({"agent": route, "text": by_route[route].result(result), "tools": tools})
+            artifacts.append({"charts": collect(turn).get("charts", [])})
+        merged = _merge(artifacts)
+        kwargs = {**answer.additional_kwargs, **merged, "team": {**answer.additional_kwargs["team"], "drawn": drawn}}
+        if merged.get("charts"):
+            emit({"type": "charts", "charts": merged["charts"]})
         return {"messages": [answer.model_copy(update={"additional_kwargs": kwargs})]}
 
     graph = StateGraph(TeamState, context_schema=AgentContext)
@@ -306,7 +338,9 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
     graph.add_node("judge", judge, destinations=("speak", "synthesize", "pause"))
     graph.add_node("pause", pause, destinations=("judge", "speak"))
     graph.add_node("synthesize", synthesize)
+    graph.add_node("draw", draw)
     graph.add_edge(START, "pick")
     graph.add_edge("speak", "judge")
-    graph.add_edge("synthesize", END)
+    graph.add_conditional_edges("synthesize", lambda state: "draw" if state["team"]["drawers"] else END, ["draw", END])
+    graph.add_edge("draw", END)
     return graph.compile(name=TEAM)

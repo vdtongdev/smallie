@@ -733,7 +733,7 @@ message ──► pick ─── nobody's data is touched ──► orchestrator
               ▼
             board ─── user's input needed ──► pause ──► user answers ──► board
               │
-              ├─ agreed, or differences explained ──► write-up
+              ├─ agreed, or differences explained ──► write-up ──► chart agent draws (if charts were asked for)
               │
               └─ conflict an agent can fix, and rounds left (up to TEAM_MAX_ROUNDS)
                       │
@@ -743,6 +743,7 @@ message ──► pick ─── nobody's data is touched ──► orchestrator
 
 - **Who takes part:** the agents the message points to (stock figures: sql; "my file": docs; news: research; charts: chart). The research agent also joins whenever another agent does, as an outside check.
 - **Write-up:** the orchestrator writes one answer from the agents' answers, the explained differences and the open conflicts. When a single agent took part and nothing disagrees, its own answer is shown as is, with no extra model call.
+- **Charts:** the chart agent does not answer in the rounds and does not query. When the message names it, sql joins to fetch the data; after the write-up the chart agent runs once and draws from the final answer's table (or from figures written in the answer). It never adds or changes a figure. If it fails, the answer is shown without a chart. The chart appears in the chat as soon as it is drawn.
 - **Pause:** if the answers cannot go on without something only the user knows (for example which of two files they mean), the board asks one short question and the chat waits. The user's next message resumes the same turn; if the answer names an agent that is not taking part yet, that agent answers one round before the board looks again.
 
 ### Independent sources and the conflict rules

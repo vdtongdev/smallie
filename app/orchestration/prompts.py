@@ -131,6 +131,9 @@ OPEN CONFLICTS:
 
 Combine the answers into one answer to the user's message. Where sources gave different values and the differences are explained, give each source's value with its source and date, plus the explanation, so the user sees both. Where OPEN CONFLICTS is not "none", show every value, say plainly that the team could not settle it, and do not pick one. Where the issue says several independent dated sources agree against one, say which values agree and which stands alone, without calling a source right because of its kind. When an answer says it failed, say plainly which part is missing."""
 
+# Hidden last message for a team drawer (the chart agent), after the final answer: the thread plus the final answer plus this (name TEAM).
+DRAW_MESSAGE = """TEAM DRAW (not visible to the user). The message just above is the team's final answer to the user's latest message. Draw the chart the user asked for from the data in that answer. You have no database. 1. When a table listed in this chat holds the data, draw it with chart_table. 2. Otherwise, when the answer writes the figures, draw them with chart_data, copying them exactly. Never add, change or estimate a figure. When the answer holds no data to chart, say so in one line and draw nothing. After drawing, reply with one short line about the chart, not another answer. Write in {language}."""
+
 # Results of tool calls the orchestrator may not make (`no_repeats` in orchestrator.py).
 REPEATED_CALL = "Not run: this exact call was already made for this message; its result is above. Use it, or write the answer."
 ALREADY_ASKED = "Not run: this specialist was already asked enough about this message and had nothing more. Write the answer with what you have, saying plainly what is missing."

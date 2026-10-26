@@ -352,3 +352,18 @@ async def test_tool_calls_reported_by_the_server_pass_through():
     remote = FakeRemote(output={"messages": [HUMAN], "tools": tools})
     result = await agent(remote).ainvoke({"messages": []}, {}, context=CTX)
     assert result["tools"] == tools
+
+
+def test_tables_on_a_message_survive_the_wire_to_the_servers_state():
+    """The team's final answer carries its tables in additional_kwargs; the chart server's chart_table
+    reads them from the thread, after the SDK's JSON encoding and the server's add_messages."""
+    import orjson
+    from langgraph.graph.message import add_messages
+    from langgraph_sdk._shared.utilities import _orjson_default
+
+    from app.agents.artifacts import artifacts_from
+
+    answer = AIMessage("Cap.", id="a1", additional_kwargs={"tables": [{"id": "t1", "rows": [[1]]}]})
+    wire = orjson.loads(orjson.dumps({"messages": [answer]}, default=_orjson_default))
+    state = add_messages([], wire["messages"])
+    assert artifacts_from(state, "tables") == [{"id": "t1", "rows": [[1]]}]

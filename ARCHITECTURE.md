@@ -1,8 +1,8 @@
 # Smallie Architecture
 
-A FastAPI multi-agent AI app. A rule-based router sends each message to one specialist agent, or to an orchestrator that answers itself, hands off to a specialist, or asks several specialists and writes the answer.
+A FastAPI multi-agent AI app. A rule-based router sends each message to one specialist agent, or to an orchestrator that answers itself, hands off to a specialist, or asks several specialists and writes the answer. In team mode (section 11) the agents answer independently and a judge compares them.
 
-This file describes `main` plus the 0.4.0 work in progress (remote agents, section 10). Code-level detail lives in `CLAUDE.md`; the 0.4.0 design is in `docs/superpowers/specs/2026-10-20-remote-agents-design.md`.
+This file describes `main` plus the 0.4.0 work in progress (remote agents, section 10) and the 0.5.0 agent team (section 11). Code-level detail lives in `CLAUDE.md`; the 0.4.0 design is in `docs/superpowers/specs/2026-10-20-remote-agents-design.md`.
 
 ---
 
@@ -27,7 +27,7 @@ This file describes `main` plus the 0.4.0 work in progress (remote agents, secti
 - LangChain agents (specialists + orchestrator)
 - OpenRouter API for LLM and embedding calls (free tier + server-side fallback models)
 - MCP (Model Context Protocol) servers for web search, Wikipedia, arXiv
-- Optional LangSmith tracing for debugging (section 11)
+- Optional LangSmith tracing for debugging (section 12)
 
 **Database**
 
@@ -63,14 +63,15 @@ This file describes `main` plus the 0.4.0 work in progress (remote agents, secti
 │    6. Start market price scheduler (daily update)               │
 │                                                                 │
 │  Routes:                                                        │
-│    POST /api/chat/{kind}   ─ Main message endpoint              │
+│    POST /api/chat/{kind}   ─ Main message endpoint (auto, team, │
+│                              or one agent)                      │
 │    GET  /api/agents        ─ Agent info + labels                │
 │    POST /api/signup        ─ Create account (max 20)            │
 │    GET  /api/conversations ─ Conversation list                  │
 │    POST /api/documents     ─ Upload files (PDF/DOCX)            │
 │                                                                 │
 │  Assistant Graph (built once at startup):                       │
-│    START → router → {docs|sql|chart|research|orchestrator}      │
+│    START → router → {docs|sql|chart|research|orchestrator|team} │
 │           ↓ (rule-based, no model)                              │
 │           └─ fallback (if the specialist gives up)              │
 └────────────────────┬────────────────────────────────────────────┘
@@ -99,7 +100,7 @@ This file describes `main` plus the 0.4.0 work in progress (remote agents, secti
 ### Request Phase
 
 1. **User sends a message**
-   - POST `/api/chat/{kind}`, where kind is "auto" or a specific agent route
+   - POST `/api/chat/{kind}`, where kind is "auto", "team" (section 11) or a specific agent route
    - Message ≤ 8,000 characters
 2. **Authentication and context**
    - Verify the session cookie → `user_id`
@@ -114,7 +115,8 @@ This file describes `main` plus the 0.4.0 work in progress (remote agents, secti
 ### Routing Phase
 
 4. **Router decides (rule-based, no model)**
-   - If `kind != "auto"`: use the forced route (e.g. `/api/chat/docs` → docs agent)
+   - If `kind == "team"`: go to the team round table (section 11)
+   - If `kind` is an agent route: use the forced route (e.g. `/api/chat/docs` → docs agent)
    - Otherwise check whether the message obviously points to one agent:
      - Hints: keyword regex ("documents", "stock", "research", ...)
      - Matches: ticker symbols, file names
@@ -141,6 +143,7 @@ This file describes `main` plus the 0.4.0 work in progress (remote agents, secti
    - `token`: text as it is generated
    - `tool_call`: which tool is called with which arguments
    - `tool_result`: tool output, plus charts
+   - Team mode adds `round`, `board`, `spoke`, `synthesize` and `needs_human` events
    - The UI renders as events arrive
 
 ### Completion Phase
@@ -725,7 +728,88 @@ sequenceDiagram
 
 ---
 
-## 11. Debugging with LangSmith
+## 11. Agent Team (0.5.0)
+
+### What it is
+
+Normal mode sends a message to one specialist or lets the orchestrator ask several. **Team mode** is a second way to answer: the agents whose data the question touches each answer **on their own, from their own sources**, a judge ("the board") compares the answers, and the agents that disagree check their point again. The user sees one answer in which differences between sources are shown, not hidden.
+
+It is a switch next to the message box. It applies to a new chat (an opened chat keeps the mode it started with), and a team chat is marked in the sidebar. The API call is `POST /api/chat/team`. Design: `docs/superpowers/specs/2026-10-23-agent-team-design.md`.
+
+### The round table
+
+```
+message ──► pick ─── nobody's data is touched ──► orchestrator answers as usual
+              │
+              ▼
+        round 1: each participant answers alone (parallel, own sources only)
+              │
+              ▼
+            board ─── user's input needed ──► pause ──► user answers ──► board
+              │
+              ├─ agreed, or differences explained ──► write-up
+              │
+              └─ conflict an agent can fix, and rounds left (up to TEAM_MAX_ROUNDS)
+                      │
+                      ▼
+                conflict round: only the agents involved check again ──► board
+```
+
+- **Who takes part:** the agents the message points to (stock figures: sql; "my file": docs; news: research; charts: chart). The research agent also joins whenever another agent does, as an outside check.
+- **Write-up:** the orchestrator writes one answer from the agents' answers, the explained differences and the open conflicts. When a single agent took part and nothing disagrees, its own answer is shown as is, with no extra model call.
+- **Pause:** if the answers cannot go on without something only the user knows (for example which of two files they mean), the board asks one short question and the chat waits. The user's next message resumes the same turn.
+
+### Independent sources and the conflict rules
+
+- Each agent only gets the tools of its own data source (stock database, uploaded files, web). A tool it is not offered is also refused if the model asks for it anyway. So two agents cannot quietly repeat one source's mistake.
+- A difference between answers is **explained** only when every side gives a source and an as-of date and the explanation fits the size of the gap (a date gap explains a small move, not a multiple). Otherwise it is a **conflict**.
+- The board never trusts a source because of its kind: a database, a file, a web page and a model can each be wrong. It does not use outside knowledge.
+- A conflict that one of the involved agents can fix with its own tools (a wrong query, a wrong name) goes to another round. When it cannot be settled (or the round cap is reached), the answer shows every value and says plainly that the team could not settle it.
+
+### The judge model
+
+The board is one structured model call per round. It is set with `OPENROUTER_JUDGE_MODEL` and is used exactly (no provider quantization filter, no fallback model). Three judges were measured on the same scenarios:
+
+| Judge | Result |
+|---|---|
+| Gemma (default free model) | Did not flag a planted wrong figure; 29 model calls, 189 s |
+| Haiku 5.5 | Faster per call, but looped 4 rounds over a small date gap |
+| **DeepSeek V4.1 Flash (chosen)** | Flagged the planted figure in 1 round; plain scenarios settled in 1 round |
+
+### In the UI
+
+- **Status line** under each reply (all chats): a spinner while it runs, the round (for example "Round 2 of 5 · conflict") with the agents' badges, "using <tool>" or "writing"; afterwards the number of rounds and explained differences.
+- **Activity popup** (button on the status line): the rounds, each agent's answer and the tools it called with their results, the board's findings and a pending question. It is rebuilt from the saved conversation, so it is still there after a reload.
+- Tool calls no longer appear as lines inside the chat; they live in the popup.
+
+### Guardrails
+
+- **Round cap:** `TEAM_MAX_ROUNDS` conflict rounds after the first answer round (default 4).
+- **Call budget:** `TEAM_MAX_MESSAGE_MODEL_CALLS` model calls per message across the app and all agent servers (default 30). Past it, no further agent is called.
+- **Failures:** an agent that fails does not stop the others; the write-up says which part is missing. A failed board call ends the debate with the answers so far.
+- **Pause for the user:** the debate never guesses information only the user has.
+
+### Measured cost and latency
+
+| Scenario | Normal relay (replaced design) | Round table, DeepSeek judge |
+|---|---|---|
+| Stock question (AAPL vs MSFT) | 7 calls, 38 s | 1 round, 6 calls, 49 s |
+| File and database disagree (planted wrong figure) | not measured | 1 round, 9 calls, 99 s |
+| Chart request | not measured | 1 round, 6 calls, 74 s |
+| Research question | 126-156 s | not re-measured |
+
+The board costs under $0.01 per message. All numbers are from the free-tier chat models; latency varies with their load.
+
+### Limits
+
+- The chat models are free ones, so answers vary; the board's quality depends on the judge model.
+- `needs_human` (the pause) rarely fires in practice; it is covered by tests, not by many real runs.
+- Team mode costs more calls and time than a normal answer. Use it when sources may disagree.
+- **Shared rooms (phase A of the design) are not built**: team mode is for one user's chat.
+
+---
+
+## 12. Debugging with LangSmith
 
 Optional, off by default. With `LANGSMITH_TRACING=true` and `LANGSMITH_API_KEY` set, every chat message becomes one trace in the LangSmith project `smallie`: the router's choice, each agent, each model call with its full prompt, each tool call with its result, tokens and time per step. Chat traces carry the user's id as metadata, so they can be filtered per user. After 0.4.0's remote agents, one trace covers the main app and the specialist servers it called.
 
@@ -733,7 +817,7 @@ Traces contain full prompts (users' messages, file passages, memories), so traci
 
 ---
 
-## 12. Deployment
+## 13. Deployment
 
 **Local development**
 

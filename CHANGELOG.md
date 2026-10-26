@@ -122,7 +122,7 @@ Versions are `major.minor.patch`: the major version stays 0 for now, each minor 
   - On Cloud Run the services also require Google's ID token (`roles/run.invoker` for the main app's service account), so an agent URL can't be called from outside
   - The servers read your files, the knowledge graph and chat history as `agent_reader` (read-only, no accounts or chats) and keep their run queues in their own databases as `agent_server`; stock questions keep using `agent_readonly`. Web search keys (`TAVILY_API_KEY`, `MCP_SERVERS`, `EXTERNAL_DATABASE_URL`) reach only the research server
   - Same number of model calls per message as before: 17 vs 17 over 6 benchmark scenarios, worst case 6 for one message. No slowdown measurable locally; cold-start and warm latency on Cloud Run: measured after the first deploy
-  - Limits: in LangSmith a server's run is its own trace, not nested under the main app's; the usage box counts the servers' calls, as before
+  - Limits: in LangSmith a server's run shows under the main app's trace and also as its own trace; the usage box counts the servers' calls, as before
 - **LangSmith tracing** (`LANGSMITH_TRACING`, `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT`), off by default: traces chats, with the user id in their metadata. Traces hold full prompts (your messages, file passages, memories)
 - Local Postgres now runs in Docker inside WSL (`docker-compose.yml`, port 5433); `scripts\dev_db.ps1` starts it and keeps WSL running, so DB tests and the app no longer freeze when WSL stops
 - `scripts.bench_chat` counts the agent servers' model calls too

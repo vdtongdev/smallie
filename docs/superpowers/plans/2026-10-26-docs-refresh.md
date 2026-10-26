@@ -29,6 +29,11 @@ DEPLOYING.md:
 CHANGELOG.md:
 15. 0.4.0: "steps in README \"Deploying\"" -> "steps in `DEPLOYING.md`".
 
+## Task 2: LangSmith line and settings.json (user decisions, 2026-10-26)
+
+1. CHANGELOG.md line 125 (0.4.0 Limits): the user checked LangSmith: a server's run shows nested under the main app's trace on the same thread, and also as its own trace. Replace "in LangSmith a server's run is its own trace, not nested under the main app's; " with "in LangSmith a server's run shows under the main app's trace and also as its own trace; ".
+2. `.gitignore`: append `.claude/settings.json` (CRLF like the rest of the file). The file stays on disk, untracked.
+
 Out of scope (user decides): LangSmith nesting contradiction (CHANGELOG 0.4.0 limit vs ARCHITECTURE §12), "0.6.0: image agent" in `.claude/rules/changelog.md`, old plans in `docs/superpowers/plans/`.
 
 Acceptance: each item applied; no broken intra-repo markdown links (check every `](` link to a .md anchor); `git diff --stat` touches only CLAUDE.md, ARCHITECTURE.md, README.md, DEPLOYING.md, CHANGELOG.md (plus this plan). One commit.

@@ -36,9 +36,10 @@ def test_provider_sort_joins_the_provider_preferences(monkeypatch):
     }
 
 
-def test_any_precision_skips_the_quantization_filter(monkeypatch):
+def test_exact_model_skips_quantization_filter_and_fallbacks(monkeypatch):
     settings = get_settings()
-    monkeypatch.setattr(settings, "openrouter_fallback_model", "")
+    monkeypatch.setattr(settings, "openrouter_fallback_model", "other")
     monkeypatch.setattr(settings, "openrouter_quantizations", "bf16,fp8")
     monkeypatch.setattr(settings, "openrouter_provider_sort", "throughput")
-    assert get_chat_model("main", any_precision=True).extra_body == {"provider": {"sort": "throughput"}}
+    body = get_chat_model("main", exact_model=True).extra_body
+    assert body == {"provider": {"sort": "throughput"}} and "models" not in body

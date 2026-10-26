@@ -107,7 +107,7 @@ async def ask_board(messages: list[AnyMessage], answers: list[dict], config: Run
     judge = settings.openrouter_judge_model
     # A chosen judge may be a closed model, which the quantization filter would leave without a provider.
     board = get_chat_model(judge or settings.openrouter_orchestrator_model or None,
-                           **({"any_precision": True} if judge else {})).with_structured_output(
+                           **({"exact_model": True} if judge else {})).with_structured_output(
         Board, method="function_calling")
     system = BOARD_PROMPT.format(language=reply_language(messages))
     return await board.ainvoke([SystemMessage(system), HumanMessage(human)], config=config)

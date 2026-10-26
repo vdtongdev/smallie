@@ -19,14 +19,22 @@ from app.orchestration import team
 from app.orchestration.router import build_router
 from app.orchestration.team import Board, Conflict, Difference, Side, clean, participants
 from tests.scripted import per_agent
-from tests.test_orchestrator import _assistant
+from tests.test_orchestrator import _assistant as _build_assistant
 
 SQL, RESEARCH = get("sql"), get("research")
 
-QUESTION = "What is the AAPL market cap?"  # sql; research joins
-THREE = "What is the AAPL market cap and what does handbook.pdf say?"  # docs + sql; research joins
+QUESTION = "What is the AAPL market cap?"  # names no source: every available agent takes part (Goal 1)
+SQL_QUESTION = "Using the SQL agent, what is the AAPL market cap?"  # names the sql source (Goal 1)
+SQL_CHART = "Using the SQL agent, draw a chart of AAPL"
+THREE = QUESTION  # names no source: with files uploaded, docs + sql + research all take part (Goal 1)
 TEAM_CONTEXT = AgentContext(user_id="u1", agent="team")
 CONFIG = {"configurable": {"thread_id": "t1"}}
+
+
+def _assistant(monkeypatch, model, documents=(), **agents):
+    """The orchestrator tests' assistant, but the user has no files unless a test says so: docs is
+    available with permission only then (Goal 1), and an available agent takes part."""
+    return _build_assistant(monkeypatch, model, documents=documents, **agents)
 
 
 # --- who takes part ---
@@ -41,10 +49,12 @@ def _routes(message, **kw):
 
 
 def test_pick_mentioned_with_others_and_overrides():
-    assert _routes(QUESTION) == ["sql", "research"]  # research joins whoever else takes part
-    assert _routes(THREE) == ["docs", "sql", "research"]  # registry order
-    assert _routes("chart AAPL") == ["sql", "research", "chart"]  # chart draws from sql, so sql joins too
-    assert _routes("what does handbook.pdf say", docs=False) == []  # an unavailable agent is not picked
+    # Goal 1: no source named (a ticker is a topic word) -> every available agent, in registry order.
+    assert _routes(QUESTION) == ["docs", "sql", "research"]
+    assert _routes(QUESTION, docs=False) == ["sql", "research"]
+    assert _routes("chart AAPL") == ["docs", "sql", "research", "chart"]  # Goal 3: asked for a chart, so the drawer joins
+    # Goal 1 "available with permission": a named file of an unavailable docs agent does not bring it in.
+    assert "docs" not in _routes("what does handbook.pdf say", docs=False)
 
 
 def test_chart_mention_brings_in_sql():
@@ -189,10 +199,11 @@ def _two(monkeypatch, log, *, sql="Cap is 3T.", research="Notes: 3T.", final="Fi
 def _three(monkeypatch, log, **texts):
     model = per_agent(orchestrator=[AIMessage("Final.")])
     agents = {n: Fake(n, *texts.get(n, (f"{n} v1", f"{n} v2")), log=log) for n in ("sql", "docs", "research")}
-    return model, _assistant(monkeypatch, model, **agents), agents
+    return model, _assistant(monkeypatch, model, documents=("handbook.pdf",), **agents), agents
 
 
 def _research_does_not_join(monkeypatch):
+    # Only used with a message that names the SQL agent: with no source named, research would take part too (Goal 1).
     monkeypatch.setattr(graph_module, "AGENTS", tuple(replace(s, joins="mentioned") for s in AGENTS))
 
 
@@ -246,7 +257,7 @@ async def test_single_participant_answer_stands(monkeypatch):
     _board(monkeypatch, Board(agreements=["only one source"]))
     model = per_agent(sql=[AIMessage("unused")])  # no orchestrator script: a call to it fails the test
     assistant = _assistant(monkeypatch, model, sql=Fake("sql", "Cap is 3T.", log=log, tools=True))
-    chunks = await _stream(assistant, _ask())
+    chunks = await _stream(assistant, _ask(SQL_QUESTION))
 
     reply = (await _thread(assistant))[-1]
     assert (reply.name, reply.text) == ("sql_agent", "Cap is 3T.")
@@ -355,7 +366,7 @@ async def test_team_reply_carries_participants_artifacts(monkeypatch):
     _research_does_not_join(monkeypatch)
     _board(monkeypatch, Board())
     assistant = _assistant(monkeypatch, per_agent(sql=[AIMessage("unused")]), sql=Fake("sql", "Cap.", log=[], chart="chart-sql"))
-    await _stream(assistant, _ask())
+    await _stream(assistant, _ask(SQL_QUESTION))
     assert (await _thread(assistant))[-1].additional_kwargs["charts"] == [{"id": "chart-sql"}]
 
 
@@ -471,8 +482,9 @@ async def _chart_asks(monkeypatch, reply, **kw):
     log = []
     agents = {"chart": Fake("chart", "drawn", log=log), "sql": Fake("sql", "rows", log=log),
               "docs": Fake("docs", "from file", log=log)}
-    assistant = _assistant(monkeypatch, per_agent(orchestrator=[AIMessage("Final.")]), **{**agents, **kw})
-    await _stream(assistant, _ask("plot a chart of prices"))
+    assistant = _assistant(monkeypatch, per_agent(orchestrator=[AIMessage("Final.")]),
+                           **{"documents": ("handbook.pdf",), **agents, **kw})
+    await _stream(assistant, _ask("Using the SQL agent, draw a chart of prices"))
     return assistant, agents, await _stream(assistant, Command(resume=reply))
 
 
@@ -710,7 +722,7 @@ async def test_single_speaker_answer_stands_then_chart_draws(monkeypatch):
     _board(monkeypatch, Board())
     model = per_agent(chart=DRAW)  # no orchestrator script: a call to it fails the test
     assistant = _assistant(monkeypatch, model, sql=Fake("sql", "Cap is 3T.", log=[], table=TABLE))
-    chunks = await _stream(assistant, _ask("chart AAPL"))
+    chunks = await _stream(assistant, _ask(SQL_CHART))
 
     final = (await _thread(assistant))[-1]
     assert (final.name, final.text) == ("sql_agent", "Cap is 3T.")
@@ -723,7 +735,7 @@ async def test_answer_without_data_draws_nothing(monkeypatch):
     _board(monkeypatch, Board())
     model = per_agent(chart=[AIMessage("The answer holds no data to chart.")])
     assistant = _assistant(monkeypatch, model, sql=Fake("sql", "No rows.", log=[]))
-    chunks = await _stream(assistant, _ask("chart AAPL"))
+    chunks = await _stream(assistant, _ask(SQL_CHART))
 
     final = (await _thread(assistant))[-1]
     assert final.text == "No rows." and "charts" not in final.additional_kwargs and not _events(chunks, "charts")
@@ -734,3 +746,288 @@ def test_draw_message_formats_with_language():
 
     text = DRAW_MESSAGE.format(language="English")
     assert "English" in text and "{" not in text and "}" not in text
+
+
+# --- open table (Goal 1: no source named -> every available agent takes part) ---
+
+GAVE_UP = "I couldn't find anything about that."  # a short "nothing found" reply: the agent withdraws (Goal 2)
+
+
+def test_spec_names_is_a_pattern_or_none():
+    """Interfaces: AgentSpec.names is a compiled pattern (or None)."""
+    import re
+
+    assert all(spec.names is None or isinstance(spec.names, re.Pattern) for spec in AGENTS)
+    assert all(get(route).names is not None for route in ("sql", "docs", "research", "chart"))
+
+
+def test_names_match_the_explicit_phrases():
+    """Goal 1 'specifying a source': naming an agent or its source, English and Vietnamese."""
+    for route, phrases in {"sql": ["SQL agent", "the database"], "docs": ["docs agent", "my documents"],
+                           "research": ["research agent", "search the web"],
+                           "chart": ["chart agent", "draw a chart", "biểu đồ"]}.items():
+        for phrase in phrases:
+            assert get(route).names.search(f"please use {phrase} now"), (route, phrase)
+
+
+def test_topic_words_and_tickers_do_not_name_a_source():
+    """Goal 1: topic words such as 'stocks', or a ticker, do not count as specifying a source."""
+    for route in ("sql", "docs", "research", "chart"):
+        for message in ("evaluate top 3 stocks", "What is the AAPL market cap?"):
+            assert not get(route).names.search(message), (route, message)
+
+
+def test_no_source_named_brings_in_every_available_speaker():
+    """Goal 1: an ambiguous question without a source -> all available agents; docs only with files."""
+    for message in ("find in different sources that you can use", "evaluate top 3 stocks", QUESTION):
+        assert _routes(message) == ["docs", "sql", "research"], message
+        assert _routes(message, docs=False) == ["sql", "research"], message
+
+
+def test_naming_a_source_restricts_to_it():
+    """Goal 1: naming an agent or its source takes part alone (research may join, as today); others stay out."""
+    for message in ("Ask the SQL agent about it", "look in the database", "Ask the SQL agent: what is AAPL?"):
+        routes = _routes(message)
+        assert "sql" in routes and "docs" not in routes, message
+    for message in ("ask the docs agent about it", "search my documents", "what does handbook.pdf say"):
+        routes = _routes(message)
+        assert "docs" in routes and "sql" not in routes, message
+    for message in ("ask the research agent about it", "search the web for AAPL news"):
+        routes = _routes(message)
+        assert "research" in routes and "sql" not in routes and "docs" not in routes, message
+
+
+def test_docs_mentions_such_as_resume_words_name_the_docs_source():
+    """Goal 1 + Interfaces: docs is named through RouteInfo.mentions (resume/CV words), not only file names."""
+    available = [(spec, RouteInfo(mentions=lambda m: "resume" in m) if spec.route == "docs" else RouteInfo())
+                 for spec in AGENTS]
+    routes = [s.route for s in participants(available, "summarise my resume for me please")]
+    assert "docs" in routes and "sql" not in routes
+
+
+def test_named_source_of_an_unavailable_agent_does_not_bring_it_in():
+    """Goal 1 'available with permission': docs without files never joins."""
+    assert "docs" not in _routes("ask the docs agent about it", docs=False)
+    assert "docs" not in _routes("search my documents", docs=False)
+
+
+def test_the_chart_drawer_takes_part_only_when_asked():
+    """Goal 3: chart joins only when the message asks for a chart; then sql feeds it."""
+    for message in (QUESTION, "find in different sources that you can use", "evaluate top 3 stocks"):
+        assert "chart" not in _routes(message), message
+    for message in ("draw a chart of the top stocks", "ask the chart agent for a view", "vẽ biểu đồ giá AAPL"):
+        assert {"sql", "chart"} <= set(_routes(message)), message
+
+
+def test_users_message_naming_sql_and_chart_agents():
+    """Goal 1 + 3: the user's own message names the SQL agent and the Chart agent."""
+    message = ("SQL Agent, please pull the top 3 stocks by growth and their key metrics. "
+               "Chart Agent, draw a chart that compares them.")
+    routes = _routes(message)
+    assert "sql" in routes and "chart" in routes and "docs" not in routes
+    assert routes.index("sql") < routes.index("chart")  # registry order
+
+
+def test_users_message_find_in_different_sources():
+    """Goal 1: the user's own message names no source, so every available agent takes part, docs included."""
+    assert _routes("find in different sources that you can use") == ["docs", "sql", "research"]
+
+
+def test_small_talk_is_rule_based():
+    """Goal 1 'small talk': a short message with no question and no data words goes to the orchestrator."""
+    for message in ("hi", "thanks", "ok", "ok cảm ơn", "cảm ơn bạn", "xin chào", "write a short poem"):
+        assert team.is_small_talk(message), message
+        assert _routes(message) == [], message
+
+
+def test_not_small_talk():
+    """Interfaces: more than 5 words, a '?', or a name/hint/route match is not small talk."""
+    for message in ("find in different sources that you can use", "ok?", "What is the AAPL market cap?",
+                    "SQL agent", "draw a chart", "ask the docs agent", "evaluate top 3 stocks"):
+        assert not team.is_small_talk(message), message
+    assert _routes("evaluate top 3 stocks") != []
+
+
+async def test_small_talk_goes_to_the_orchestrator_alone(monkeypatch):
+    """Goal 1 'small talk': orchestrator alone, no rounds, one model call."""
+    model = per_agent(orchestrator=[AIMessage("You are welcome.")])
+    assistant = _assistant(monkeypatch, model, documents=("handbook.pdf",))
+    chunks = await _stream(assistant, _ask("ok cảm ơn"))
+
+    assert not _events(chunks, "round") and not _events(chunks, "board") and len(model.prompts) == 1
+    assert (await _thread(assistant))[-1].text == "You are welcome."
+
+
+async def test_open_table_runs_every_available_agent_in_one_round(monkeypatch):
+    """Goal 1 end to end: no source named -> docs, sql and research all speak in round 1."""
+    log = []
+    _board(monkeypatch, Board())
+    model, assistant, agents = _three(monkeypatch, log)
+    chunks = await _stream(assistant, _ask("find in different sources that you can use"))
+
+    assert [(e["round"], sorted(e["agents"])) for e in _events(chunks, "round")] == [(1, ["docs", "research", "sql"])]
+    assert all(a.calls == 1 for a in agents.values())
+
+
+# --- withdrawal (Goal 2) ---
+
+def _boards_log(monkeypatch, *boards, then=None):
+    """Scripted boards that also record which agents each board call saw."""
+    seen = []
+    queue = itertools.chain(boards, itertools.repeat(then) if then else ())
+
+    async def fake(messages, answers, config):
+        seen.append([a["agent"] for a in answers])
+        return next(queue)
+
+    monkeypatch.setattr(team, "ask_board", fake)
+    return seen
+
+
+def _entry(final, agent, rnd=0):
+    return next(a for a in final.additional_kwargs["team"]["rounds"][rnd]["answers"] if a["agent"] == agent)
+
+
+async def test_one_agent_withdraws_and_the_others_continue(monkeypatch):
+    """Goal 2: an agent that cannot answer from its source withdraws; the others go on to board and write-up."""
+    log = []
+    seen = _boards_log(monkeypatch, Board(agreements=["same"]))
+    model = per_agent(orchestrator=[AIMessage("Final.")])
+    assistant = _assistant(monkeypatch, model, documents=("handbook.pdf",),
+                           docs=Fake("docs", "DOCS-LEAK " + GAVE_UP, log=log), sql=Fake("sql", "Cap is 3T.", log=log),
+                           research=Fake("research", "Notes: 3T.", log=log))
+    chunks = await _stream(assistant, _ask(QUESTION))
+
+    final = (await _thread(assistant))[-1]
+    assert final.text == "Final."
+    assert seen == [["sql", "research"]]  # the board sees no withdrawn agent
+    (writeup,) = _writeups(model)
+    assert "Cap is 3T." in writeup and "Notes: 3T." in writeup and "DOCS-LEAK" not in writeup
+    assert final.additional_kwargs["team"]["withdrawn"] == ["docs"]
+    assert (_entry(final, "docs")["withdrew"], _entry(final, "sql")["withdrew"],
+            _entry(final, "research")["withdrew"]) == (True, False, False)
+    assert {e["agent"]: e["withdrew"] for e in _events(chunks, "spoke")} == {"docs": True, "sql": False, "research": False}
+
+
+async def test_transcript_withdrawn_is_empty_when_everyone_answers(monkeypatch):
+    """Interfaces: the transcript always carries `withdrawn`."""
+    _board(monkeypatch, Board())
+    _, assistant = _two(monkeypatch, [])
+    await _stream(assistant, _ask())
+    assert (await _thread(assistant))[-1].additional_kwargs["team"]["withdrawn"] == []
+
+
+async def test_withdrawn_agent_is_left_out_of_conflict_rounds(monkeypatch):
+    """Goal 2 + Review Focus: a withdrawn agent's round-1 answer never reaches a conflict round, nor can it fix one."""
+    log = []
+    conflict = Conflict(routes=["sql", "research", "docs"], claim="CAP-CLAIM", fixable_by=["sql", "docs"], issue="differ")
+    seen = _boards_log(monkeypatch, Board(conflicts=[conflict]), Board())
+    model = per_agent(orchestrator=[AIMessage("Final.")])
+    docs = Fake("docs", "DOCS-LEAK " + GAVE_UP, log=log)
+    assistant = _assistant(monkeypatch, model, documents=("handbook.pdf",), docs=docs,
+                           sql=Fake("sql", "sql v1", "sql v2", log=log), research=Fake("research", "notes", log=log))
+    chunks = await _stream(assistant, _ask(QUESTION))
+
+    rounds = _events(chunks, "round")
+    assert [(e["round"], e["kind"], e["agents"]) for e in rounds] == [
+        (1, "answer", ["docs", "sql", "research"]), (2, "conflict", ["sql"])]
+    assert docs.calls == 1
+    assert seen == [["sql", "research"], ["sql", "research"]]
+    second = [e["last"] for e in log if e["event"] == "start" and e["agent"] == "sql"][1]
+    assert "CAP-CLAIM" in second.text and "DOCS-LEAK" not in second.text
+    assert all("DOCS-LEAK" not in w for w in _writeups(model))
+
+
+async def test_conflict_only_a_withdrawn_agent_could_fix_goes_to_write_up(monkeypatch):
+    """Goal 2: a withdrawn agent is not a fixer, so the conflict is stated in the write-up (no conflict round)."""
+    log = []
+    conflict = Conflict(routes=["sql", "research", "docs"], claim="CAP-CLAIM", fixable_by=["docs"], issue="differ")
+    _boards_log(monkeypatch, Board(conflicts=[conflict]))
+    model = per_agent(orchestrator=[AIMessage("Final.")])
+    assistant = _assistant(monkeypatch, model, documents=("handbook.pdf",), docs=Fake("docs", GAVE_UP, log=log),
+                           sql=Fake("sql", "a", log=log), research=Fake("research", "b", log=log))
+    chunks = await _stream(assistant, _ask(QUESTION))
+
+    assert [(e["round"], e["agents"]) for e in _events(chunks, "round")] == [(1, ["docs", "sql", "research"])]
+    assert "CAP-CLAIM" in _writeups(model)[0]
+
+
+async def test_all_but_one_withdraw_skips_the_board_and_that_answer_stands(monkeypatch):
+    """Goal 2 + Interfaces: at most one non-withdrawn answer -> no board call, no write-up; it stands."""
+    log = []
+    seen = _boards_log(monkeypatch, then=Board(agreements=["unused"]))
+    model = per_agent(sql=[AIMessage("unused")])  # no orchestrator script: a call to it fails the test
+    assistant = _assistant(monkeypatch, model, documents=("handbook.pdf",), docs=Fake("docs", GAVE_UP, log=log),
+                           sql=Fake("sql", "Cap is 3T.", log=log), research=Fake("research", "", log=log))
+    chunks = await _stream(assistant, _ask(QUESTION))
+
+    assert seen == []  # the board model got 0 calls
+    final = (await _thread(assistant))[-1]
+    assert (final.name, final.text) == ("sql_agent", "Cap is 3T.")
+    assert not model.prompts and not _events(chunks, "synthesize")
+    assert final.additional_kwargs["team"]["withdrawn"] == ["docs", "research"]
+
+
+async def test_research_withdraws_on_no_findings_not_on_its_messages(monkeypatch):
+    """Review Focus: research keeps findings outside `messages`; it withdraws on empty findings only."""
+    class FindingsOnly(Fake):
+        async def ainvoke(self, input, config=None, **kwargs):
+            await super().ainvoke(input, config, **kwargs)
+            return {"messages": list(input["messages"]), "findings": self.texts[0]}  # no AIMessage at all
+
+    seen = _boards_log(monkeypatch, Board())
+    model = per_agent(orchestrator=[AIMessage("Final.")])
+    assistant = _assistant(monkeypatch, model, sql=Fake("sql", "Cap is 3T.", log=[]),
+                           research=FindingsOnly("research", "Notes: 3T.", log=[]))
+    await _stream(assistant, _ask(QUESTION))
+
+    final = (await _thread(assistant))[-1]
+    assert seen == [["sql", "research"]] and final.additional_kwargs["team"]["withdrawn"] == []
+    assert _entry(final, "research")["withdrew"] is False
+
+
+async def test_every_agent_withdraws_the_orchestrator_answers_and_names_them(monkeypatch):
+    """Goal 2: if every agent withdraws, the orchestrator answers as in normal mode and says the others found nothing."""
+    log = []
+    seen = _boards_log(monkeypatch, then=Board())
+    model = per_agent(orchestrator=[AIMessage("Final answer.")])
+    assistant = _assistant(monkeypatch, model, documents=("handbook.pdf",),
+                           docs=Fake("docs", "DOCS-LEAK " + GAVE_UP, log=log),
+                           sql=Fake("sql", "SQL-LEAK " + GAVE_UP, log=log), research=Fake("research", "", log=log))
+    await _stream(assistant, _ask(QUESTION))
+
+    assert seen == []
+    final = (await _thread(assistant))[-1]
+    assert (final.name, final.text) == ("orchestrator", "Final answer.")
+    (prompt,) = model.prompts
+    extra = " ".join(m.text for m in prompt[1:] if m.text != QUESTION).lower()  # all but the system prompt and the question
+    assert all(route in extra for route in ("docs", "sql", "research"))
+    assert "LEAK" not in " ".join(m.text for m in prompt)
+
+
+async def test_every_agent_withdraws_then_the_drawer_still_draws(monkeypatch):
+    """Goal 2 + plan: after the orchestrator's normal-mode answer, `draw` runs when a drawer was asked."""
+    _boards_log(monkeypatch, then=Board())
+    chart = Fake("chart", "drawn", log=[])
+    model = per_agent(orchestrator=[AIMessage("Final answer.")])
+    assistant = _assistant(monkeypatch, model, documents=("handbook.pdf",), docs=Fake("docs", GAVE_UP, log=[]),
+                           sql=Fake("sql", GAVE_UP, log=[]), research=Fake("research", "", log=[]), chart=chart)
+    chunks = await _stream(assistant, _ask("draw a chart of the top stocks"))
+    assert _events(chunks, "round")[0]["agents"] == ["docs", "sql", "research"] and chart.calls == 1
+
+
+async def test_reply_to_a_question_applies_withdrawal_to_the_new_round(monkeypatch):
+    """Review Focus: after a pause, the agent brought in by the reply may withdraw; it stays out of the board."""
+    seen = _boards_log(monkeypatch, Board(question="Which data?"), Board())
+    log = []
+    model = per_agent(orchestrator=[AIMessage("Final.")])
+    assistant = _assistant(monkeypatch, model, documents=("handbook.pdf",),
+                           docs=Fake("docs", "DOCS-LEAK " + GAVE_UP, log=log), sql=Fake("sql", "rows", log=log),
+                           research=Fake("research", "notes", log=log))
+    await _stream(assistant, _ask(SQL_QUESTION))
+    second = await _stream(assistant, Command(resume="check handbook.pdf"))
+
+    assert [(e["round"], e["agents"]) for e in _events(second, "round")] == [(2, ["docs"])]
+    assert seen == [["sql", "research"], ["sql", "research"]]
+    assert (await _thread(assistant))[-1].additional_kwargs["team"]["withdrawn"] == ["docs"]
+    assert all("DOCS-LEAK" not in w for w in _writeups(model))

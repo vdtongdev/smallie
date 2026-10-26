@@ -4,6 +4,16 @@ import pytest
 from app.core.config import get_settings
 
 
+@pytest.fixture(autouse=True)
+def _no_judge_model_from_env(monkeypatch):
+    # Tests run on the default config, independent of a developer's .env (env vars beat .env).
+    monkeypatch.setenv("OPENROUTER_JUDGE_MODEL", "")
+    get_settings.cache_clear()
+    yield
+    monkeypatch.undo()
+    get_settings.cache_clear()
+
+
 def _db_reachable() -> bool:
     try:
         with psycopg.connect(get_settings().database_url, connect_timeout=2):

@@ -166,7 +166,7 @@ class Fake(Runnable):
     async def ainvoke(self, input, config=None, **kwargs):
         loop = asyncio.get_running_loop()
         self.log.append({"event": "start", "agent": self.name, "at": loop.time(), "last": input["messages"][-1],
-                         "sources": kwargs["context"].sources})
+                         "sources": kwargs["context"].sources, "deny": kwargs["context"].deny_tools})
         await asyncio.sleep(self.delay)
         text = self.texts[min(self.calls, len(self.texts) - 1)]
         self.calls += 1
@@ -807,13 +807,6 @@ async def test_answer_without_data_draws_nothing(monkeypatch):
     assert final.text == "No rows." and "charts" not in final.additional_kwargs and not _events(chunks, "charts")
 
 
-def test_draw_message_formats_with_language():
-    from app.orchestration.prompts import DRAW_MESSAGE
-
-    text = DRAW_MESSAGE.format(language="English")
-    assert "English" in text and "{" not in text and "}" not in text
-
-
 # --- open table (Goal 1: no source named -> every available agent takes part) ---
 
 GAVE_UP = "I couldn't find anything about that."  # a short "nothing found" reply: the agent withdraws (Goal 2)
@@ -1071,17 +1064,6 @@ async def test_every_agent_withdraws_the_orchestrator_answers_and_names_them(mon
     extra = " ".join(m.text for m in prompt[1:] if m.text != QUESTION).lower()  # all but the system prompt and the question
     assert all(route in extra for route in ("docs", "sql", "research"))
     assert "LEAK" not in " ".join(m.text for m in prompt)
-
-
-async def test_every_agent_withdraws_then_the_drawer_still_draws(monkeypatch):
-    """Goal 2 + plan: after the orchestrator's normal-mode answer, `draw` runs when a drawer was asked."""
-    _boards_log(monkeypatch, then=Board())
-    chart = Fake("chart", "drawn", log=[])
-    model = per_agent(orchestrator=[AIMessage("Final answer.")])
-    assistant = _assistant(monkeypatch, model, documents=("handbook.pdf",), docs=Fake("docs", GAVE_UP, log=[]),
-                           sql=Fake("sql", GAVE_UP, log=[]), research=Fake("research", "", log=[]), chart=chart)
-    chunks = await _stream(assistant, _ask("draw a chart of the top stocks"))
-    assert _events(chunks, "wave")[0]["agents"] == ["docs", "sql", "research"] and chart.calls == 1
 
 
 async def test_reply_to_a_question_applies_withdrawal_to_the_new_round(monkeypatch):
@@ -1439,3 +1421,63 @@ def test_task_message_formats():
 
     text = TASK_MESSAGE.format(goal="G", inputs="none", missing="none", language="Vietnamese")
     assert "Vietnamese" in text and "{" not in text
+
+
+# --- the chart task: the chart agent is a task like any other ---
+
+def _chart_plan(monkeypatch, *, table, log, chart_depends=("t1",), with_research=False):
+    tasks = [Task(id="t1", agent="sql", goal="get caps")]
+    if with_research:
+        tasks.append(Task(id="t2", agent="research", goal="background"))
+    tasks.append(Task(id="t3" if with_research else "t2", agent="chart", goal="chart the caps", depends_on=list(chart_depends)))
+    _plan(monkeypatch, Plan(tasks=tasks))
+    _board(monkeypatch, then=Board())
+    model = per_agent(orchestrator=[AIMessage("Final.")])
+    return model, _assistant(monkeypatch, model, sql=Fake("sql", "Cap.", log=log, table=table),
+                             research=Fake("research", "Notes.", log=log),
+                             chart=Fake("chart", "drawn", log=log, chart="chart-1"))
+
+
+async def test_chart_task_charts_its_inputs_table(monkeypatch):
+    log = []
+    _, assistant = _chart_plan(monkeypatch, table={**TABLE, "id": "tbl1"}, log=log)
+    chunks = await _stream(assistant, _ask())
+
+    (start,) = _starts(log, "chart")
+    assert start["sources"] == team.NO_SOURCES and start["deny"] == ("chart_data",)
+    assert "tbl1" in start["last"].text
+    assert (await _thread(assistant))[-1].additional_kwargs["charts"] == [{"id": "chart-1"}]
+    assert [e["charts"] for e in _events(chunks, "charts")] == [[{"id": "chart-1"}]]
+    assert "chart" in {e["agent"] for e in _events(chunks, "speaker")}
+
+
+async def test_chart_task_without_table_may_use_chart_data(monkeypatch):
+    log = []
+    _, assistant = _chart_plan(monkeypatch, table=None, log=log)
+    await _stream(assistant, _ask())
+
+    (start,) = _starts(log, "chart")
+    assert start["sources"] == team.NO_SOURCES and start["deny"] == ()
+
+
+async def test_write_up_cannot_chart_when_a_chart_task_exists(monkeypatch):
+    log = []
+    model, assistant = _chart_plan(monkeypatch, table={**TABLE, "id": "tbl1"}, log=log, with_research=True)
+    await _stream(assistant, _ask())
+
+    offered = {t["function"]["name"] for prompt, tools in zip(model.prompts, model.tools)
+               if "You are smallie" in prompt[0].content for t in tools}
+    assert _writeups(model) and offered.isdisjoint({"chart_table", "chart_data"})
+
+
+async def test_fallback_plan_makes_chart_depend_on_sql(monkeypatch):
+    _board(monkeypatch, then=Board())
+    model = per_agent(orchestrator=[AIMessage("Final.")])
+    log = []
+    assistant = _assistant(monkeypatch, model, sql=Fake("sql", "Cap.", log=log), research=Fake("research", "n", log=log),
+                           chart=Fake("chart", "drawn", log=log))
+    chunks = await _stream(assistant, _ask("chart AAPL"))
+
+    (plan,) = _events(chunks, "plan")
+    tasks = {t["agent"]: t for t in plan["tasks"]}
+    assert plan["fallback"] is True and tasks["chart"]["depends_on"] == [tasks["sql"]["id"]]

@@ -12,7 +12,6 @@ on its `additional_kwargs["team"]`. Progress goes out as `custom` stream events:
 
 import asyncio
 import dataclasses
-import inspect
 import logging
 import uuid
 from collections.abc import Mapping, Sequence
@@ -465,10 +464,8 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
             task_of = {t["id"]: t for t in tasks}
             inputs = {a["task"]: got for a in answers if (got := [d for d in task_of[a["task"]]["depends_on"] if d in results])}
             available = await available_agents(runtime.context.user_id, specs)
-            wanted = {"inputs": inputs or None, "agents": [spec for spec, _ in available]}
-            accepted = inspect.signature(ask_board).parameters  # a stand-in board may take fewer arguments
             try:
-                board = await ask_board(messages, answers, config, **{k: v for k, v in wanted.items() if v and k in accepted})
+                board = await ask_board(messages, answers, config, inputs=inputs, agents=[spec for spec, _ in available])
                 if not isinstance(board, Review):
                     board = Review(**board.model_dump())
                 board = clean(board, live, [a["task"] for a in answers])

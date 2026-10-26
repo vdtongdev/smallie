@@ -400,7 +400,7 @@ async def test_failed_speaker_forces_write_up(monkeypatch):
 
 
 async def test_failed_board_forces_write_up(monkeypatch):
-    async def broken(messages, answers, config):
+    async def broken(messages, answers, config, inputs=None, agents=None):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(team, "ask_board", broken)
@@ -417,7 +417,7 @@ async def test_failed_board_rate_limit_still_propagates(monkeypatch):
     import httpx
     import openai
 
-    async def limited(messages, answers, config):
+    async def limited(messages, answers, config, inputs=None, agents=None):
         raise openai.RateLimitError("slow", response=httpx.Response(429, request=httpx.Request("POST", "http://x")), body=None)
 
     monkeypatch.setattr(team, "ask_board", limited)
@@ -449,7 +449,7 @@ async def test_drawer_does_not_speak_in_rounds(monkeypatch):
     log = []
     boards = []
 
-    async def fake(messages, answers, config):
+    async def fake(messages, answers, config, inputs=None, agents=None):
         boards.append([a["agent"] for a in answers])
         return Board()
 
@@ -942,7 +942,7 @@ def _boards_log(monkeypatch, *boards, then=None):
     seen = []
     queue = itertools.chain(boards, itertools.repeat(then) if then else ())
 
-    async def fake(messages, answers, config):
+    async def fake(messages, answers, config, inputs=None, agents=None):
         seen.append([a["agent"] for a in answers])
         return next(queue)
 
@@ -1391,7 +1391,7 @@ async def test_task_with_some_inputs_dead_runs_and_is_told(monkeypatch):
 async def test_no_review_for_a_wave_without_inputs_or_meeting(monkeypatch):
     log, reviewed = [], []
 
-    async def fake(messages, answers, config, inputs=None):
+    async def fake(messages, answers, config, inputs=None, agents=None):
         reviewed.append([a["agent"] for a in answers])
         return Board()
 

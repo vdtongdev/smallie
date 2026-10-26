@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     openrouter_quantizations: str = ""  # comma-separated provider precisions, e.g. "bf16,fp8"; empty = any
     openrouter_provider_sort: str = ""  # provider order: "throughput", "latency" or "price"; empty = OpenRouter's default (price-weighted)
     openrouter_orchestrator_model: str = ""  # the front-door agent; empty = chat model
+    openrouter_judge_model: str = ""  # the team board; empty = orchestrator model, then chat model
     openrouter_embed_model: str = "baai/bge-m3"
     embed_dim: int = 1024
 

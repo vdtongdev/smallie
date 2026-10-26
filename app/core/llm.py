@@ -18,7 +18,7 @@ class OpenRouterChat(ChatOpenAI):
         return generation
 
 
-def get_chat_model(model: str | None = None, *, streaming: bool = True) -> ChatOpenAI:
+def get_chat_model(model: str | None = None, *, streaming: bool = True, any_precision: bool = False) -> ChatOpenAI:
     s = get_settings()
     model = model or s.openrouter_chat_model
     # OpenRouter falls back server-side (`models`), inside the same request. A client-side
@@ -28,7 +28,8 @@ def get_chat_model(model: str | None = None, *, streaming: bool = True) -> ChatO
     # Paid models are routed to the cheapest provider by default, often an fp4 build, and
     # heavier quantization makes Vietnamese answers slip into other scripts more often.
     quantizations = [q.strip() for q in s.openrouter_quantizations.split(",") if q.strip()]
-    if quantizations:
+    # any_precision: closed models (Claude, GPT) list no quantization, so the filter leaves them no provider.
+    if quantizations and not any_precision:
         extra_body["provider"] = {"quantizations": quantizations}
     # Within that filter the cheapest provider is often the slowest (14 vs 130 tok/s measured).
     if s.openrouter_provider_sort:

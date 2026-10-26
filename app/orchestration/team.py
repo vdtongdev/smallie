@@ -104,7 +104,10 @@ async def ask_board(messages: list[AnyMessage], answers: list[dict], config: Run
     question = next((m.text for m in reversed(messages) if isinstance(m, HumanMessage)), "")
     # Texts go into the message, not a template: answers may contain braces.
     human = f"USER MESSAGE:\n{question}\n\nANSWERS:\n" + "\n\n".join(f"{a['agent']}:\n{a['text']}" for a in answers)
-    board = get_chat_model(settings.openrouter_orchestrator_model or None).with_structured_output(
+    judge = settings.openrouter_judge_model
+    # A chosen judge may be a closed model, which the quantization filter would leave without a provider.
+    board = get_chat_model(judge or settings.openrouter_orchestrator_model or None,
+                           **({"any_precision": True} if judge else {})).with_structured_output(
         Board, method="function_calling")
     system = BOARD_PROMPT.format(language=reply_language(messages))
     return await board.ainvoke([SystemMessage(system), HumanMessage(human)], config=config)

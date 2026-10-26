@@ -75,6 +75,28 @@ async def test_ask_board_calls_the_model_once(monkeypatch):
     assert "question?" in human and "SQL SAYS 3T" in human and "DOCS SAYS 2T" in human
 
 
+@pytest.mark.parametrize("judge, orchestrator, expected", [
+    ("judge/model", "orch/model", "judge/model"),
+    ("", "orch/model", "orch/model"),
+    ("", "", None),
+])
+async def test_board_uses_the_judge_model(monkeypatch, judge, orchestrator, expected):
+    asked = []
+
+    async def ainvoke(messages, config):
+        return Board()
+
+    def fake_model(model=None, **kwargs):
+        asked.append(model)
+        return SimpleNamespace(with_structured_output=lambda schema, method: SimpleNamespace(ainvoke=ainvoke))
+
+    monkeypatch.setattr(team, "get_chat_model", fake_model)
+    monkeypatch.setattr(team, "get_settings", lambda: SimpleNamespace(
+        openrouter_judge_model=judge, openrouter_orchestrator_model=orchestrator))
+    await team.ask_board([HumanMessage("question?")], [{"round": 1, "agent": "sql", "text": "x"}], {"callbacks": []})
+    assert asked == [expected]
+
+
 # --- the team subgraph in the real assistant graph, with scripted models and a scripted board ---
 
 class Fake(Runnable):

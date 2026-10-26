@@ -1042,3 +1042,20 @@ def test_named_source_gives_exactly_that_source_plus_research():
 def test_two_named_speakers_run_together_with_research():
     """Goal 1: naming two sources restricts to those two; Goal 4: research joins."""
     assert _routes("Ask the docs agent and the SQL agent about it") == ["docs", "sql", "research"]
+
+
+async def test_every_agent_withdraws_and_the_orchestrator_hands_off(monkeypatch):
+    """Goal 2 + Interfaces: if every speaker withdraws the orchestrator answers as in normal mode, and a handoff
+    it chooses is run as in the nobody-mentioned path: that agent answers on the thread, with no error."""
+    _boards_log(monkeypatch, then=Board())
+    log = []
+    sql = Fake("sql", GAVE_UP, "Apple's market cap is $3T.", log=log)  # withdraws in the round, answers when handed the thread
+    model = per_agent(orchestrator=[AIMessage("", tool_calls=[{"name": "handoff", "args": {"agent": "sql"}, "id": "h1"}])])
+    assistant = _assistant(monkeypatch, model, documents=("handbook.pdf",), docs=Fake("docs", GAVE_UP, log=log),
+                           sql=sql, research=Fake("research", "", log=log))
+    await _stream(assistant, _ask(QUESTION))
+
+    assert sql.calls == 2
+    messages = await _thread(assistant)
+    assert [type(m) for m in messages] == [HumanMessage, AIMessage]
+    assert messages[-1].text == "Apple's market cap is $3T."

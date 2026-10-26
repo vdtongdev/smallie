@@ -539,6 +539,14 @@ def test_prompts_format():
     prompts.TEAM_MESSAGE.format(answers="", differences="none", conflicts="none", language="English")
 
 
+def test_round_message_formats_with_language():
+    from app.orchestration.prompts import ROUND_MESSAGE
+
+    text = ROUND_MESSAGE.format(language="English")
+    assert "English" in text
+    assert "{" not in text and "}" not in text
+
+
 async def test_transcript_holds_research_tool_calls(monkeypatch):
     """Research's researcher runs inside its workflow: its tool calls are not in the workflow's messages."""
     @tool

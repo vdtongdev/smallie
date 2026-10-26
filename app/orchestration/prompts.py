@@ -86,7 +86,7 @@ ATTEMPT_MESSAGE = """ATTEMPT (not visible to the user): the {route} specialist a
 Don't run those searches again. If its reply does answer the question after all, give that answer. Otherwise ask `ask_{route}` once more only with a clearly different, more specific question (e.g. naming the file or the exact data), use another specialist or a web search where the rules above allow it, or answer yourself when it needs none of them. If nothing can answer it, tell the user plainly what isn't available."""
 
 # Team mode (app/orchestration/team.py). Hidden message for each participant in the first round: the thread plus this, as the last message (name TEAM).
-ROUND_MESSAGE = """TEAM ROUND (not visible to the user). Answer the user's latest message with your own sources only. Give each figure or claim with its source and as-of date. Say plainly when your sources hold nothing on it, and don't guess. Write in {language}."""
+ROUND_MESSAGE = """TEAM ROUND (not visible to the user). Answer the user's latest message with your own sources only. Give each figure or claim with its source and as-of date. Say plainly when your sources hold nothing on it, and don't guess. Answer only the part your own sources cover, even when the message gives tasks to other agents: they answer their own parts. You can't see their answers, so never write as another agent, never attribute data to one, and never claim another agent checked your figures. Write in {language}."""
 
 # Hidden message for the participants of a conflict round. {conflicts}: bullets, one per conflict;
 # {others}: the other side's answers; {own}: this agent's earlier answer.
@@ -101,7 +101,7 @@ THE OTHER SIDE'S ANSWERS:
 YOUR EARLIER ANSWER:
 {own}
 
-Check the point again with your own tools. Correct your answer if it was wrong, or say why it stands, with the source and as-of date of each figure. Return your whole answer, not only the change. Write in {language}."""
+Check the point again with your own tools. Correct your answer if it was wrong, or say why it stands, with the source and as-of date of each figure. Return your whole answer, not only the change. Write only your own answer, never the other side's. Write in {language}."""
 
 # System prompt of the board call. {language}: the reply language, for the question.
 BOARD_PROMPT = """You are the board of a team that answers the user's latest message. Several agents answered it, each from its own sources. Sort their answers from what is in front of you: the user's message and the answers. Don't use outside knowledge to decide whether a fact is true.

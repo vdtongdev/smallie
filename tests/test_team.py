@@ -918,7 +918,7 @@ async def test_transcript_withdrawn_is_empty_when_everyone_answers(monkeypatch):
 
 
 async def test_withdrawn_agent_is_left_out_of_conflict_rounds(monkeypatch):
-    """Goal 2 + Review Focus: a withdrawn agent's round-1 answer never reaches a conflict round, nor can it fix one."""
+    """Goal 2 + Goal 4: a fixable conflict re-runs its routes as today, but a withdrawn agent is left out and its round-1 answer never reaches the round."""
     log = []
     conflict = Conflict(routes=["sql", "research", "docs"], claim="CAP-CLAIM", fixable_by=["sql", "docs"], issue="differ")
     seen = _boards_log(monkeypatch, Board(conflicts=[conflict]), Board())
@@ -930,7 +930,7 @@ async def test_withdrawn_agent_is_left_out_of_conflict_rounds(monkeypatch):
 
     rounds = _events(chunks, "round")
     assert [(e["round"], e["kind"], e["agents"]) for e in rounds] == [
-        (1, "answer", ["docs", "sql", "research"]), (2, "conflict", ["sql"])]
+        (1, "answer", ["docs", "sql", "research"]), (2, "conflict", ["sql", "research"])]
     assert docs.calls == 1
     assert seen == [["sql", "research"], ["sql", "research"]]
     second = [e["last"] for e in log if e["event"] == "start" and e["agent"] == "sql"][1]

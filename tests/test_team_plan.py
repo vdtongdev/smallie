@@ -60,6 +60,23 @@ def test_duplicate_and_empty_ids_are_renumbered():
     assert [x["id"] for x in out] == ["t1", "t2", "t3"]
 
 
+def test_plan_without_ids_parses():
+    assert Plan.model_validate({"tasks": [{"agent": "sql", "goal": "g"}]}).tasks[0].id == ""
+
+
+def test_missing_ids_take_their_position_so_dependencies_resolve():
+    plan = Plan.model_validate(
+        {"tasks": [{"agent": "docs", "goal": "a"}, {"agent": "sql", "goal": "b", "depends_on": ["t1"]}]}
+    )
+    out = validate_plan(plan, ["docs", "sql"], 6)
+    assert [x["id"] for x in out] == ["t1", "t2"]
+    assert out[1]["depends_on"] == ["t1"]
+
+
+def test_follow_up_without_id_parses():
+    assert Task.model_validate({"agent": "sql", "goal": "g"}).depends_on == []
+
+
 def test_fallback_tasks_are_independent():
     out = fallback_tasks(["docs", "sql"])
     assert [(x["id"], x["agent"], x["goal"], x["origin"]) for x in out] == [

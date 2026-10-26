@@ -10,7 +10,7 @@ DEAD = ("failed", "withdrew", "skipped")
 
 
 class Task(BaseModel):
-    id: str
+    id: str = ""
     agent: str
     goal: str
     depends_on: list[str] = []
@@ -51,9 +51,10 @@ def validate_plan(plan: Plan, available: Sequence[str], max_tasks: int) -> list[
     if plan.tasks and not kept:
         return None
     kept = kept[:max_tasks]
-    counts = Counter(x.id for x in kept)
-    # a duplicate or empty id can't be told apart, so edges to it are dropped
-    new_ids = {x.id: f"t{i}" for i, x in enumerate(kept, 1) if x.id and counts[x.id] == 1}
+    # a missing id is its position; a duplicate id can't be told apart, so edges to it are dropped
+    given = [x.id or f"t{i}" for i, x in enumerate(kept, 1)]
+    counts = Counter(given)
+    new_ids = {g: f"t{i}" for i, g in enumerate(given, 1) if counts[g] == 1}
     tasks = [
         _item(f"t{i}", x.agent, x.goal, [new_ids[d] for d in x.depends_on if d in new_ids], "plan")
         for i, x in enumerate(kept, 1)

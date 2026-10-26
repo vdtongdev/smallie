@@ -388,7 +388,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         for t in todo:
             if t["goal"]:
                 inputs, missing = _inputs(t, {**workspace, "tasks": tasks})
-                note = TASK_MESSAGE.format(goal=t["goal"], inputs=inputs, missing=missing, language=language)
+                note = TASK_MESSAGE.format(goal=t["goal"], inputs=inputs, missing=missing, language=language, drawing=drawing)
             else:  # fallback and reply tasks: the plain round note
                 note = ROUND_MESSAGE.format(language=language, drawing=drawing)
             if notes.get(t["agent"]):

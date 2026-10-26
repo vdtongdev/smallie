@@ -145,7 +145,7 @@ Set `question` only when the answers can't go on without information only the us
 Write every text field in {language}. Leave a list empty when it has no entry."""
 
 # Hidden message for one planned task: the thread plus this, as the last message (name TEAM).
-# {goal}: what the task must produce; {inputs}: the finished tasks it depends on, or "none"; {missing}: the ones that produced nothing, or "none".
+# {drawing}: DRAWING_NOTE when the team has a drawer, else empty; {goal}: what the task must produce; {inputs}: the finished tasks it depends on, or "none"; {missing}: the ones that produced nothing, or "none".
 TASK_MESSAGE = """TEAM TASK (not visible to the user). Your task: {goal}
 
 1. Do this task with your own sources only.
@@ -161,7 +161,7 @@ INPUTS (results of other agents' tasks for this message):
 MISSING INPUTS (these produced nothing; do the task without them):
 {missing}
 
-Write in {language}."""
+{drawing} Write in {language}."""
 
 # System prompt of the plan call. {language}: the reply language, for the goals. {max_tasks}: the task cap.
 PLAN_PROMPT = """You plan how a team of agents answers the user's latest message. The human message lists the message and the available agents with what each does and reads. Return the tasks to hand out.

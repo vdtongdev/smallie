@@ -1454,7 +1454,7 @@ async def test_transcript_is_the_workspace(monkeypatch):
 def test_task_message_formats():
     from app.orchestration.prompts import TASK_MESSAGE
 
-    text = TASK_MESSAGE.format(goal="G", inputs="none", missing="none", language="Vietnamese")
+    text = TASK_MESSAGE.format(goal="G", inputs="none", missing="none", language="Vietnamese", drawing="")
     assert "Vietnamese" in text and "{" not in text
 
 
@@ -1532,6 +1532,22 @@ async def test_dependency_on_a_chart_task_is_dropped(monkeypatch):
     tasks = {t["agent"]: t for t in _events(chunks, "plan")[0]["tasks"]}
     assert tasks["research"]["depends_on"] == []
     assert len(_starts(log, "research")) == 1
+
+
+async def test_task_note_says_the_chart_agent_draws(monkeypatch):
+    log = []
+    _plan(monkeypatch, Plan(tasks=[Task(id="t1", agent="sql", goal="get caps"), Task(id="t2", agent="chart", goal="chart")]))
+    _board(monkeypatch, then=Board())
+    model = per_agent(orchestrator=[AIMessage("Final.")])
+    assistant = _assistant(monkeypatch, model, sql=Fake("sql", "Cap.", log=log), chart=Fake("chart", "drawn", log=log, chart="chart-1"))
+    await _stream(assistant, _ask())
+    assert "Never say a chart can't be drawn" in _starts(log, "sql")[0]["last"].text
+
+    log.clear()
+    _plan(monkeypatch, Plan(tasks=[Task(id="t1", agent="sql", goal="get caps")]))
+    assistant = _assistant(monkeypatch, per_agent(orchestrator=[AIMessage("Final.")]), sql=Fake("sql", "Cap.", log=log))
+    await _stream(assistant, _ask(), {"configurable": {"thread_id": "no-drawer"}})
+    assert "can't be drawn" not in _starts(log, "sql")[0]["last"].text
 
 
 # --- hand-off challenges and per-meeting-point rounds ---

@@ -4,6 +4,9 @@ paths:
   - "app/core/memory.py"
   - "scripts/build_graph.py"
   - "scripts/reindex.py"
+  - "app/api/routes_chat.py"
+  - "app/api/routes_conversations.py"
+  - "app/api/routes_memories.py"
 ---
 
 Short-term, long-term (knowledge graph) and cross-chat memory.

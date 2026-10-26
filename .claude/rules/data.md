@@ -7,6 +7,10 @@ paths:
   - "app/agents/artifacts.py"
   - "scripts/load_stocks.py"
   - "db/init/**"
+  - "app/core/db.py"
+  - "app/static/charts.js"
+  - "app/api/routes_chat.py"
+  - "app/agents/delegation.py"
 ---
 
 Documents, SQL safety, chart and table artifacts, stock data and the daily update.

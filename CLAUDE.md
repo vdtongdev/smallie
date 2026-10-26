@@ -4,7 +4,7 @@ Guidance for Claude Code in this repository.
 
 ## What this is
 
-FastAPI app hosting LangChain agents (`create_agent`) behind an orchestrator, with a plain HTML/JS UI (`app/static/`, EN/VI toggle in `i18n.js`). The **orchestrator** answers general questions, hands a message to one specialist, or asks several as tools and writes the answer. Specialists: **docs**, **sql**, **chart**, **research**, each its own agent server. All LLM and embedding calls go through OpenRouter (`app/core/llm.py`). Every agent replies in the language of the user's latest message (English or Vietnamese): `LANGUAGE_RULE` in `app/core/prompts.py`.
+FastAPI app hosting LangChain agents (`create_agent`) behind an orchestrator, with a plain HTML/JS UI (`app/static/`, chat view plus a Readme dialog opened from the header, EN/VI toggle in `i18n.js`). The **orchestrator** answers general questions, hands a message to one specialist, or asks several as tools and writes the answer. Specialists: **docs**, **sql**, **chart**, **research**, each its own agent server. All LLM and embedding calls go through OpenRouter (OpenAI-compatible API, `app/core/llm.py`). Every agent replies in the language of the user's latest message (English or Vietnamese): `LANGUAGE_RULE` in `app/core/prompts.py`.
 
 Layout of `app/`: `core/` (config, llm, db, memory, auth, accounts, conversations, shared prompts; knows nothing about specific agents), `agents/` (one package per agent: `agent.py` with build + `SPEC`, `tools.py`, `prompts.py`; listed in `agents/registry.py`), `features/` (data an agent uses plus its API, ingestion and background jobs; listed in `features/registry.py`), `orchestration/` (router + assistant graph), `api/` (shared routes and `main.py`).
 
@@ -51,10 +51,10 @@ Tests that need Postgres use the `requires_db` marker (`tests/conftest.py`) and 
 
 - **User scoping**: every DB row, vector filter, memory namespace, upload path and tool is keyed by `user_id`. Keep it in every new query or tool.
 - **Windows event loop**: uvicorn and any standalone async script that touches Postgres use `asyncio.SelectorEventLoop` (psycopg's async driver fails on Proactor; see `scripts/reindex.py`).
-- **DB connections survive a Postgres restart**: SQLAlchemy engines (also PGVector's, via `engine_args`) use `pool_pre_ping=True`; the LangGraph pool uses `check=AsyncConnectionPool.check_connection` plus TCP keepalives. Never use `from_conn_string`.
+- **DB connections survive a Postgres restart**: SQLAlchemy engines (also PGVector's, via `engine_args`) use `pool_pre_ping=True`; the LangGraph pool uses `check=AsyncConnectionPool.check_connection` plus TCP keepalives. WSL stops Postgres when the distro shuts down. Never use `from_conn_string`: it holds one connection that never reconnects.
 - **Agent servers never write app data**: server-side code runs as `agent_reader` (`.claude/rules/remote-agents.md`).
-- **Agents never call each other**: only the orchestrator and the router delegate.
+- **Agents never call each other**: specialists never call one another; only the orchestrator asks or hands off to them.
 - **Sync DB or vector work** in async routes and tools goes through `asyncio.to_thread`.
 - **Config** comes from `get_settings()`; `.env.example` documents every variable.
-- **Deploy** only from `main`, after merging the PR, updating `CHANGELOG.md` and the version in `pyproject.toml` (`.claude/rules/changelog.md`), with a clean working tree.
+- **Deploy** only from `main`, after merging the PR, `git checkout main && git pull`, updating `CHANGELOG.md` and the version in `pyproject.toml` (`.claude/rules/changelog.md`), with a clean working tree, so the live app always matches `main`.
 - **`*.sh` files** keep LF line endings (they run in WSL).

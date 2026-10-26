@@ -5,6 +5,9 @@ paths:
   - "app/core/mcp.py"
   - "app/agents/skills.py"
   - "app/orchestration/formats/**"
+  - "app/orchestration/orchestrator.py"
+  - "app/static/app.js"
+  - "app/core/prompts.py"
 ---
 
 Research workflow, citations, MCP servers and skills.

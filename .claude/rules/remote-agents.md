@@ -6,6 +6,10 @@ paths:
   - "Dockerfile.agent"
   - "docker-compose.yml"
   - "db/init/**"
+  - "app/orchestration/graph.py"
+  - "app/core/db.py"
+  - "app/core/usage.py"
+  - "tests/conftest.py"
 ---
 
 How the main app calls the specialists as separate agent servers.

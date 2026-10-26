@@ -4,6 +4,8 @@ paths:
   - "app/core/accounts.py"
   - "app/api/routes_admin.py"
   - "scripts/claim_anonymous_data.py"
+  - "app/core/db.py"
+  - "app/features/base.py"
 ---
 
 Accounts, admin and per-user data isolation.

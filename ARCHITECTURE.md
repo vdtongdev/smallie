@@ -793,7 +793,7 @@ The judge is one structured model call per reviewed wave. It is set with `OPENRO
 - **Task cap:** `TEAM_MAX_TASKS` tasks per message, follow-ups included (default 6).
 - **Round cap:** `TEAM_MAX_ROUNDS` extra rounds per check point (default 2).
 - **Call budget:** `TEAM_MAX_MESSAGE_MODEL_CALLS` model calls per message across the app and all agent servers (default 30). Past it, no further agent is called; the write-up uses what finished and names the tasks that never ran.
-- **Failures:** an agent that fails does not stop the others; the write-up says which part is missing. A failed judge call ends the checking with the answers so far.
+- **Failures:** an agent that fails does not stop the others; the write-up says which part is missing. If the judge call fails, the review is skipped for that wave: no checks and no follow-ups, and the write-up is marked as forced. Later waves still run.
 - **Pause for the user:** the team never guesses information only the user has.
 
 ### Measured cost and latency

@@ -1706,6 +1706,19 @@ async def test_repeated_follow_up_is_dropped(monkeypatch):
     assert agents["sql"].calls == 1 and not _events(chunks, "plan_updated")
 
 
+async def test_follow_up_for_an_unavailable_agent_is_dropped(monkeypatch):
+    log = []
+    _plan(monkeypatch, Plan(tasks=[Task(id="t1", agent="sql", goal="a"), Task(id="t2", agent="research", goal="b")]))
+    _board(monkeypatch, _follow(agent="docs", depends_on=()), then=Board())
+    docs = Fake("docs", "DOCS TEXT", log=log)
+    assistant = _assistant(monkeypatch, per_agent(orchestrator=[AIMessage("Final.")]), docs=docs,
+                           sql=Fake("sql", "SQL TEXT", log=log), research=Fake("research", "RESEARCH TEXT", log=log))
+    chunks = await _stream(assistant, _ask(THREE))
+
+    assert docs.calls == 0 and not _events(chunks, "plan_updated")
+    assert all(t["agent"] != "docs" for t in (await _thread(assistant))[-1].additional_kwargs["team"]["tasks"])
+
+
 async def test_last_wave_with_one_task_is_reviewed_and_may_grow_the_plan_below_the_cap(monkeypatch):
     for cap, sql_runs, plan_updates in ((6, 1, 1), (1, 0, 0)):
         monkeypatch.setattr(get_settings(), "team_max_tasks", cap)

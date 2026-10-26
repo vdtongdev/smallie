@@ -96,7 +96,7 @@ class Outcome(BaseModel):
 class Review(Board):
     challenges: list[Challenge] = []
     outcomes: list[Outcome] = []
-    follow_ups: list[Task] = []  # parsed here; the review node does not act on them yet
+    follow_ups: list[Task] = []  # new tasks for the plan; the review node adds them after its checks
 
 
 def hand_off_key(to_task: str, by_task: str) -> str:
@@ -539,7 +539,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
                 if mark not in seen:
                     seen.add(mark)
                     fresh.append(f.model_copy(update={"depends_on": [d for d in f.depends_on if d not in charts]}))
-            _, added, dropped = add_follow_ups(tasks, fresh, [s.route for s in specs], settings.team_max_tasks)
+            _, added, dropped = add_follow_ups(tasks, fresh, [s.route for s, _ in available], settings.team_max_tasks)
             added = [{**t, "depends_on": [ANSWER]} if by_route[t["agent"]].draws else t for t in added]
             not_done += dropped
         update = {"synthesis": {**synthesis, "forced": forced, "open_points": open_points, "not_done": not_done}, "challenged": still}

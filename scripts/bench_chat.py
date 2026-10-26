@@ -68,8 +68,9 @@ SCENARIOS = {
     "team_ambiguous": ("Which one is better?", "team mode: a comparison with no subject, to try needs_human"),
     "team_conflict": ("What is AAPL's market cap according to the file bench_team_conflict.docx, and what does the stock database say?",
                       "team mode: the uploaded file and the database disagree"),
+    "team_chart": ("Chart AAPL closing prices over the last month", "team mode: a chart request, a small gap should settle fast"),
 }
-FIXTURES = {"team_conflict": ("team_conflict.md", "bench_team_conflict.docx")}  # scenario -> (source, uploaded name)
+FIXTURES ={"team_conflict": ("team_conflict.md", "bench_team_conflict.docx")}  # scenario -> (source, uploaded name)
 PAUSE_SECONDS = 20  # between scenarios, so bursts stay under the free tier's ~20 requests/min
 
 

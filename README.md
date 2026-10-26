@@ -127,7 +127,7 @@ Set in `.env`; all calls go through OpenRouter.
 
 ## Architecture
 
-A router, an orchestrator and four specialists that each run as their own agent server. [ARCHITECTURE.md](ARCHITECTURE.md) has the details: [the router](ARCHITECTURE.md#3-router), [the orchestrator](ARCHITECTURE.md#4-orchestrator), [memory](ARCHITECTURE.md#8-memory), [remote agents](ARCHITECTURE.md#10-remote-agents-040) [team mode](ARCHITECTURE.md#11-agent-team-050) and [deployment](ARCHITECTURE.md#13-deployment). Developer notes for coding agents are in [CLAUDE.md](CLAUDE.md).
+A router, an orchestrator and four specialists that each run as their own agent server. [ARCHITECTURE.md](ARCHITECTURE.md) has the details: [the router](ARCHITECTURE.md#3-router), [the orchestrator](ARCHITECTURE.md#4-orchestrator), [memory](ARCHITECTURE.md#8-memory), [remote agents](ARCHITECTURE.md#10-remote-agents-040), [team mode](ARCHITECTURE.md#11-agent-team-050) and [deployment](ARCHITECTURE.md#13-deployment). Developer notes for coding agents are in [CLAUDE.md](CLAUDE.md).
 
 ## Adding an agent
 

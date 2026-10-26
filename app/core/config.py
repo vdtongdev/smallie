@@ -68,8 +68,9 @@ class Settings(BaseSettings):
     # Loop guard: model calls one chat message may use across the orchestrator and every agent
     # server (they report theirs); past it, no further specialist is called.
     max_message_model_calls: int = 30
-    # Team mode: conflict rounds per message after the first answer round, and its own model-call cap (same guard as above).
-    team_max_rounds: int = 4
+    # Team mode: conflict rounds per meeting point, tasks per message (follow-ups included), and its own model-call cap (same guard as above).
+    team_max_rounds: int = 2
+    team_max_tasks: int = 6
     team_max_message_model_calls: int = 30
 
     @property

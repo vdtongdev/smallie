@@ -13,6 +13,7 @@ on its `additional_kwargs["team"]`. Progress goes out as `custom` stream events:
 import asyncio
 import dataclasses
 import logging
+import uuid
 from collections.abc import Mapping, Sequence
 from typing import Annotated
 
@@ -33,7 +34,7 @@ from app.core.config import get_settings
 from app.core.llm import get_chat_model
 from app.core.memory import TEAM_MODE, AgentContext
 from app.core.prompts import reply_language
-from app.orchestration.prompts import BOARD_PROMPT, CONFLICT_MESSAGE, DRAWING_NOTE, NOTHING_FOUND_MESSAGE, PLAN_PROMPT, ROUND_MESSAGE, TASK_MESSAGE, TEAM_MESSAGE
+from app.orchestration.prompts import BOARD_PROMPT, CONFLICT_MESSAGE, DRAW_MESSAGE, DRAWING_NOTE, NOTHING_FOUND_MESSAGE, PLAN_PROMPT, ROUND_MESSAGE, TASK_MESSAGE, TEAM_MESSAGE
 from app.orchestration.team_plan import Plan, dead_inputs, fallback_tasks, ready, validate_plan
 from app.orchestration.router import ORCHESTRATOR, AssistantState, available_agents
 
@@ -42,7 +43,8 @@ log = logging.getLogger(__name__)
 TEAM = TEAM_MODE
 SMALL_TALK_WORDS = 5
 NO_SOURCES = ("none",)  # empty sources means unscoped, so the chart task gets a source no tool carries
-DRAW_GOAL = "Draw the chart the user asked for from the data in your inputs."
+ANSWER = "answer"  # the id a chart task depends on: the final answer, which exists only after `synthesize`
+DRAW_GOAL = "Draw the chart the user asked for from the final answer."
 LIVE = ("done", "failed")  # statuses whose text reaches the board and the write-up
 
 
@@ -227,14 +229,20 @@ def _drawing(drawers: Sequence[str]) -> str:
     return DRAWING_NOTE.format(agent=" and ".join(drawers)) if drawers else ""
 
 
-def with_drawers(tasks: Sequence[dict], drawers: Sequence[str], by_route: Mapping[str, AgentSpec], origin: str) -> list[dict]:
-    """The tasks plus one chart task per drawer route, depending on the first task of the agent that feeds it (`fed_by`)."""
+def with_drawers(tasks: Sequence[dict], drawers: Sequence[str], origin: str) -> list[dict]:
+    """The tasks plus one chart task per drawer route; it waits for the final answer (`dispatch` never sends it)."""
     tasks = list(tasks)
     for route in drawers:
-        feed = [t["id"] for t in tasks if t["agent"] in by_route[route].fed_by][:1]
-        tasks.append({"id": f"t{len(tasks) + 1}", "agent": route, "goal": DRAW_GOAL, "depends_on": feed,
+        tasks.append({"id": f"t{len(tasks) + 1}", "agent": route, "goal": DRAW_GOAL, "depends_on": [ANSWER],
                       "status": "pending", "origin": origin})
     return tasks
+
+
+def _transcript(workspace: dict) -> dict:
+    """The workspace as the answer carries it: the tables and charts travel on the answer itself, so results keep only text and tools."""
+    transcript = {k: v for k, v in workspace.items() if k not in ("rounds_at", "artifacts")}
+    transcript["results"] = {k: {f: v for f, v in r.items() if f != "artifacts"} for k, r in workspace["results"].items()}
+    return transcript
 
 
 def _brief(task: dict) -> dict:
@@ -252,9 +260,8 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
     def drawers_of(tasks: Sequence[dict]) -> list[str]:
         return list(dict.fromkeys(t["agent"] for t in tasks if by_route[t["agent"]].draws))
 
-    def job(task_id: str, route: str, rnd: int, kind: str, note: str, messages, deny: tuple[str, ...] = ()) -> Send:
-        return Send("speak", {"task": task_id, "route": route, "round": rnd, "kind": kind, "note": note,
-                              "messages": messages, "deny": deny})
+    def job(task_id: str, route: str, rnd: int, kind: str, note: str, messages) -> Send:
+        return Send("speak", {"task": task_id, "route": route, "round": rnd, "kind": kind, "note": note, "messages": messages})
 
     async def ask_orchestrator(state: AssistantState, runtime: Runtime[AgentContext], note: str = "", drawn: bool = False):
         """The orchestrator node's Command for this thread (`note` as its hidden team message;
@@ -296,9 +303,11 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
                 tasks = None
             if tasks == []:
                 return await alone(state, runtime, config)
-            if tasks is None:  # the participants take the work, a named chart agent draws from sql's task
-                tasks = with_drawers(fallback_tasks(chosen), [s.route for s in everyone if s.draws], by_route, "fallback")
+            if tasks is None:  # the participants take the work, a named chart agent draws from the answer
+                tasks = with_drawers(fallback_tasks(chosen), [s.route for s in everyone if s.draws], "fallback")
                 fallback = True
+            else:  # a planned chart task waits for the answer, whatever the plan says
+                tasks = [{**t, "depends_on": [ANSWER]} if by_route[t["agent"]].draws else t for t in tasks]
         emit({"type": "plan", "tasks": [_brief(t) for t in tasks], "fallback": fallback})
         workspace = {"reset": True, "goal": messages[-1].text, "tasks": tasks, "results": {}, "evidence": [], "artifacts": {},
                      "history": [], "rounds_at": {}, "wave": 0, "question": "",
@@ -325,15 +334,6 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         sends = []
         drawing = _drawing(drawers_of(tasks))
         for t in todo:
-            task_messages, deny = messages, ()
-            if by_route[t["agent"]].draws:  # chart_table finds its inputs' tables in the messages
-                dead = dead_inputs(t, tasks)[0]
-                tables = [tb for d in t["depends_on"] if d in workspace["results"] and d not in dead
-                          for tb in workspace["results"][d]["artifacts"].get("tables", [])]
-                if tables:  # it charts a table and never copies numbers
-                    ids = ", ".join(tb["id"] for tb in tables)
-                    task_messages = [*messages, AIMessage(f"Tables from the team's work: {ids}.", additional_kwargs={"tables": tables})]
-                    deny = ("chart_data",)
             if t["goal"]:
                 inputs, missing = _inputs(t, {**workspace, "tasks": tasks})
                 note = TASK_MESSAGE.format(goal=t["goal"], inputs=inputs, missing=missing, language=language)
@@ -341,7 +341,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
                 note = ROUND_MESSAGE.format(language=language, drawing=drawing)
             if notes.get(t["agent"]):
                 note = f"{note}\n{notes[t['agent']]}"
-            sends.append(job(t["id"], t["agent"], 1, "plan", note, task_messages, deny))
+            sends.append(job(t["id"], t["agent"], 1, "plan", note, messages))
         ids, routes = [t["id"] for t in todo], [t["agent"] for t in todo]
         entry = {"type": "wave", "wave": wave, "kind": "plan", "tasks": ids, "agents": routes}
         emit(entry)
@@ -350,8 +350,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
     async def speak(task: dict, runtime: Runtime[AgentContext], config: RunnableConfig) -> dict:
         route, spec, tid = task["route"], by_route[task["route"]], task["task"]
         emit({"type": "speaker", "agent": route, "task": tid, "ns": config["configurable"]["checkpoint_ns"]})
-        context = dataclasses.replace(runtime.context, sources=NO_SOURCES if spec.draws else tuple(sorted(spec.sources)),
-                                      deny_tools=tuple(task["deny"]))
+        context = dataclasses.replace(runtime.context, sources=tuple(sorted(spec.sources)))
         messages = [*task["messages"], HumanMessage(task["note"], name=TEAM)]
         entry = {"agent": route, "round": task["round"], "tools": [], "artifacts": {}}
 
@@ -387,7 +386,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
     async def review(state: TeamState, runtime: Runtime[AgentContext], config: RunnableConfig) -> Command:
         workspace, messages, settings = state["workspace"], state["messages"], get_settings()
         tasks, results, rounds_at = workspace["tasks"], workspace["results"], workspace["rounds_at"]
-        pending = [t for t in tasks if t["status"] == "pending"]
+        pending = [t for t in tasks if t["status"] == "pending" and ANSWER not in t["depends_on"]]
         if pending:  # an intermediate wave: its tasks, and only when they took input or meet in a pending task
             wave = next(e for e in reversed(workspace["history"]) if e["type"] == "wave" and e["kind"] == "plan")
             group = [t for t in tasks if t["id"] in wave["tasks"]]
@@ -466,8 +465,9 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         tasks = list(workspace["tasks"])
         for t in fallback_tasks(new):
             tasks.append({**t, "id": f"t{len(tasks) + 1}", "origin": "reply"})
-        tasks = with_drawers(tasks, [s.route for s in named if s.draws and s.route not in taking_part], by_route, "reply")
-        added = tasks[len(workspace["tasks"]):]
+        n = len(tasks)
+        tasks = with_drawers(tasks, [s.route for s in named if s.draws and s.route not in taking_part], "reply")
+        added = tasks[len(workspace["tasks"]):n]  # a chart task waits for the answer: it alone sends nothing now
         update = {"tasks": tasks}
         return Command(update={"messages": messages[-1:], "workspace": update}, goto="dispatch" if added else "review")
 
@@ -502,13 +502,45 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
             answer = AIMessage("\n\n".join(a["text"] for a in answers), name=ORCHESTRATOR) if did_handoff \
                 else command.update["messages"][0]
         artifacts = _merge([r["artifacts"] for r in workspace["results"].values()])
-        # The tables and charts travel on the answer itself, so the transcript keeps only the ids' owners (the results' text and tools).
-        transcript = {k: v for k, v in workspace.items() if k not in ("rounds_at", "artifacts")}
-        transcript["results"] = {k: {f: v for f, v in r.items() if f != "artifacts"} for k, r in workspace["results"].items()}
-        kwargs = {**answer.additional_kwargs, **_merge([artifacts, collect([answer])]), "team": transcript}
-        if kwargs.get("charts"):
+        kwargs = {**answer.additional_kwargs, **_merge([artifacts, collect([answer])]), "team": _transcript(workspace)}
+        if kwargs.get("charts") and not drawers:
             emit({"type": "charts", "charts": kwargs["charts"]})
-        return {"messages": [answer.model_copy(update={"additional_kwargs": kwargs})]}
+        # An id, so the `draw` step's version replaces this message instead of joining it.
+        return {"messages": [answer.model_copy(update={"additional_kwargs": kwargs, "id": answer.id or str(uuid.uuid4())})]}
+
+    async def draw(state: TeamState, runtime: Runtime[AgentContext], config: RunnableConfig) -> dict:
+        """Each chart task runs once on the thread plus the final answer, with no data source, and its charts join the answer."""
+        workspace, messages, answer = state["workspace"], state["messages"], state["messages"][-1]
+        artifacts, results, status = [collect([answer])], {}, {}
+        for task in (t for t in workspace["tasks"] if t["status"] == "pending" and ANSWER in t["depends_on"]):
+            route, tid = task["agent"], task["id"]
+            emit({"type": "speaker", "agent": route, "task": tid, "ns": config["configurable"]["checkpoint_ns"]})
+            # With a table on this turn's answer the chart agent charts that table: it may not copy numbers.
+            deny = ("chart_data",) if answer.additional_kwargs.get("tables") else ()
+            context = dataclasses.replace(runtime.context, sources=NO_SOURCES, deny_tools=deny)
+            note = HumanMessage(DRAW_MESSAGE.format(language=reply_language(messages)), name=TEAM)
+            recorder = ToolRecorder()
+            tools, text, charts = [], "", []
+            try:
+                result = await agents[route].ainvoke({"messages": [*messages, note]},
+                                                     merge_configs(config, {"callbacks": [recorder]}), context=context)
+            except (openai.RateLimitError, openai.AuthenticationError):
+                raise
+            except Exception as exc:  # noqa: BLE001 - the final answer stands without the chart
+                log.exception("Team chart task %s failed", route)
+                status[tid], text = "failed", f"failed: {type(exc).__name__}"
+            else:
+                turn = turn_messages(result.get("messages", []))
+                tools = result["tools"] if "tools" in result else recorder.tools or _tools(turn)
+                status[tid], text, charts = "done", by_route[route].result(result), collect(turn).get("charts", [])
+            results[tid] = {"agent": route, "round": 1, "tools": tools, "artifacts": {}, "text": text}
+            artifacts.append({"charts": charts})
+        update = {"results": results, "status": status}
+        merged = _merge(artifacts)
+        kwargs = {**answer.additional_kwargs, **merged, "team": _transcript(merge_workspace(workspace, update))}
+        if merged.get("charts"):
+            emit({"type": "charts", "charts": merged["charts"]})
+        return {"messages": [answer.model_copy(update={"additional_kwargs": kwargs})], "workspace": update}
 
     graph = StateGraph(TeamState, context_schema=AgentContext)
     graph.add_node("plan", plan, destinations=("dispatch", END))
@@ -519,5 +551,8 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
     graph.add_node("synthesize", synthesize)
     graph.add_edge(START, "plan")
     graph.add_edge("speak", "review")
-    graph.add_edge("synthesize", END)
+    graph.add_node("draw", draw)
+    graph.add_conditional_edges("synthesize", lambda state: "draw" if any(
+        t["status"] == "pending" and ANSWER in t["depends_on"] for t in state["workspace"]["tasks"]) else END, ["draw", END])
+    graph.add_edge("draw", END)
     return graph.compile(name=TEAM)

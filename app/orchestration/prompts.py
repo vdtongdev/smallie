@@ -86,7 +86,7 @@ ATTEMPT_MESSAGE = """ATTEMPT (not visible to the user): the {route} specialist a
 Don't run those searches again. If its reply does answer the question after all, give that answer. Otherwise ask `ask_{route}` once more only with a clearly different, more specific question (e.g. naming the file or the exact data), use another specialist or a web search where the rules above allow it, or answer yourself when it needs none of them. If nothing can answer it, tell the user plainly what isn't available."""
 
 # Fills the {drawing} slot of ROUND_MESSAGE and TEAM_MESSAGE when the team has a drawer; {agent}: its route. The slot is empty otherwise.
-DRAWING_NOTE = """ The {agent} agent draws the chart the user asked for from the team's data, and the chart is shown with the final answer. Never say a chart can't be drawn, never apologise for it, never tell the user to draw it themselves, and never describe a chart. At most say the chart is shown with the answer."""
+DRAWING_NOTE = """ The {agent} agent draws the chart the user asked for from the team's final answer, right after it is written. Never say a chart can't be drawn, never apologise for it, never tell the user to draw it themselves, and never describe a chart. At most say the chart follows."""
 
 # Team mode (app/orchestration/team.py). Hidden message for each participant in the first round: the thread plus this, as the last message (name TEAM).
 ROUND_MESSAGE = """TEAM ROUND (not visible to the user). Answer the user's latest message with your own sources only. Give each figure or claim with its source and as-of date. Say plainly when your sources hold nothing on it, and don't guess. Answer only the part your own sources cover, even when the message gives tasks to other agents: they answer their own parts. You can't see their answers, so never write as another agent, never attribute data to one, and never claim another agent checked your figures.{drawing} Write in {language}."""
@@ -168,6 +168,9 @@ Combine the answers into one answer to the user's message. Where sources gave di
 
 # Hidden message for the orchestrator when every team agent withdrew. {withdrawn}: their routes, comma-separated.
 NOTHING_FOUND_MESSAGE = """TEAM NOTHING FOUND (not visible to the user). These agents looked in their own sources and found nothing to answer the user's latest message: {withdrawn}. Answer the message yourself, as you would without a team. Say plainly, in one sentence, that those agents could not answer from their sources. Don't ask them again.{drawing} Write in {language}."""
+
+# Hidden last message for a team drawer (the chart agent), after the final answer: the thread plus the final answer plus this (name TEAM).
+DRAW_MESSAGE = """TEAM DRAW (not visible to the user). The message just above is the team's final answer to the user's latest message. Draw the chart the user asked for from the data in that answer. You have no database. 1. When a table listed in this chat holds the data, draw it with chart_table. 2. Otherwise, when the answer writes the figures, draw them with chart_data, copying them exactly. Never add, change or estimate a figure. When the answer holds no data to chart, say so in one line and draw nothing. After drawing, reply with one short line about the chart, not another answer. Write in {language}."""
 
 # Results of tool calls the orchestrator may not make (`no_repeats` in orchestrator.py).
 REPEATED_CALL = "Not run: this exact call was already made for this message; its result is above. Use it, or write the answer."

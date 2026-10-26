@@ -562,6 +562,23 @@ async def test_reply_to_question_naming_a_new_agent_brings_it_in(monkeypatch):
     assert [a for a in _agents(team_record) if a != "chart"] == ["sql", "docs"] and [a for a in _agents(team_record) if a == "chart"] == ["chart"]
 
 
+async def test_reply_task_has_origin_reply(monkeypatch):
+    assistant, agents, second = await _chart_asks(monkeypatch, "check handbook.pdf")
+
+    tasks = (await _thread(assistant))[-1].additional_kwargs["team"]["tasks"]
+    docs = next(t for t in tasks if t["agent"] == "docs")
+    assert docs["origin"] == "reply" and docs["depends_on"] == [] and docs["goal"] == ""
+
+
+async def test_follow_up_and_reply_after_pause_keep_one_workspace(monkeypatch):
+    assistant, agents, second = await _chart_asks(monkeypatch, "check handbook.pdf")
+
+    team = (await _thread(assistant))[-1].additional_kwargs["team"]
+    assert sorted(_agents(team)) == ["chart", "docs", "sql"]
+    assert {t["agent"] for t in team["tasks"] if t["status"] == "done"} >= {"sql", "docs"}
+    assert {e["agent"] for e in team["history"] if e["type"] == "result"} >= {"sql", "docs"}
+
+
 async def test_reply_without_new_agent_goes_straight_to_judge(monkeypatch):
     assistant, agents, second = await _chart_asks(monkeypatch, "2024 please")
 

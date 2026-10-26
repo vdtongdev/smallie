@@ -126,3 +126,12 @@
 - [ ] **Step 1:** add bench scenario `team_chart` ("Chart AAPL closing prices over the last month", team mode); commit `test: team chart scenario`
 - [ ] **Step 2:** for each candidate (set `OPENROUTER_JUDGE_MODEL` in the bench process env only; don't edit `.env`), run `--only team,team_conflict,team_chart --runs 1` with the events wrapper
 - [ ] **Step 3:** report per model and scenario: boards (agreements, differences with sides, conflicts), whether the planted file is flagged against the dated sources, rounds, calls, latency, judge-call cost (from the usage totals), errors; recommend one; fix nothing
+
+### Task 9: Docs (user request, 2026-10-26)
+
+**Files:** `CLAUDE.md`, `ARCHITECTURE.md`, `.claude/rules/changelog.md`, `.env.example` (check only).
+
+- [ ] **Step 1:** `CLAUDE.md` (with `writing-llm-document`): a "Team mode" section for the round table (pick, speak via `Send`, board, conflict rounds, write-up, pause/resume), `AgentSpec.review`/`sources`/`joins`, tool `source` tags with `scope_tools` + `refuse_hidden_tools`, research's per-request source prompt, the `team` transcript, the custom events (`speaker` internal, `round`, `board`, `spoke`, `synthesize`, `needs_human`) and `_events_from`'s namespace mapping, the status line and Activity popup, `REPLY_LANGUAGE`, settings `TEAM_MAX_ROUNDS`, `TEAM_MAX_MESSAGE_MODEL_CALLS`, `OPENROUTER_JUDGE_MODEL` (`exact_model`). Update the existing paragraphs it changes (Chat flow, Agent registry, Agent construction, the free-tier call counts line).
+- [ ] **Step 2:** `ARCHITECTURE.md`: the agent team for people (team lead, customers): what team mode does, the round-table flow, independent sources and conflict rules, the judge model, the UI, measured costs (from the evaluations).
+- [ ] **Step 3:** `.claude/rules/changelog.md` (with `writing-llm-document`): `0.5.0`: agent team (team mode, round table); `0.6.0`: image agent; later ones `0.7.0`.
+- [ ] **Step 4:** `.env.example` documents `TEAM_MAX_ROUNDS`, `TEAM_MAX_MESSAGE_MODEL_CALLS`, `OPENROUTER_JUDGE_MODEL`; commit `docs: agent team`

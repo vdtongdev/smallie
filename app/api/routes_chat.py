@@ -28,7 +28,7 @@ from app.core.usage import UsageCounter, add_usage
 router = APIRouter(tags=["chat"])
 log = logging.getLogger(__name__)
 
-TEAM_EVENTS = frozenset({"round", "board", "synthesize", "needs_human", "spoke", "charts"})  # custom events of a team turn
+TEAM_EVENTS = frozenset({"plan", "plan_updated", "wave", "review", "synthesize", "needs_human", "spoke", "charts"})  # custom events of a team turn
 
 
 class ChatRequest(BaseModel):
@@ -172,14 +172,14 @@ async def _events_from(stream) -> AsyncIterator[dict]:
     """SSE events for a `subgraphs=True` stream, plus a `step` event whenever a workflow
     moves to another of its steps listed in its spec's `steps`."""
     current = None
-    speakers: dict[str, str] = {}  # "speak:<task id>" -> route, from the team's internal speaker event
+    speakers: dict[str, tuple[str, str | None]] = {}  # "speak:<task id>" -> (route, task id), from the team's internal speaker event
     async for namespace, mode, chunk in stream:
         if mode == "custom" and isinstance(chunk, dict) and chunk.get("type") == "speaker":
-            speakers[chunk["ns"].rsplit("|", 1)[-1]] = chunk["agent"]  # ns is "team:<id>|speak:<task id>"
+            speakers[chunk["ns"].rsplit("|", 1)[-1]] = (chunk["agent"], chunk.get("task"))  # ns is "team:<id>|speak:<task id>"
             continue
         # The team is a subgraph node, so `speak:<id>` sits after its parent segment; inner depth varies too.
         at = next((i for i, segment in enumerate(namespace) if segment in speakers), None)
-        agent = speakers[namespace[at]] if at is not None else None
+        agent, task = speakers[namespace[at]] if at is not None else (None, None)
         if agent:
             namespace = namespace[at:]  # keep `speak` so the chunk still counts as inside a subgraph
         else:
@@ -188,7 +188,9 @@ async def _events_from(stream) -> AsyncIterator[dict]:
                 current = step
                 yield {"type": "step", "agent": step[0], "name": step[1]}
         for event in _to_events(mode, chunk, namespace, in_round=bool(agent)):
-            yield {**event, "agent": agent} if agent and event["type"] in ("token", "tool_call", "tool_result") else event
+            if agent and event["type"] in ("token", "tool_call", "tool_result"):
+                event = {**event, "agent": agent, **({"task": task} if task else {})}
+            yield event
 
 
 def _step(namespace: tuple[str, ...]) -> tuple[str, str] | None:

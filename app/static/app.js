@@ -227,13 +227,14 @@ const el = (tag, cls, text) => Object.assign(document.createElement(tag), { clas
 
 // ---------- status line and activity popup ----------
 // Each reply has a status line (spinner and badges while it runs, a summary after) and an Activity button.
-// `act` is what the popup shows, kept in memory per reply: {team, rounds: [{round, max, kind, agents,
-// answers: [{agent, text, tools: [{name, args, result}]}], board}], tools: [], question}. A reload builds it
-// from `message.team` or the tool messages.
+// `act` is what the popup shows, kept in memory per reply: {team, plan: [{id, agent, goal, depends_on, origin}],
+// waves: [{wave, kind, tasks, agents, answers: [{task, agent, text, tools: [{name, args, result}]}], review}],
+// drawn: [same answers, tasks outside every wave], synthesis, tools: [], question}. A reload builds it
+// from `message.team` (the task graph's workspace or the older rounds/boards) or the tool messages.
 function newTurn(team = false) {
   const turn = {
     el: el("div", "status-line"), badges: [], running: true, step: {}, opener: null,
-    act: { team, rounds: [], tools: [], drawn: [], question: null },
+    act: { team, plan: [], waves: [], tools: [], drawn: [], synthesis: null, question: null },
   };
   turn.el.turn = turn;
   turn.head = el("span");
@@ -250,28 +251,47 @@ function newTurn(team = false) {
   return turn;
 }
 
-const stepCount = (act) => act.rounds.reduce((n, r) => n + r.answers.reduce((m, a) => m + 1 + a.tools.length, 0), 0)
+const stepCount = (act) => act.waves.reduce((n, r) => n + r.answers.reduce((m, a) => m + 1 + a.tools.length, 0), 0)
   + act.drawn.reduce((n, d) => n + 1 + d.tools.length, 0) + act.tools.length + (act.question ? 1 : 0);
 
-const roundTitle = (r) => `${t(r.max ? "roundOf" : "roundN").replace("{n}", r.round).replace("{max}", r.max)} · ${t(r.kind === "conflict" ? "kindConflict" : "kindAnswer")}`;
+const waveTitle = (w) => `${t("waveN").replace("{n}", w.wave)} · ${t({ conflict: "kindConflict", challenge: "kindChallenge" }[w.kind] || "kindAnswer")}`;
 
+// Waves the plan needs so far: its longest dependency chain, at least the waves already run.
+function waveTotal(act) {
+  const depth = {};
+  const of = (task, seen = []) => depth[task.id] ??= 1 + Math.max(0, ...task.depends_on.map((d) => {
+    const dep = act.plan.find((x) => x.id === d);
+    return dep && !seen.includes(d) ? of(dep, [...seen, task.id]) : 0;
+  }));
+  return Math.max(act.waves.length, ...act.plan.filter((x) => !x.depends_on.includes("answer")).map((x) => of(x)));
+}
+
+const planAgent = (act, id) => agentLabel(act.plan.find((x) => x.id === id)?.agent ?? id);
+
+// One line for a review: who questions whom, and the follow-up tasks it adds.
+function reviewNote(act, review) {
+  return [...(review.challenges || []).map((c) => t("questions").replace("{by}", planAgent(act, c.by_task)).replace("{to}", planAgent(act, c.to_task))),
+    ...(review.follow_ups || []).map((f) => `+ ${agentLabel(f.agent)}: ${f.goal}`)].join(" · ");
+}
 function renderStatus(turn) {
   const { act, step } = turn;
   let head = "";
   let tail = "";
   let names = turn.badges;
   if (turn.running) {
-    if (step.round) {
-      head = roundTitle(step.round);
-      names = step.round.agents.map((agent) => ({ agent }));
-    }
+    if (step.wave) {
+      head = t("waveOf").replace("{n}", step.wave.wave).replace("{max}", waveTotal(act));
+      names = step.wave.agents.map((agent) => ({ agent }));
+    } else if (step.note) head = step.note;
     if (step.writing) head = t("writing");
     else if (step.tool) head = t("usingTool").replace("{name}", step.tool);
-  } else if (act.team && act.rounds.length) {
-    const n = act.rounds.length;
+  } else if (act.team && act.waves.length) {
+    const n = act.waves.length;
     head = n === 1 ? t("teamSummaryOne") : t("teamSummary").replace("{n}", n);
-    const diffs = act.rounds.reduce((m, r) => m + (r.board?.differences.length || 0), 0);
-    if (diffs) tail = t(diffs === 1 ? "differenceOne" : "differenceMany").replace("{n}", diffs);
+    const resolved = act.waves.reduce((m, w) => m + (w.review?.outcomes?.length || 0), 0);
+    const diffs = act.waves.reduce((m, w) => m + (w.review?.differences.length || 0), 0);
+    if (resolved) tail = t(resolved === 1 ? "resolvedOne" : "resolvedMany").replace("{n}", resolved);
+    else if (diffs) tail = t(diffs === 1 ? "differenceOne" : "differenceMany").replace("{n}", diffs);
   }
   turn.head.textContent = head;
   turn.tail.textContent = tail;
@@ -327,7 +347,7 @@ function toolBlock(parent, { name, args, result }) {
   parent.append(out);
 }
 
-function boardBlock(b) {
+function boardBlock(b, act) {
   const div = el("div", "act-board");
   div.append(el("strong", "", t("boardTitle")));
   if (b.forced) div.append(i18nSpan("em", "forcedStop"));
@@ -341,6 +361,9 @@ function boardBlock(b) {
   section(t("agreements"), b.agreements);
   section(t("differences"), b.differences.map((d) => `${routes(d.routes)}: ${d.explanation}`
     + (d.sides || []).map((x) => ` [${agentLabel(x.route)}: ${x.value}, ${x.source}, ${x.as_of}]`).join("")));
+  section(t("challenges"), (b.challenges || []).map((c) => `${planAgent(act, c.by_task)} -> ${planAgent(act, c.to_task)}: ${c.question}`));
+  section(t("outcomes"), (b.outcomes || []).map((o) => `${planAgent(act, o.task)}: ${t(o.revised ? "revised" : "stands")}`));
+  section(t("followUps"), (b.follow_ups || []).map((f) => `${agentLabel(f.agent)}: ${f.goal}`));
   section(t("conflicts"), b.conflicts.map((c) => `${routes(c.routes)}: ${c.claim}${c.issue ? ` — ${c.issue}` : ""}`
     + (c.fixable_by.length ? ` (${t("fixableBy")} ${routes(c.fixable_by)})` : "")));
   return div;
@@ -350,9 +373,20 @@ function renderActivity() {
   const act = activityTurn.act;
   const body = $("activityBody");
   body.replaceChildren();
-  for (const r of act.rounds) {
+  if (act.plan.length) {
     const sec = el("section", "act-round");
-    sec.append(el("h3", "", roundTitle(r)));
+    sec.append(el("h3", "", t("plan")));
+    const ul = document.createElement("ul");
+    for (const x of act.plan) {
+      const mark = { follow_up: t("followUpMark"), reply: t("replyMark") }[x.origin];
+      ul.append(el("li", "", `${x.id} ${agentLabel(x.agent)}: ${x.goal}${x.depends_on.length ? ` ← ${x.depends_on.join(", ")}` : ""}${mark ? ` (${mark})` : ""}`));
+    }
+    sec.append(ul);
+    body.append(sec);
+  }
+  for (const r of act.waves) {
+    const sec = el("section", "act-round");
+    sec.append(el("h3", "", waveTitle(r)));
     for (const a of r.answers) {
       const div = el("div", "act-agent");
       div.append(agentBadge(a.agent));
@@ -364,7 +398,7 @@ function renderActivity() {
       for (const tool of a.tools) toolBlock(div, tool);
       sec.append(div);
     }
-    if (r.board) sec.append(boardBlock(r.board));
+    if (r.review) sec.append(boardBlock(r.review, act));
     body.append(sec);
   }
   if (act.drawn.length) {
@@ -385,8 +419,16 @@ function renderActivity() {
   }
   if (act.tools.length) {
     const sec = el("section", "act-round");
-    if (act.rounds.length) sec.append(el("h3", "", t("otherSteps")));
+    if (act.waves.length) sec.append(el("h3", "", t("otherSteps")));
     for (const tool of act.tools) toolBlock(sec, tool);
+    body.append(sec);
+  }
+  const open = act.synthesis ? [...act.synthesis.open_points, ...act.synthesis.not_done] : [];
+  if (open.length) {
+    const sec = el("section", "act-round");
+    const ul = document.createElement("ul");
+    for (const line of open) ul.append(el("li", "", typeof line === "string" ? line : JSON.stringify(line)));
+    sec.append(el("h3", "", t("openPoints")), ul);
     body.append(sec);
   }
   if (act.question) {
@@ -404,13 +446,30 @@ function openActivity(turn) {
 }
 $("activityDialog").addEventListener("close", () => activityTurn?.opener?.focus());
 
-// A finished team reply's transcript (message.team) as popup data.
-const teamActivity = (team) => ({
-  team: true, tools: [], drawn: team.drawn || [], question: null,
-  rounds: team.rounds.map((r) => ({
-    ...r, agents: r.answers.map((a) => a.agent), board: team.boards.find((b) => b.round === r.round) || null,
-  })),
-});
+// A finished team reply's transcript (message.team) as popup data. The task graph's workspace keeps
+// `history` (waves, task results, reviews in order); the older round table kept `rounds` and `boards`.
+function teamActivity(team) {
+  const act = { team: true, plan: [], waves: [], tools: [], drawn: [], synthesis: team.synthesis || null, question: null };
+  if (!team.history) {
+    act.drawn = team.drawn || [];
+    act.waves = (team.rounds || []).map((r) => ({
+      wave: r.round, kind: r.kind, tasks: [], agents: r.answers.map((a) => a.agent), answers: r.answers,
+      review: (team.boards || []).find((b) => b.round === r.round) || null,
+    }));
+    return act;
+  }
+  act.plan = (team.tasks || []).map(({ id, agent, goal, depends_on, origin }) => ({ id, agent, goal, depends_on, origin }));
+  for (const e of team.history) {
+    const last = act.waves.at(-1);
+    if (e.type === "wave") act.waves.push({ ...e, answers: [], review: null });
+    else if (e.type === "review" && last) last.review = e;
+    else if (e.type === "result") {
+      const answer = { task: e.task, agent: e.agent, text: e.text, tools: e.tools || [] };
+      (last?.tasks.includes(e.task) ? last.answers : act.drawn).push(answer);
+    }
+  }
+  return act;
+}
 
 // ---------- readme ----------
 $("readmeBtn").onclick = () => {
@@ -536,7 +595,8 @@ async function openConversation(id) {
     if (m.role === "assistant") {
       if (m.team) {
         turn.act = teamActivity(m.team);
-        turn.badges = m.team.participants.map((a) => ({ agent: a }));
+        const agents = m.team.participants || (m.team.tasks || []).map((x) => x.agent);
+        turn.badges = [...new Set(agents)].map((a) => ({ agent: a }));
       } else if (m.agent && m.agent !== agent) turn.badges.push({ agent: (agent = m.agent) });
       for (const call of m.tool_calls || []) turn.act.tools.push({ name: call.name, args: call.args, result: null });
       addCharts(m.charts); // an orchestrator answer's charts, shown above it as when it streamed
@@ -638,15 +698,14 @@ async function sendMessage(text) {
   let finished = false;
   let waiting = false; // showing "thinking" after a fallback
   let synthesized = false; // the team's write-up started
-  // A drawer runs after the rounds, so an agent named in none of the rounds' `agents` so far is one.
-  const drawerOf = (agent) => {
-    if (!act.rounds.length || act.rounds.some((r) => r.agents.includes(agent))) return null;
-    return act.drawn.find((d) => d.agent === agent) || act.drawn[act.drawn.push({ agent, text: "", tools: [] }) - 1];
+  // A task's answer: in the latest wave that ran it, else (a chart task after the write-up) in `drawn`.
+  const answerOf = (agent, task) => {
+    const wave = act.waves.findLast((w) => w.tasks.includes(task));
+    const answers = wave ? wave.answers : act.drawn;
+    return answers.find((a) => a.task === task) || answers[answers.push({ task, agent, text: "", tools: [] }) - 1];
   };
-  const answerOf = (agent) => {
-    if (!act.rounds.length) act.rounds.push({ round: 1, max: 0, kind: "answer", agents: [agent], answers: [], board: null });
-    const answers = act.rounds[act.rounds.length - 1].answers;
-    return answers.find((a) => a.agent === agent) || answers[answers.push({ agent, text: "", tools: [] }) - 1];
+  const addBadges = (agents) => {
+    for (const agent of agents) if (!turn.badges.some((b) => b.agent === agent)) turn.badges.push({ agent });
   };
 
   try {
@@ -677,7 +736,7 @@ async function sendMessage(text) {
             setConversation(event.id);
             break;
           case "agent":
-            if (act.team || event.name === "team") break; // the rounds name their own agents
+            if (act.team || event.name === "team") break; // the plan names its own agents
             // The orchestrator handed off before showing anything: relabel its badge, as a reload would show it.
             if (turn.badges.length && !started) turn.badges[turn.badges.length - 1] = { agent: event.name };
             else turn.badges.push({ agent: event.name });
@@ -696,24 +755,35 @@ async function sendMessage(text) {
             current.update(`_${t("thinking")}_`);
             started = waiting = true; // the next `agent` event adds the assistant's own badge
             break;
-          case "round": {
-            const round = { round: event.round, max: event.max_rounds, kind: event.kind, agents: event.agents, answers: [], board: null };
-            act.rounds.push(round);
-            turn.step = { round };
-            for (const agent of event.agents) if (!turn.badges.some((b) => b.agent === agent)) turn.badges.push({ agent });
+          case "plan":
+            act.plan = event.tasks;
+            addBadges(event.tasks.map((x) => x.agent));
+            touch(turn);
+            break;
+          case "plan_updated":
+            act.plan.push(...event.tasks);
+            addBadges(event.tasks.map((x) => x.agent));
+            touch(turn);
+            break;
+          case "wave": {
+            const wave = { wave: event.wave, kind: event.kind, tasks: event.tasks, agents: event.agents, answers: [], review: null };
+            act.waves.push(wave);
+            turn.step = { wave };
+            addBadges(event.agents);
             touch(turn);
             break;
           }
-          case "board": {
-            const round = act.rounds.find((r) => r.round === event.round);
-            if (round) round.board = event;
+          case "review": {
+            const wave = act.waves.at(-1);
+            if (wave) wave.review = event;
+            turn.step = { note: reviewNote(act, event) };
             touch(turn);
             break;
           }
-          case "spoke": { // the speaker's final entry: what a reload shows
-            const answers = act.rounds.find((r) => r.round === event.round)?.answers;
-            const mine = answers?.find((x) => x.agent === event.agent) || answers?.[answers.push({ agent: event.agent }) - 1];
-            if (mine) { mine.text = event.text; mine.tools = event.tools.map((x, i) => ({ ...x, charts: mine.tools?.[i]?.name === x.name ? mine.tools[i].charts : undefined })); }
+          case "spoke": { // the task's final entry: what a reload shows
+            const mine = answerOf(event.agent, event.task);
+            mine.text = event.text;
+            mine.tools = event.tools.map((x, i) => ({ ...x, charts: mine.tools?.[i]?.name === x.name ? mine.tools[i].charts : undefined }));
             touch(turn);
             break;
           }
@@ -736,7 +806,7 @@ async function sendMessage(text) {
             finished = true;
             if (act.team && !started && !synthesized) {
               // One participant and no conflict: its round answer is the reply, so no write-up came.
-              const only = act.rounds[0]?.answers[0];
+              const only = act.waves[0]?.answers[0];
               if (only?.text) {
                 addCharts(only.tools.flatMap((x) => x.charts || []), current.el);
                 current.update(only.text);
@@ -745,12 +815,12 @@ async function sendMessage(text) {
             }
             break;
           case "token":
-            if (event.agent) { (drawerOf(event.agent) || answerOf(event.agent)).text += event.text; touch(turn); break; } // a round's draft: popup only
+            if (event.agent) { answerOf(event.agent, event.task).text += event.text; touch(turn); break; } // a task's draft: popup only
             if (!started || waiting) { current.update(""); started = true; waiting = false; }
             current.append(event.text);
             break;
           case "tool_call":
-            if (event.agent) { (drawerOf(event.agent) || answerOf(event.agent)).tools.push({ name: event.name, args: event.args, result: null }); touch(turn); break; }
+            if (event.agent) { answerOf(event.agent, event.task).tools.push({ name: event.name, args: event.args, result: null }); touch(turn); break; }
             if (!started || waiting) current.remove();
             waiting = false;
             act.tools.push({ name: event.name, args: event.args, result: null });
@@ -761,7 +831,7 @@ async function sendMessage(text) {
             break;
           case "tool_result":
             if (event.agent) { // its charts stay out of the answer
-              const tools = (drawerOf(event.agent) || answerOf(event.agent)).tools;
+              const { tools } = answerOf(event.agent, event.task);
               closeTool(tools, event.name, event.content).charts = event.charts;
               touch(turn);
               break;

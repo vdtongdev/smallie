@@ -143,9 +143,16 @@ def test_remote_dict_chunks_become_events():
 
 
 def test_team_custom_events_pass_through():
-    for chunk in ({"type": "round", "round": 1, "kind": "first"}, {"type": "board", "round": 1},
+    for chunk in ({"type": "plan", "tasks": [], "fallback": False}, {"type": "plan_updated", "tasks": []},
+                  {"type": "wave", "wave": 1, "kind": "plan", "tasks": ["t1"], "agents": ["sql"]},
+                  {"type": "review", "challenges": [], "follow_ups": [], "forced": False},
                   {"type": "synthesize"}, {"type": "needs_human", "question": "Which year?"}):
         assert _to_events("custom", chunk, SUBGRAPH) == [chunk]
+
+
+def test_round_table_events_are_gone():
+    for chunk in ({"type": "round", "round": 1, "kind": "first"}, {"type": "board", "round": 1}):
+        assert _to_events("custom", chunk, SUBGRAPH) == []
 
 
 def test_relay_event_types_are_gone():
@@ -329,3 +336,14 @@ async def test_lone_participant_reply_reaches_the_answer(monkeypatch):
 def test_spoke_event_passes_through():
     chunk = {"type": "spoke", "agent": "sql", "round": 1, "text": "x", "tools": []}
     assert _to_events("custom", chunk, SUBGRAPH) == [chunk]
+
+
+async def test_speaker_task_splits_two_tasks_of_one_agent():
+    speaker = lambda task, ns: ((), "custom", {"type": "speaker", "agent": "sql", "task": task, "ns": ns})  # noqa: E731
+    events = await _collect([
+        speaker("t1", "team:T|speak:A"), speaker("t2", "team:T|speak:B"),
+        (("team:T", "speak:A"), "messages", (AIMessageChunk(content="one"), TOKEN)),
+        (("team:T", "speak:B"), "messages", (AIMessageChunk(content="two"), TOKEN)),
+    ])
+    assert events == [{"type": "token", "text": "one", "agent": "sql", "task": "t1"},
+                      {"type": "token", "text": "two", "agent": "sql", "task": "t2"}]

@@ -404,6 +404,45 @@ async def test_needs_human_pauses_and_resume_continues(monkeypatch):
         (HumanMessage, QUESTION), (AIMessage, "Which year?"), (HumanMessage, "2024"), (AIMessage, "Final 2024.")]
 
 
+async def _chart_asks(monkeypatch, reply, **kw):
+    """Only chart takes part; the board asks a question; the user's `reply` resumes the turn."""
+    _research_does_not_join(monkeypatch)
+    _board(monkeypatch, Board(question="Which data?"), Board())
+    log = []
+    agents = {"chart": Fake("chart", "drawn", log=log), "sql": Fake("sql", "rows", log=log)}
+    assistant = _assistant(monkeypatch, per_agent(orchestrator=[AIMessage("Final.")]), **kw, **agents)
+    await _stream(assistant, _ask("plot a chart of prices"))
+    return assistant, agents, await _stream(assistant, Command(resume=reply))
+
+
+async def test_reply_to_question_naming_a_new_agent_brings_it_in(monkeypatch):
+    assistant, agents, second = await _chart_asks(monkeypatch, "use the stock database")
+
+    assert [(e["round"], e["kind"], e["agents"]) for e in _events(second, "round")] == [(2, "answer", ["sql"])]
+    assert agents["sql"].calls == 1 and agents["chart"].calls == 1
+    answer = (await _thread(assistant))[-1]
+    assert answer.additional_kwargs["team"]["participants"] == ["chart", "sql"]
+
+
+async def test_reply_without_new_agent_goes_straight_to_judge(monkeypatch):
+    assistant, agents, second = await _chart_asks(monkeypatch, "2024 please")
+
+    assert not _events(second, "round") and agents["sql"].calls == 0 and agents["chart"].calls == 1
+
+
+async def test_reply_naming_an_agent_already_taking_part_does_not_run_it_again(monkeypatch):
+    assistant, agents, second = await _chart_asks(monkeypatch, "make it a bar chart")
+
+    assert not _events(second, "round") and agents["chart"].calls == 1
+
+
+async def test_reply_never_brings_in_an_unavailable_agent(monkeypatch):
+    docs = Fake("docs", "from file", log=[])
+    assistant, agents, second = await _chart_asks(monkeypatch, "check the uploaded file", documents=(), docs=docs)
+
+    assert not _events(second, "round") and docs.calls == 0
+
+
 async def test_second_turn_starts_fresh(monkeypatch):
     log = []
     _board(monkeypatch, then=Board())

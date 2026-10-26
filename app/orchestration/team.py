@@ -258,10 +258,20 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
                 own=next(s["text"] for s in reversed(speeches) if s["agent"] == r), language=language)
         return Command(update={"team": {**team, "round": rnd + 1}}, goto=sends(routes, rnd + 1, "conflict", notes, messages))
 
-    async def pause(state: TeamState) -> Command:
-        # Only this: on resume the node runs again from its start.
+    async def pause(state: TeamState, runtime: Runtime[AgentContext]) -> Command:
+        # Nothing before `interrupt`: on resume the node runs again from its start.
         reply = interrupt({"question": state["team"]["question"]})
-        return Command(update={"messages": [HumanMessage(reply)]}, goto="judge")
+        team, messages = state["team"], [*state["messages"], HumanMessage(reply)]
+        available = await available_agents(runtime.context.user_id, specs)
+        new = [s.route for s in participants(available, reply) if s.route not in team["participants"]]
+        if not new:
+            return Command(update={"messages": messages[-1:]}, goto="judge")
+        # The reply names an agent that is not taking part yet: it answers one round before the board runs again.
+        rnd = team["round"] + 1
+        note = ROUND_MESSAGE.format(language=reply_language(messages))
+        team = {**team, "participants": [*team["participants"], *new], "round": rnd}
+        return Command(update={"messages": messages[-1:], "team": team},
+                       goto=sends(new, rnd, "answer", {r: note for r in new}, messages))
 
     async def synthesize(state: TeamState, runtime: Runtime[AgentContext]) -> dict:
         team, messages = state["team"], state["messages"]
@@ -291,7 +301,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
     graph.add_node("pick", pick, destinations=("speak", END))
     graph.add_node("speak", speak)
     graph.add_node("judge", judge, destinations=("speak", "synthesize", "pause"))
-    graph.add_node("pause", pause, destinations=("judge",))
+    graph.add_node("pause", pause, destinations=("judge", "speak"))
     graph.add_node("synthesize", synthesize)
     graph.add_edge(START, "pick")
     graph.add_edge("speak", "judge")

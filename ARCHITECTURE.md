@@ -743,7 +743,7 @@ message ──► pick ─── nobody's data is touched ──► orchestrator
 
 - **Who takes part:** the agents the message points to (stock figures: sql; "my file": docs; news: research; charts: chart). The research agent also joins whenever another agent does, as an outside check.
 - **Write-up:** the orchestrator writes one answer from the agents' answers, the explained differences and the open conflicts. When a single agent took part and nothing disagrees, its own answer is shown as is, with no extra model call.
-- **Pause:** if the answers cannot go on without something only the user knows (for example which of two files they mean), the board asks one short question and the chat waits. The user's next message resumes the same turn.
+- **Pause:** if the answers cannot go on without something only the user knows (for example which of two files they mean), the board asks one short question and the chat waits. The user's next message resumes the same turn; if the answer names an agent that is not taking part yet, that agent answers one round before the board looks again.
 
 ### Independent sources and the conflict rules
 

@@ -47,6 +47,12 @@ def test_pick_mentioned_with_others_and_overrides():
     assert _routes("what does handbook.pdf say", docs=False) == []  # an unavailable agent is not picked
 
 
+def test_message_naming_sql_and_chart_agents_runs_both():
+    # A user who addresses the SQL agent by name must get it, even when the Chart agent is named too.
+    message = "SQL Agent, pull the top 3 stocks by growth. Chart Agent, suggest layouts for them."
+    assert "sql" in _routes(message)
+
+
 def test_nobody_mentioned_picks_nobody():
     assert _routes("write a short poem") == []  # research alone does not join
 

@@ -18,7 +18,7 @@ from app.core.prompts import reply_language
 from app.orchestration import graph as graph_module
 from app.orchestration import team
 from app.orchestration.router import build_router
-from app.orchestration.team import Board, Conflict, Difference, Side, clean, participants
+from app.orchestration.team import Board, Challenge, Conflict, Difference, Outcome, Review, Side, clean, participants
 from app.orchestration.team_plan import Plan, Task
 from tests.scripted import per_agent
 from tests.test_orchestrator import _assistant as _build_assistant
@@ -195,7 +195,7 @@ def _board(monkeypatch, *boards, then=None):
     """Scripted board: the boards in order, then `then` forever."""
     queue = itertools.chain(boards, itertools.repeat(then) if then else ())
 
-    async def fake(messages, answers, config):
+    async def fake(messages, answers, config, inputs=None):
         return next(queue)
 
     monkeypatch.setattr(team, "ask_board", fake)
@@ -1391,7 +1391,7 @@ async def test_task_with_some_inputs_dead_runs_and_is_told(monkeypatch):
 async def test_no_review_for_a_wave_without_inputs_or_meeting(monkeypatch):
     log, reviewed = [], []
 
-    async def fake(messages, answers, config):
+    async def fake(messages, answers, config, inputs=None):
         reviewed.append([a["agent"] for a in answers])
         return Board()
 
@@ -1515,3 +1515,116 @@ async def test_dependency_on_a_chart_task_is_dropped(monkeypatch):
     tasks = {t["agent"]: t for t in _events(chunks, "plan")[0]["tasks"]}
     assert tasks["research"]["depends_on"] == []
     assert len(_starts(log, "research")) == 1
+
+
+# --- hand-off challenges and per-meeting-point rounds ---
+
+def _challenge(to="t1", by="t2", question="Q-SPLIT?", evidence="EV-CLOSE"):
+    return Review(challenges=[Challenge(to_task=to, by_task=by, question=question, evidence=evidence)])
+
+
+def _docs_then_sql(extra=()):
+    return Plan(tasks=[Task(id="t1", agent="docs", goal="extract"), Task(id="t2", agent="sql", goal="check", depends_on=["t1"]), *extra])
+
+
+async def test_challenge_gives_the_producer_one_round(monkeypatch):
+    log = []
+    _, assistant, agents = _docs_sql(monkeypatch, _docs_then_sql(), log, board=False)
+    _board(monkeypatch, _challenge(), then=Board())
+    chunks = await _stream(assistant, _ask(THREE))
+
+    assert agents["docs"].calls == 2
+    second = _starts(log, "docs")[1]["last"]
+    assert second.name == "team" and "Q-SPLIT?" in second.text and "EV-CLOSE" in second.text and "DOCS TEXT" in second.text
+    assert [(e["kind"], e["tasks"]) for e in _events(chunks, "wave")][-1] == ("challenge", ["t1"])
+
+
+async def test_revised_output_reruns_only_its_users(monkeypatch):
+    log = []
+    plan = _docs_then_sql([Task(id="t3", agent="research", goal="background")])
+    _, assistant, agents = _docs_sql(monkeypatch, plan, log, board=False)
+    _board(monkeypatch, _challenge(), Review(outcomes=[Outcome(task="t1", revised=True)]), then=Board())
+    await _stream(assistant, _ask(THREE))
+
+    assert [agents[n].calls for n in ("docs", "sql", "research")] == [2, 2, 1]
+
+
+async def test_output_that_stands_becomes_an_open_point(monkeypatch):
+    log = []
+    model, assistant, agents = _docs_sql(monkeypatch, _docs_then_sql(), log, board=False)
+    _board(monkeypatch, _challenge(), Review(outcomes=[Outcome(task="t1", revised=False)]), then=Board())
+    await _stream(assistant, _ask(THREE))
+
+    assert [agents[n].calls for n in ("docs", "sql")] == [2, 1]
+    assert "Q-SPLIT?" in _writeups(model)[0]
+
+
+async def test_a_meeting_point_gets_at_most_two_rounds(monkeypatch):
+    log = []
+    model, assistant, agents = _docs_sql(monkeypatch, _docs_then_sql(), log, board=False)
+    _board(monkeypatch, then=_challenge())
+    await _stream(assistant, _ask(THREE))
+
+    assert agents["docs"].calls == 1 + 2 == 1 + get_settings().team_max_rounds
+    final = (await _thread(assistant))[-1]
+    assert final.additional_kwargs["team"]["synthesis"]["forced"] is True
+    assert len(_writeups(model)) == 1 and "Q-SPLIT?" in _writeups(model)[0]
+
+
+async def test_cap_counts_per_meeting_point(monkeypatch):
+    log = []
+    plan = Plan(tasks=[Task(id="t1", agent="docs", goal="a"), Task(id="t2", agent="research", goal="b"),
+                       Task(id="t3", agent="sql", goal="c", depends_on=["t1", "t2"])])
+    _, assistant, agents = _docs_sql(monkeypatch, plan, log, board=False)
+    both = Review(challenges=[Challenge(to_task="t1", by_task="t3", question="Q1", evidence="e"),
+                              Challenge(to_task="t2", by_task="t3", question="Q2", evidence="e")])
+    _board(monkeypatch, then=both)
+    await _stream(assistant, _ask(THREE))
+
+    assert agents["docs"].calls == agents["research"].calls == 1 + get_settings().team_max_rounds
+
+
+async def test_meeting_conflict_follows_board_rules(monkeypatch):
+    undated = Difference(routes=["sql", "docs"], explanation="e", sides=[Side(route="sql", value="1", source="", as_of="")])
+    assert len(clean(Board(differences=[undated]), ["sql", "docs"]).conflicts) == 1
+
+    review = Review(differences=[undated], conflicts=[Conflict(routes=["sql", "docs"], claim="CAP-CLAIM", fixable_by=["sql"], issue="i")])
+    _board(monkeypatch, review, then=Board())
+    _, assistant, agents = _three(monkeypatch, [])
+    chunks = await _stream(assistant, _ask(THREE))
+
+    assert [(e["kind"], e["agents"]) for e in _events(chunks, "wave")] == [("plan", ["docs", "sql", "research"]), ("conflict", ["docs", "sql"])]
+    assert len(_events(chunks, "review")[0]["conflicts"]) == 2
+
+
+def test_cause_defaults_to_unknown():
+    assert Conflict(routes=[], claim="c").cause == "unknown" and Difference(routes=[], explanation="e").cause == "unknown"
+
+
+def test_clean_drops_challenges_of_tasks_that_are_not_live():
+    review = Review(challenges=[Challenge(to_task="t1", by_task="t2", question="q", evidence="e"),
+                                Challenge(to_task="t1", by_task="t9", question="q", evidence="e")],
+                    outcomes=[Outcome(task="t1", revised=True), Outcome(task="t9", revised=True)])
+    cleaned = clean(review, ["sql"], ["t1", "t2"])
+    assert [c.by_task for c in cleaned.challenges] == ["t2"] and [o.task for o in cleaned.outcomes] == ["t1"]
+
+
+async def test_ask_board_lists_what_each_task_received(monkeypatch):
+    seen = []
+
+    async def ainvoke(messages, config):
+        seen.append(messages[1].content)
+        return Review()
+
+    monkeypatch.setattr(team, "get_chat_model", lambda model=None, **kw: SimpleNamespace(
+        with_structured_output=lambda schema, method: SimpleNamespace(ainvoke=ainvoke)))
+    answers = [{"task": "t1", "agent": "docs", "text": "D"}, {"task": "t2", "agent": "sql", "text": "S"}]
+    await team.ask_board([HumanMessage("q?")], answers, {"callbacks": []}, inputs={"t2": ["t1"]})
+    assert "t2 (sql) received: t1" in seen[0]
+
+
+def test_review_prompt_and_challenge_message_format():
+    from app.orchestration import prompts
+    assert "Vietnamese" in prompts.BOARD_PROMPT.format(language="Vietnamese")
+    text = prompts.CHALLENGE_MESSAGE.format(question="Q", evidence="E", own="O", language="Vietnamese")
+    assert "{" not in text and "Vietnamese" in text

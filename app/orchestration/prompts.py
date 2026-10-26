@@ -106,13 +106,36 @@ YOUR EARLIER ANSWER:
 
 Check the point again with your own tools. Correct your answer if it was wrong, or say why it stands, with the source and as-of date of each figure. Return your whole answer, not only the change. Write only your own answer, never the other side's. Write in {language}."""
 
-# System prompt of the board call. {language}: the reply language, for the question.
-BOARD_PROMPT = """You are the board of a team that answers the user's latest message. Several agents answered it, each from its own sources. Sort their answers from what is in front of you: the user's message and the answers. Don't use outside knowledge to decide whether a fact is true.
+# Hidden message for the producer of a challenged output: the thread plus this, as the last message (name TEAM).
+# {question}, {evidence}: what the receiving task found; {own}: this agent's earlier answer.
+CHALLENGE_MESSAGE = """TEAM CHALLENGE (not visible to the user). Another agent worked from your answer and found a mismatch with its own source.
+
+ITS QUESTION:
+{question}
+
+WHAT IT FOUND:
+{evidence}
+
+YOUR EARLIER ANSWER:
+{own}
+
+1. Check the point again with your own tools.
+2. Correct your answer if it was wrong. Otherwise keep it and say why it stands.
+3. Give the source and as-of date of each figure.
+4. Return your whole answer, not only the change. Write only your own answer, never the other agent's.
+
+Write in {language}."""
+
+# System prompt of the review call. {language}: the reply language, for the question.
+BOARD_PROMPT = """You review the work of a team that answers the user's latest message. Each agent answered a task from its own sources. The human message gives the user's message and the answers, each headed by its task id and agent. A heading may say which tasks the answer received as input. Sort the answers from what is in front of you. Don't use outside knowledge to decide whether a fact is true.
 
 Fill in these lists:
 - agreements: points the answers agree on, one short sentence each.
 - differences: answers that differ, where both sides give a source and an as-of date and the explanation (as-of date, definition, scope) fits the size of the gap. A date gap explains a small move, not a multiple. Give the `routes` involved, the explanation, and in `sides` each side's route, value, source and as-of date.
 - conflicts: answers that differ and don't meet that test: a side without a source or date, or an explanation that doesn't fit the gap. Give the `routes` involved, the `claim` in dispute, and the `issue` in one sentence. Put in `fixable_by` the routes among them that can fix it with their own tools (a wrong query, a wrong name, a claim their data doesn't support). Leave `fixable_by` empty when nobody involved can settle it, for example when two sources of different kinds each hold a different value. When several independent dated sources agree against one, say so in the `issue`.
+- cause: for every conflict and every difference, set the reason for the gap: definition, date, source, error, or unknown when the answers don't show it.
+- challenges: add one only when an answer itself states that its own source does not match something it received as input. Set `to_task` to the task that produced the input, `by_task` to the answer that found the mismatch, `question` to what to re-check, and `evidence` to the value that answer found and where. Don't add a challenge for a difference you spotted yourself, and none for an answer that received no input.
+- outcomes: for every answer marked as previously challenged, add its task id and whether it `revised` its answer (true) or kept it (false). Compare its new answer with the challenge.
 
 Never decide that a source is right because of its kind (database, file, web page, model). Any source can be wrong.
 

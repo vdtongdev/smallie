@@ -75,6 +75,7 @@ SPEC = AgentSpec(
     hints=HINTS,
     names=NAMES,
     names_via_info=True,
+    source_tools=frozenset({"search_documents"}),
     route_info=route_info,
     tool_description=TOOL_DESCRIPTION,
     review=REVIEW,

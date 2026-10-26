@@ -248,7 +248,10 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         # the message scan is what agents without callbacks leave.
         tools = result["tools"] if "tools" in result else recorder.tools or _tools(turn)
         # Research keeps its notes outside `messages`: it withdraws on empty findings, the others when `gave_up`.
-        withdrew = spec.gave_up(turn) if spec.answers_directly else not result.get("findings")
+        if spec.answers_directly:
+            withdrew = spec.gave_up(turn) or bool(spec.source_tools and not any(t["name"] in spec.source_tools for t in tools))
+        else:
+            withdrew = not result.get("findings")
         entry = {**entry, "text": spec.result(result), "tools": tools, "artifacts": collect(turn), "withdrew": withdrew}
         emit({"type": "spoke", **{k: entry[k] for k in ("agent", "round", "text", "tools", "withdrew")}})
         return {"speeches": [entry]}

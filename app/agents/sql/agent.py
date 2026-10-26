@@ -64,6 +64,7 @@ SPEC = AgentSpec(
     message_names=("sql_agent",),
     hints=HINTS,
     names=NAMES,
+    source_tools=frozenset({"run_sql"}),
     route_info=route_info,
     tool_description=TOOL_DESCRIPTION,
     review=REVIEW,

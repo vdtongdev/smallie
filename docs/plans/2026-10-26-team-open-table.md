@@ -96,6 +96,16 @@ Agent: verifier
 - Check that `git diff` of the tests since the Task 1 commit is empty.
 - Review against the Global Constraints and Review Focus.
 
+### Task 6: An agent that never looked in its sources withdraws (from the Task 5 live run)
+
+The live run (conversation `71c29ce9-8a8d-48c9-a5b7-0c5509675a8d`) found a gap. docs made no tool call and answered "I do not have access to real-time stock market data … I cannot browse the live web", with `withdrew: false`. `gave_up` only catches empty tool results or short `NOT_FOUND` phrases ("couldn't find" and similar). An answer that never searched its source and only says what it lacks slips through.
+
+Rule (Goal 2, "cannot give an answer from its source"): in team mode, a speaker that made no call to a source-tagged tool (`TOOL_SOURCE` in `tool.metadata`; memory and skill tools don't count) gave no answer from its source. It withdraws. Use `ToolRecorder`/the server's `tools` list, which already records calls.
+
+- Test author (implementer, Goal-driven): `test_speaker_that_never_used_its_source_withdraws`. A docs fake that answers with text and no tool call gets `withdrew: True`. A sql fake that ran `run_sql` and answered does not. Commit only the test.
+- Implementer: make it pass without editing tests, and update CLAUDE.md in one line.
+- Verifier: test diff empty, suite green.
+
 ### Task 5: Live run
 
 Agent: implementer

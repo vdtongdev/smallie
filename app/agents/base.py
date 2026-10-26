@@ -128,6 +128,8 @@ class AgentSpec:
     names: re.Pattern | None = None
     # True: the user's file names and resume/CV words (`RouteInfo.matches`/`mentions`) also name this source.
     names_via_info: bool = False
+    # Team mode: names of its source-tagged tools. A speaker that called none of them gave no answer from its source and withdraws.
+    source_tools: frozenset[str] = frozenset()
 
     async def info(self, user_id: str) -> RouteInfo | None:
         return await self.route_info(user_id) if self.route_info else RouteInfo()

@@ -14,10 +14,12 @@ from app.agents.registry import AGENTS, get
 from app.agents.research import agent as research_agent
 from app.core.config import get_settings
 from app.core.memory import AgentContext
+from app.core.prompts import reply_language
 from app.orchestration import graph as graph_module
 from app.orchestration import team
 from app.orchestration.router import build_router
 from app.orchestration.team import Board, Conflict, Difference, Side, clean, participants
+from app.orchestration.team_plan import Plan, Task
 from tests.scripted import per_agent
 from tests.test_orchestrator import _assistant as _build_assistant
 
@@ -197,6 +199,28 @@ def _board(monkeypatch, *boards, then=None):
         return next(queue)
 
     monkeypatch.setattr(team, "ask_board", fake)
+
+
+@pytest.fixture(autouse=True)
+def _plan_call_fails(monkeypatch):
+    """The plan call fails unless a test scripts it, so the team runs the fallback plan (every participant, independent)."""
+    async def boom(*args, **kwargs):
+        raise RuntimeError("no plan model in tests")
+
+    monkeypatch.setattr(team, "get_chat_model", lambda *a, **k: SimpleNamespace(
+        with_structured_output=lambda schema, method: SimpleNamespace(ainvoke=boom)))
+
+
+def _plan(monkeypatch, *plans):
+    """Scripted plan call: the plans in order. Returns the list of messages it was asked with."""
+    queue, asked = iter(plans), []
+
+    async def fake(messages, available, config):
+        asked.append(messages)
+        return next(queue)
+
+    monkeypatch.setattr(team, "ask_plan", fake)
+    return asked
 
 
 async def _stream(assistant, first, config=CONFIG):
@@ -1221,3 +1245,184 @@ async def test_a_table_from_an_earlier_turn_does_not_count(monkeypatch):
     await _stream(assistant, _ask(SQL_CHART))  # turn 2: no table
 
     assert "chart_data" in _offered(model)
+
+
+# --- the task graph: plan, waves, workspace ---
+
+def _docs_sql(monkeypatch, plan, log, *, docs=None, sql=None, research=None, final="Final.", board=True):
+    """docs, sql and research are all available (the user has a file); `plan` is what the plan call returns."""
+    _plan(monkeypatch, plan)
+    if board:
+        _board(monkeypatch, then=Board())
+    agents = {"docs": docs or Fake("docs", "DOCS TEXT", log=log), "sql": sql or Fake("sql", "SQL TEXT", log=log),
+              "research": research or Fake("research", "RESEARCH TEXT", log=log)}
+    model = per_agent(orchestrator=[AIMessage(final)])
+    return model, _assistant(monkeypatch, model, documents=("handbook.pdf",), **agents), agents
+
+
+def _starts(log, agent):
+    return [e for e in log if e["event"] == "start" and e["agent"] == agent]
+
+
+async def test_dependent_task_waits_for_its_input(monkeypatch):
+    log = []
+    plan = Plan(tasks=[Task(id="t1", agent="docs", goal="extract"), Task(id="t2", agent="sql", goal="check", depends_on=["t1"])])
+    _, assistant, _ = _docs_sql(monkeypatch, plan, log, docs=Fake("docs", "DOCS TEXT", log=log, delay=0.1))
+    await _stream(assistant, _ask(THREE))
+
+    at = {(e["agent"], e["event"]): e["at"] for e in log}
+    assert at[("docs", "end")] <= at[("sql", "start")]
+    note = _starts(log, "sql")[0]["last"].text
+    assert "DOCS TEXT" in note and "t1" in note
+
+
+async def test_independent_tasks_share_a_wave(monkeypatch):
+    log = []
+    plan = Plan(tasks=[Task(id="t1", agent="docs", goal="a"), Task(id="t2", agent="sql", goal="b", depends_on=["t1"]),
+                       Task(id="t3", agent="research", goal="c", depends_on=["t1"])])
+    _, assistant, _ = _docs_sql(monkeypatch, plan, log, sql=Fake("sql", "s", log=log, delay=0.2),
+                                research=Fake("research", "r", log=log, delay=0.2))
+    chunks = await _stream(assistant, _ask(THREE))
+
+    at = {(e["agent"], e["event"]): e["at"] for e in log}
+    assert at[("sql", "start")] < at[("research", "end")] and at[("research", "start")] < at[("sql", "end")]
+    assert [(e["wave"], e["tasks"]) for e in _events(chunks, "wave")] == [(1, ["t1"]), (2, ["t2", "t3"])]
+
+
+async def test_task_note_carries_input_tables(monkeypatch):
+    log = []
+    plan = Plan(tasks=[Task(id="t1", agent="docs", goal="a"), Task(id="t2", agent="sql", goal="b", depends_on=["t1"])])
+    table = {"id": "tbl1", "query": "q", "columns": ["a"], "rows": [[1]], "truncated": False}
+    _, assistant, _ = _docs_sql(monkeypatch, plan, log, docs=Fake("docs", "D", log=log, table=table))
+    await _stream(assistant, _ask(THREE))
+
+    assert "tbl1" in _starts(log, "sql")[0]["last"].text
+
+
+async def test_task_note_names_the_language(monkeypatch):
+    log = []
+    message = "Vốn hóa của AAPL là bao nhiêu?"
+    plan = Plan(tasks=[Task(id="t1", agent="sql", goal="lấy vốn hóa")])
+    _, assistant, _ = _docs_sql(monkeypatch, plan, log)
+    await _stream(assistant, _ask(message))
+
+    note = _starts(log, "sql")[0]["last"].text
+    assert reply_language([HumanMessage(message)]) == "Vietnamese" and "Vietnamese" in note
+
+
+async def test_two_tasks_of_one_agent_stream_apart(monkeypatch):
+    log = []
+    plan = Plan(tasks=[Task(id="t1", agent="sql", goal="a"), Task(id="t2", agent="sql", goal="b")])
+    _, assistant, agents = _docs_sql(monkeypatch, plan, log)
+    chunks = await _stream(assistant, _ask(THREE))
+
+    speakers = _events(chunks, "speaker")
+    assert [e["agent"] for e in speakers] == ["sql", "sql"] and agents["sql"].calls == 2
+    assert {e["task"] for e in speakers} == {"t1", "t2"} and len({e["ns"] for e in speakers}) == 2
+
+
+async def test_empty_plan_orchestrator_answers_alone(monkeypatch):
+    log = []
+    model, assistant, agents = _docs_sql(monkeypatch, Plan(), log, final="Alone.")
+    chunks = await _stream(assistant, _ask(THREE))
+
+    assert not _events(chunks, "wave") and len(model.prompts) == 1
+    assert [(type(m), m.name, m.text) for m in await _thread(assistant)][1:] == [(AIMessage, "orchestrator", "Alone.")]
+    assert not log
+
+
+async def test_plan_failure_falls_back_to_participants(monkeypatch):
+    _board(monkeypatch, Board())
+    _, assistant = _two(monkeypatch, [])
+    chunks = await _stream(assistant, _ask())
+
+    (plan,) = _events(chunks, "plan")
+    assert plan["fallback"] is True and [t["agent"] for t in plan["tasks"]] == ["sql", "research"]
+
+
+async def test_one_named_speaker_skips_the_plan_call(monkeypatch):
+    _research_does_not_join(monkeypatch)
+    asked = _plan(monkeypatch)  # a call would raise StopIteration
+    _board(monkeypatch, Board())
+    log = []
+    assistant = _assistant(monkeypatch, per_agent(sql=[AIMessage("unused")]), sql=Fake("sql", "Cap is 3T.", log=log))
+    chunks = await _stream(assistant, _ask(SQL_QUESTION))
+
+    assert asked == [] and [t["agent"] for t in _events(chunks, "plan")[0]["tasks"]] == ["sql"]
+    assert (await _thread(assistant))[-1].text == "Cap is 3T."
+
+
+async def test_task_with_all_inputs_dead_is_skipped(monkeypatch):
+    log = []
+    plan = Plan(tasks=[Task(id="t1", agent="docs", goal="a"), Task(id="t2", agent="sql", goal="b", depends_on=["t1"])])
+    _, assistant, agents = _docs_sql(monkeypatch, plan, log, docs=Fake("docs", "nothing", log=log, tools=False), final="Nothing found.")
+    await _stream(assistant, _ask(THREE))
+
+    assert agents["sql"].calls == 0
+    status = {t["id"]: t["status"] for t in (await _thread(assistant))[-1].additional_kwargs["team"]["tasks"]}
+    assert status == {"t1": "withdrew", "t2": "skipped"}
+
+
+async def test_task_with_some_inputs_dead_runs_and_is_told(monkeypatch):
+    log = []
+    plan = Plan(tasks=[Task(id="t1", agent="docs", goal="a"), Task(id="t2", agent="sql", goal="b"),
+                       Task(id="t3", agent="research", goal="c", depends_on=["t1", "t2"])])
+    _, assistant, agents = _docs_sql(monkeypatch, plan, log, docs=Fake("docs", "nothing", log=log, tools=False))
+    await _stream(assistant, _ask(THREE))
+
+    note = _starts(log, "research")[0]["last"].text
+    assert agents["research"].calls == 1
+    assert "t1" in note.split("MISSING INPUTS")[1] and "SQL TEXT" in note.split("MISSING INPUTS")[0]
+
+
+async def test_no_review_for_a_wave_without_inputs_or_meeting(monkeypatch):
+    log, reviewed = [], []
+
+    async def fake(messages, answers, config):
+        reviewed.append([a["agent"] for a in answers])
+        return Board()
+
+    plan = Plan(tasks=[Task(id="t1", agent="docs", goal="a"), Task(id="t2", agent="sql", goal="b", depends_on=["t1"])])
+    _, assistant, _ = _docs_sql(monkeypatch, plan, log, board=False)
+    monkeypatch.setattr(team, "ask_board", fake)
+    await _stream(assistant, _ask(THREE))
+
+    assert reviewed == [["docs", "sql"]]  # the last wave only; it reads every live task
+
+
+async def test_second_message_starts_an_empty_workspace(monkeypatch):
+    log = []
+    _plan(monkeypatch,
+          Plan(tasks=[Task(id="t1", agent="sql", goal="a"), Task(id="t2", agent="research", goal="b")]),
+          Plan(tasks=[Task(id="t1", agent="sql", goal="c")]))
+    _board(monkeypatch, then=Board())
+    model = per_agent(orchestrator=[AIMessage("F1"), AIMessage("F2")])
+    assistant = _assistant(monkeypatch, model, sql=Fake("sql", "d1", "d2", log=log), research=Fake("research", "n1", log=log))
+    await _stream(assistant, _ask())
+    await _stream(assistant, _ask("And the AAPL market cap in euro?"))
+
+    transcript = (await _thread(assistant))[-1].additional_kwargs["team"]
+    assert [(t["id"], t["agent"]) for t in transcript["tasks"]] == [("t1", "sql")]
+    assert {k: v["text"] for k, v in transcript["results"].items()} == {"t1": "d2"}
+    assert all(e.get("task") in (None, "t1") for e in transcript["history"])
+
+
+async def test_transcript_is_the_workspace(monkeypatch):
+    log = []
+    plan = Plan(tasks=[Task(id="t1", agent="sql", goal="a"), Task(id="t2", agent="research", goal="b")])
+    _, assistant, _ = _docs_sql(monkeypatch, plan, log)
+    await _stream(assistant, _ask(THREE))
+
+    transcript = (await _thread(assistant))[-1].additional_kwargs["team"]
+    assert {"tasks", "results", "history", "synthesis"} <= set(transcript)
+    assert {t["id"]: t["status"] for t in transcript["tasks"]} == {"t1": "done", "t2": "done"}
+    assert transcript["results"]["t1"]["text"] == "SQL TEXT" and transcript["results"]["t1"]["agent"] == "sql"
+    assert [e["type"] for e in transcript["history"] if e["type"] == "wave"] == ["wave"]
+    assert "rounds_at" not in transcript
+
+
+def test_task_message_formats():
+    from app.orchestration.prompts import TASK_MESSAGE
+
+    text = TASK_MESSAGE.format(goal="G", inputs="none", missing="none", language="Vietnamese")
+    assert "Vietnamese" in text and "{" not in text

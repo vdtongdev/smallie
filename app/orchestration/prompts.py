@@ -121,6 +121,25 @@ Set `question` only when the answers can't go on without information only the us
 Write every text field in {language}. Leave a list empty when it has no entry."""
 
 # System prompt of the plan call. {language}: the reply language, for the goals. {max_tasks}: the task cap.
+# Hidden message for one planned task: the thread plus this, as the last message (name TEAM).
+# {goal}: what the task must produce; {inputs}: the finished tasks it depends on, or "none"; {missing}: the ones that produced nothing, or "none".
+TASK_MESSAGE = """TEAM TASK (not visible to the user). Your task: {goal}
+
+1. Do this task with your own sources only.
+2. Give each figure or claim with its source and as-of date.
+3. Say plainly when your sources hold nothing on it, and don't guess.
+4. Compare every input below with what your own source shows. When an input does not match, say so in your answer with the value you found and where you found it.
+
+You can't see the other agents' work except the inputs. Never write as another agent and never attribute data to one.
+
+INPUTS (results of other agents' tasks for this message):
+{inputs}
+
+MISSING INPUTS (these produced nothing; do the task without them):
+{missing}
+
+Write in {language}."""
+
 PLAN_PROMPT = """You plan how a team of agents answers the user's latest message. The human message lists the message and the available agents with what each does and reads. Return the tasks to hand out.
 
 1. Pick only the agents the message needs. Leave out an agent whose sources the message does not call for.

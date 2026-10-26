@@ -29,7 +29,7 @@ class AssistantState(AgentState):
     direct: NotRequired[bool]
     failed: NotRequired[str]  # the route that gave up, for the orchestrator
     attempt: NotRequired[str]  # what it tried, for the orchestrator
-    team: NotRequired[dict]  # the team debate's state (app/orchestration/team.py); reset by each new message
+    workspace: NotRequired[dict]  # the team's shared state: tasks, results, history (app/orchestration/team.py); reset by each new message
     team_drawn: NotRequired[bool]  # a drawer charts the write-up (set with `team_note`)
     team_note: NotRequired[str]  # a hidden note for the orchestrator; only ever put in the state a team node passes it
 

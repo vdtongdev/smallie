@@ -1,12 +1,12 @@
-"""Team mode, a round table (design: docs/superpowers/specs/2026-10-23-agent-team-design.md):
+"""Team mode, a task graph (design: docs/superpowers/specs/2026-10-26-team-task-graph-design.md):
 
-    pick -+- nobody mentioned -> the orchestrator answers as in normal mode -> END
-          +- speak x N (parallel, one `Send` each, own sources only) -> judge -+- agreed / explained -> synthesize -> END
-                                                                              +- question -> pause -> judge
-                                                                              +- fixable conflicts, round < cap -> speak x involved -> judge
+    plan -+- nobody needed -> the orchestrator answers as in normal mode -> END
+          +- dispatch -> speak x N (one `Send` per ready task, own sources only) -> review -+- clean -> dispatch (next wave) / synthesize when nothing is pending
+                                                                                            +- question -> pause -> review / dispatch
+                                                                                            +- fixable conflicts, rounds left -> speak x involved -> review
 
-A `team` node of the assistant graph. Only the final answer joins the thread; the transcript goes
-on its `additional_kwargs["team"]`. Progress goes out as `custom` stream events: `round`, `board`,
+A `team` node of the assistant graph. Only the final answer joins the thread; the transcript (the workspace) goes
+on its `additional_kwargs["team"]`. Progress goes out as `custom` stream events: `plan`, `wave`, `spoke`, `review`,
 `synthesize`, `needs_human`, and `speaker` (internal: which `speak` task runs which agent).
 """
 
@@ -34,8 +34,8 @@ from app.core.config import get_settings
 from app.core.llm import get_chat_model
 from app.core.memory import TEAM_MODE, AgentContext
 from app.core.prompts import reply_language
-from app.orchestration.prompts import BOARD_PROMPT, CONFLICT_MESSAGE, DRAW_MESSAGE, DRAWING_NOTE, NOTHING_FOUND_MESSAGE, PLAN_PROMPT, ROUND_MESSAGE, TEAM_MESSAGE
-from app.orchestration.team_plan import Plan
+from app.orchestration.prompts import BOARD_PROMPT, CONFLICT_MESSAGE, DRAW_MESSAGE, DRAWING_NOTE, NOTHING_FOUND_MESSAGE, PLAN_PROMPT, ROUND_MESSAGE, TASK_MESSAGE, TEAM_MESSAGE
+from app.orchestration.team_plan import Plan, dead_inputs, fallback_tasks, ready, validate_plan
 from app.orchestration.router import ORCHESTRATOR, AssistantState, available_agents
 
 log = logging.getLogger(__name__)
@@ -43,7 +43,7 @@ log = logging.getLogger(__name__)
 TEAM = TEAM_MODE
 SMALL_TALK_WORDS = 5
 NO_SOURCES = ("none",)  # empty sources means unscoped, so the drawer gets a source no tool carries
-RESET = {"reset": True}  # first entry of `speeches` at the start of a message: forget the earlier message's
+LIVE = ("done", "failed")  # statuses whose text reaches the board and the write-up
 
 
 class Side(BaseModel):
@@ -156,15 +156,26 @@ async def ask_plan(messages: list[AnyMessage], available: Sequence[tuple[AgentSp
     return await planner.ainvoke([SystemMessage(system), HumanMessage(human)], config=config)
 
 
-def merge_speeches(old: list[dict] | None, new: list[dict]) -> list[dict]:
-    """Reducer: parallel `speak` tasks each add one entry; `RESET` first starts a new list."""
-    if new and new[0] == RESET:
-        return new[1:]
-    return [*(old or []), *new]
+def merge_workspace(old: dict | None, new: dict) -> dict:
+    """Reducer: parallel `speak` tasks each add their result and status; `RESET` (a `reset` key) starts a new workspace."""
+    if new.get("reset"):
+        return {k: v for k, v in new.items() if k != "reset"}
+    workspace = dict(old or {})
+    for key, value in new.items():
+        if key == "results":
+            workspace["results"] = {**workspace.get("results", {}), **value}
+        elif key == "history":
+            workspace["history"] = [*workspace.get("history", []), *value]
+        elif key == "status":  # task id -> status
+            workspace["tasks"] = [{**t, "status": value.get(t["id"], t["status"])} for t in workspace["tasks"]]
+        else:
+            workspace[key] = value
+    return workspace
 
 
 class TeamState(AssistantState):
-    speeches: Annotated[list[dict], merge_speeches]  # {round, kind, agent, text, tools, artifacts, failed, withdrew}
+    # tasks, results (task id -> {agent, text, tools, artifacts, round}), history, rounds_at, synthesis, question, drawers, wave
+    workspace: Annotated[dict, merge_workspace]
 
 
 def _merge(artifacts: Sequence[dict]) -> dict:
@@ -180,27 +191,25 @@ def _tools(messages: Sequence[AnyMessage]) -> list[dict]:
             for m in messages if isinstance(m, AIMessage) for c in m.tool_calls if c["name"] not in MEMORY_TOOL_NAMES]
 
 
-def _rounds(speeches: Sequence[dict]) -> list[dict]:
-    rounds: dict[int, dict] = {}
-    for s in speeches:
-        entry = rounds.setdefault(s["round"], {"round": s["round"], "kind": s["kind"], "answers": []})
-        entry["answers"].append({"agent": s["agent"], "text": s["text"], "tools": s["tools"], "withdrew": s["withdrew"]})
-    return list(rounds.values())
+def _answers(workspace: dict, tasks: Sequence[dict]) -> list[dict]:
+    """The board's and the write-up's view: the newest result of each task that gave one (a failed task's note counts, it forces the write-up)."""
+    return [{"agent": t["agent"], "task": t["id"], "text": workspace["results"][t["id"]]["text"]}
+            for t in tasks if t["status"] in LIVE]
 
 
-def _latest(speeches: Sequence[dict], routes: Sequence[str]) -> list[dict]:
-    """Each listed agent's newest entry, in the order of `routes`."""
-    newest = {s["agent"]: s for s in speeches}
-    return [newest[r] for r in routes if r in newest]
-
-
-def _live(speeches: Sequence[dict], routes: Sequence[str]) -> list[dict]:
-    """The newest entries of agents that did not withdraw: the only ones the board and the write-up see."""
-    return [a for a in _latest(speeches, routes) if not a["withdrew"]]
-
-
-def _withdrawn(speeches: Sequence[dict], routes: Sequence[str]) -> list[str]:
-    return [a["agent"] for a in _latest(speeches, routes) if a["withdrew"]]
+def _inputs(task: dict, workspace: dict) -> tuple[str, str]:
+    """The finished tasks this one depends on, and the ones that produced nothing, as prompt text."""
+    lines = []
+    dead, _ = dead_inputs(task, workspace["tasks"])
+    for d in task["depends_on"]:
+        if d in dead or d not in workspace["results"]:
+            continue
+        result = workspace["results"][d]
+        line = f"{d} ({result['agent']}): {result['text']}"
+        if tables := [t["id"] for t in result["artifacts"].get("tables", [])]:
+            line += f"\ntables: {', '.join(tables)}"
+        lines.append(line)
+    return "\n\n".join(lines) or "none", ", ".join(dead) or "none"
 
 
 def _round_notes(routes: Sequence[str], available: Sequence[tuple[AgentSpec, RouteInfo]], base: str) -> dict[str, str]:
@@ -217,6 +226,10 @@ def _drawing(drawers: Sequence[str]) -> str:
     return DRAWING_NOTE.format(agent=" and ".join(drawers)) if drawers else ""
 
 
+def _brief(task: dict) -> dict:
+    return {k: task[k] for k in ("id", "agent", "goal", "depends_on")}
+
+
 def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
     """The `team` subgraph. `agents`: route -> compiled graph or RemoteAgent; `orchestrator`: the
     orchestrator node function (it reads `team_note` as a hidden message)."""
@@ -225,11 +238,8 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
     def emit(event: dict) -> None:
         get_stream_writer()(event)
 
-    def sends(routes: Sequence[str], rnd: int, kind: str, notes: Mapping[str, str], messages) -> list[Send]:
-        emit({"type": "round", "round": rnd, "max_rounds": get_settings().team_max_rounds + 1,  # total: round 1 plus the conflict rounds allowed
-              "kind": kind, "agents": list(routes)})
-        return [Send("speak", {"route": r, "round": rnd, "kind": kind, "note": notes[r], "messages": messages})
-                for r in routes]
+    def job(task_id: str, route: str, rnd: int, kind: str, note: str, messages) -> Send:
+        return Send("speak", {"task": task_id, "route": route, "round": rnd, "kind": kind, "note": note, "messages": messages})
 
     async def ask_orchestrator(state: AssistantState, runtime: Runtime[AgentContext], note: str = "", drawn: bool = False):
         """The orchestrator node's Command for this thread (`note` as its hidden team message;
@@ -243,29 +253,90 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         turn = turn_messages(result.get("messages", []))
         return AIMessage(spec.result(result), name=spec.message_names[0], additional_kwargs=collect(turn))
 
-    async def pick(state: TeamState, runtime: Runtime[AgentContext], config: RunnableConfig) -> Command:
+    async def alone(state: TeamState, runtime: Runtime[AgentContext], config: RunnableConfig) -> Command:
+        """No specialist is needed: the orchestrator answers as in normal mode."""
+        command = await ask_orchestrator(state, runtime)
+        if command.goto not in by_route:
+            return Command(goto=END, update=command.update)
+        return Command(goto=END, update={"messages": [await handed_off(command, state["messages"], runtime, config)]})
+
+    async def plan(state: TeamState, runtime: Runtime[AgentContext], config: RunnableConfig) -> Command:
         messages = state["messages"]
         available = await available_agents(runtime.context.user_id, specs)
         everyone = participants(available, messages[-1].text)
         chosen = [spec.route for spec in everyone if not spec.draws]
         drawers = [spec.route for spec in everyone if spec.draws]
         if not chosen:
-            command = await ask_orchestrator(state, runtime)
-            if command.goto not in by_route:
-                return Command(goto=END, update=command.update)
-            return Command(goto=END, update={"messages": [await handed_off(command, messages, runtime, config)]})
-        note = ROUND_MESSAGE.format(language=reply_language(messages), drawing=_drawing(drawers))
-        team = {"participants": chosen, "drawers": drawers, "round": 1, "rounds": [], "boards": [], "forced": False, "withdrawn": [], "artifacts": {},
-                "question": ""}  # a fresh debate: nothing of an earlier message's carries over
-        return Command(update={"team": team, "speeches": [RESET]},
-                       goto=sends(chosen, 1, "answer", _round_notes(chosen, available, note), messages))
+            return await alone(state, runtime, config)
+        fallback = False
+        if len(everyone) == 1:  # exactly one speaker named: one task, no plan call
+            tasks = [{**t, "origin": "plan"} for t in fallback_tasks(chosen)]
+        else:
+            try:
+                tasks = validate_plan(await ask_plan(messages, available, config), [s.route for s, _ in available],
+                                      get_settings().team_max_tasks)
+            except (openai.RateLimitError, openai.AuthenticationError):
+                raise
+            except Exception:  # noqa: BLE001 - the participants take the work, as the round table did
+                log.exception("Team plan failed")
+                tasks = None
+            if tasks == []:
+                return await alone(state, runtime, config)
+            if tasks is None:
+                tasks, fallback = fallback_tasks(chosen), True
+            else:
+                drawers = []  # a planned chart is a task of its own
+        emit({"type": "plan", "tasks": [_brief(t) for t in tasks], "fallback": fallback})
+        workspace = {"reset": True, "goal": messages[-1].text, "tasks": tasks, "results": {}, "evidence": [], "artifacts": {},
+                     "history": [], "rounds_at": {}, "wave": 0, "drawers": drawers, "question": "",
+                     "synthesis": {"forced": False, "open_points": [], "not_done": []}}
+        return Command(update={"workspace": workspace}, goto="dispatch")
 
-    async def speak(job, runtime: Runtime[AgentContext], config: RunnableConfig) -> dict:
-        route, spec = job["route"], by_route[job["route"]]
-        emit({"type": "speaker", "agent": route, "ns": config["configurable"]["checkpoint_ns"]})
+    async def dispatch(state: TeamState, runtime: Runtime[AgentContext]) -> Command:
+        workspace, messages = state["workspace"], state["messages"]
+        tasks = [dict(t) for t in workspace["tasks"]]
+        while True:  # a skipped task settles, which can leave its dependents without input too
+            todo = ready(tasks)
+            dead = [t for t in todo if dead_inputs(t, tasks)[1]]
+            for t in dead:
+                t["status"] = "skipped"
+            if not dead:
+                break
+        if not todo:
+            return Command(update={"workspace": {"tasks": tasks}}, goto="synthesize")
+        for t in todo:
+            t["status"] = "running"
+        wave, language = workspace["wave"] + 1, reply_language(messages)
+        available = await available_agents(runtime.context.user_id, specs)
+        notes = {spec.route: info.prompt_note for spec, info in available}
+        sends = []
+        for t in todo:
+            if t["goal"]:
+                inputs, missing = _inputs(t, {**workspace, "tasks": tasks})
+                note = TASK_MESSAGE.format(goal=t["goal"], inputs=inputs, missing=missing, language=language)
+            else:  # fallback and reply tasks: the plain round note
+                note = ROUND_MESSAGE.format(language=language, drawing=_drawing(workspace["drawers"]))
+            if notes.get(t["agent"]):
+                note = f"{note}\n{notes[t['agent']]}"
+            sends.append(job(t["id"], t["agent"], 1, "plan", note, messages))
+        ids, routes = [t["id"] for t in todo], [t["agent"] for t in todo]
+        entry = {"type": "wave", "wave": wave, "kind": "plan", "tasks": ids, "agents": routes}
+        emit(entry)
+        return Command(update={"workspace": {"tasks": tasks, "wave": wave, "history": [entry]}}, goto=sends)
+
+    async def speak(task: dict, runtime: Runtime[AgentContext], config: RunnableConfig) -> dict:
+        route, spec, tid = task["route"], by_route[task["route"]], task["task"]
+        emit({"type": "speaker", "agent": route, "task": tid, "ns": config["configurable"]["checkpoint_ns"]})
         context = dataclasses.replace(runtime.context, sources=tuple(sorted(spec.sources)))
-        messages = [*job["messages"], HumanMessage(job["note"], name=TEAM)]
-        entry = {"round": job["round"], "kind": job["kind"], "agent": route, "tools": [], "artifacts": {}, "failed": False, "withdrew": False}
+        messages = [*task["messages"], HumanMessage(task["note"], name=TEAM)]
+        entry = {"agent": route, "round": task["round"], "tools": [], "artifacts": {}}
+
+        def done(text: str, status: str) -> dict:
+            result = {**entry, "text": text}
+            record = {"type": "result", "task": tid, "kind": task["kind"], "status": status,
+                      **{k: result[k] for k in ("agent", "round", "text", "tools")}}
+            return {"workspace": {"results": {tid: result}, "status": {tid: status}, "history": [record]}}
+
         recorder = ToolRecorder()
         try:
             result = await agents[route].ainvoke({"messages": messages}, merge_configs(config, {"callbacks": [recorder]}),
@@ -274,7 +345,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
             raise
         except Exception as exc:  # noqa: BLE001 - the user still gets an answer from the others
             log.exception("Team step by %s failed", route)
-            return {"speeches": [{**entry, "text": f"failed: {type(exc).__name__}", "failed": True}]}
+            return done(f"failed: {type(exc).__name__}", "failed")
         turn = turn_messages(result.get("messages", []))
         # A server reports every tool call, a workflow's inner ones too; in-process the recorder sees them;
         # the message scan is what agents without callbacks leave.
@@ -284,19 +355,30 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
             withdrew = spec.gave_up(turn) or bool(spec.source_tools and not any(t["name"] in spec.source_tools for t in tools))
         else:
             withdrew = not result.get("findings")
-        entry = {**entry, "text": spec.result(result), "tools": tools, "artifacts": collect(turn), "withdrew": withdrew}
-        emit({"type": "spoke", **{k: entry[k] for k in ("agent", "round", "text", "tools", "withdrew")}})
-        return {"speeches": [entry]}
+        entry = {**entry, "tools": tools, "artifacts": collect(turn)}
+        text = spec.result(result)
+        emit({"type": "spoke", "task": tid, "agent": route, "round": task["round"], "text": text, "tools": tools, "withdrew": withdrew})
+        return done(text, "withdrew" if withdrew else "done")
 
-    async def judge(state: TeamState, runtime: Runtime[AgentContext], config: RunnableConfig) -> Command:
-        team, speeches, settings = state["team"], state["speeches"], get_settings()
-        rnd, messages = team["round"], state["messages"]
-        answers = _live(speeches, team["participants"])
-        live = [a["agent"] for a in answers]
+    async def review(state: TeamState, runtime: Runtime[AgentContext], config: RunnableConfig) -> Command:
+        workspace, messages, settings = state["workspace"], state["messages"], get_settings()
+        tasks, results, rounds_at = workspace["tasks"], workspace["results"], workspace["rounds_at"]
+        pending = [t for t in tasks if t["status"] == "pending"]
+        if pending:  # an intermediate wave: its tasks, and only when they took input or meet in a pending task
+            wave = next(e for e in reversed(workspace["history"]) if e["type"] == "wave" and e["kind"] == "plan")
+            group = [t for t in tasks if t["id"] in wave["tasks"]]
+            key = "+".join(wave["tasks"])
+            live_ids = {t["id"] for t in group if t["status"] in LIVE}
+            worth = any(t["depends_on"] for t in group) or any(sum(d in live_ids for d in p["depends_on"]) > 1 for p in pending)
+        else:  # the last wave: the board reads every task that answered
+            group, key, worth = tasks, "final", True
+        answers = _answers(workspace, group)
+        live = list(dict.fromkeys(a["agent"] for a in answers))
+        withdrawn = [t["agent"] for t in group if t["status"] == "withdrew"]
+        # A lone task that did not withdraw still goes to the board; withdrawals leave nothing to compare.
+        compare = worth and bool(answers) and (len(answers) > 1 or not withdrawn)
         broken = False
         board = Board()
-        withdrawn = _withdrawn(speeches, team["participants"])
-        compare = len(answers) > 1 or not withdrawn  # a lone participant still goes to the board; withdrawals leave nothing to compare
         if compare:
             try:
                 board = clean(await ask_board(messages, answers, config), live)
@@ -305,72 +387,78 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
             except Exception:  # noqa: BLE001 - the user still gets a write-up of the answers so far
                 log.exception("Team board failed")
                 broken = True
+        done_rounds = rounds_at.get(key, 0)
         fixable = [c for c in board.conflicts if c.fixable_by]
-        failed = broken or team["forced"] or any(s["failed"] for s in speeches if s["round"] == rnd)
+        failed = broken or workspace["synthesis"]["forced"] or any(
+            t["status"] == "failed" and results[t["id"]]["round"] == done_rounds + 1 for t in group)
         asks = bool(board.question.strip())
-        again = bool(fixable) and not asks and not failed and rnd <= settings.team_max_rounds  # round 1 is the answer round; conflict rounds are 2..cap+1
+        again = bool(fixable) and not asks and not failed and done_rounds < settings.team_max_rounds
         forced = failed or (bool(fixable) and not asks and not again)
-        boards = team["boards"]
+        update = {"synthesis": {**workspace["synthesis"], "forced": forced}}
         if compare:
-            record = {"round": rnd, **board.model_dump(), "forced": forced}
-            emit({"type": "board", **record})
-            boards = [*boards, record]
-        team = {**team, "rounds": _rounds(speeches), "boards": boards, "forced": forced,
-                "withdrawn": withdrawn,
-                "artifacts": _merge([s["artifacts"] for s in speeches])}
+            record = {"type": "review", "key": key, **board.model_dump(), "forced": forced}
+            emit({"type": "review", **{k: v for k, v in record.items() if k != "type"}})
+            update["history"] = [record]
         if asks:
             emit({"type": "needs_human", "question": board.question})
-            return Command(update={"team": {**team, "question": board.question},
+            return Command(update={"workspace": {**update, "question": board.question},
                                    "messages": [AIMessage(board.question, name=ORCHESTRATOR)]}, goto="pause")
         if not again:
-            return Command(update={"team": team}, goto="synthesize")
+            return Command(update={"workspace": update}, goto="dispatch")
         routes = [r for r in live if any(r in c.routes for c in fixable)]
-        language, notes = reply_language(messages), {}
-        for r in routes:
-            mine = [c for c in fixable if r in c.routes]
-            others = [o for o in answers if o["agent"] != r
-                      and any(o["agent"] in c.routes for c in mine)]
-            notes[r] = CONFLICT_MESSAGE.format(
+        language, wave, rnd = reply_language(messages), workspace["wave"] + 1, done_rounds + 2
+        sends, ids = [], []
+        for a in answers:
+            if a["agent"] not in routes:
+                continue
+            mine = [c for c in fixable if a["agent"] in c.routes]
+            others = [o for o in answers if o["agent"] != a["agent"] and any(o["agent"] in c.routes for c in mine)]
+            note = CONFLICT_MESSAGE.format(
                 conflicts=_bullets([f"{c.claim} ({c.issue})" for c in mine]),
                 others="\n\n".join(f"{o['agent']}:\n{o['text']}" for o in others) or "none",
-                own=next(s["text"] for s in reversed(speeches) if s["agent"] == r), language=language)
-        return Command(update={"team": {**team, "round": rnd + 1}}, goto=sends(routes, rnd + 1, "conflict", notes, messages))
+                own=a["text"], language=language)
+            sends.append(job(a["task"], a["agent"], rnd, "conflict", note, messages))
+            ids.append(a["task"])
+        entry = {"type": "wave", "wave": wave, "kind": "conflict", "tasks": ids, "agents": routes}
+        emit(entry)
+        update["history"] = [*update.get("history", []), entry]
+        update.update({"wave": wave, "rounds_at": {**rounds_at, key: done_rounds + 1}, "status": {i: "running" for i in ids}})
+        return Command(update={"workspace": update}, goto=sends)
 
     async def pause(state: TeamState, runtime: Runtime[AgentContext]) -> Command:
         # Nothing before `interrupt`: on resume the node runs again from its start.
-        reply = interrupt({"question": state["team"]["question"]})
-        team, messages = state["team"], [*state["messages"], HumanMessage(reply)]
+        reply = interrupt({"question": state["workspace"]["question"]})
+        workspace, messages = state["workspace"], [*state["messages"], HumanMessage(reply)]
         available = await available_agents(runtime.context.user_id, specs)
         # Only an agent the reply names joins (a drawer brings its `fed_by`); a free-text answer brings nobody in.
         hits = [s for s, i in available if s.is_named(reply, i)]
         named = participants(available, reply) if any(not s.draws for s in hits) else [
             s for s, _ in available if s in hits or any(s.route in h.fed_by for h in hits)]
-        new = [s.route for s in named if not s.draws and s.route not in team["participants"]]
-        drawers = [*team["drawers"], *(s.route for s in named if s.draws and s.route not in team["drawers"])]
-        team = {**team, "drawers": drawers}
-        if not new:
-            return Command(update={"messages": messages[-1:], "team": team}, goto="judge")
-        # The reply names an agent that is not taking part yet: it answers one round before the board runs again.
-        rnd = team["round"] + 1
-        note = ROUND_MESSAGE.format(language=reply_language(messages), drawing=_drawing(drawers))
-        team = {**team, "participants": [*team["participants"], *new], "round": rnd}
-        return Command(update={"messages": messages[-1:], "team": team},
-                       goto=sends(new, rnd, "answer", _round_notes(new, available, note), messages))
+        taking_part = {t["agent"] for t in workspace["tasks"]}
+        new = [s.route for s in named if not s.draws and s.route not in taking_part]
+        drawers = [*workspace["drawers"], *(s.route for s in named if s.draws and s.route not in workspace["drawers"])]
+        # The reply names an agent that is not taking part yet: it answers one wave before the review runs again.
+        added = [{**t, "id": f"t{len(workspace['tasks']) + i}", "origin": "reply"} for i, t in enumerate(fallback_tasks(new), 1)]
+        update = {"drawers": drawers, "tasks": [*workspace["tasks"], *added]}
+        return Command(update={"messages": messages[-1:], "workspace": update}, goto="dispatch" if added else "review")
 
     async def synthesize(state: TeamState, runtime: Runtime[AgentContext], config: RunnableConfig) -> dict:
-        team, messages = state["team"], state["messages"]
-        answers = _live(state["speeches"], team["participants"])
-        board = Board(**team["boards"][-1]) if team["boards"] else Board()
-        transcript = {key: team[key] for key in ("participants", "drawers", "rounds", "boards", "forced", "withdrawn")}
+        workspace, messages = state["workspace"], state["messages"]
+        drawers = workspace["drawers"]
+        answers = _answers(workspace, workspace["tasks"])
+        last = next((e for e in reversed(workspace["history"]) if e["type"] == "review"), None)
+        board = Board(**last) if last else Board()
+        forced = workspace["synthesis"]["forced"]
         only = by_route[answers[0]["agent"]] if answers else None
         if not answers:  # every agent withdrew: the orchestrator answers as in normal mode and says so
             emit({"type": "synthesize"})
-            note = NOTHING_FOUND_MESSAGE.format(withdrawn=", ".join(team["withdrawn"]),
-                                                language=reply_language(messages), drawing=_drawing(team["drawers"]))
-            command = await ask_orchestrator(state, runtime, note, bool(team["drawers"]))
+            withdrawn = [t["agent"] for t in workspace["tasks"] if t["status"] == "withdrew"]
+            note = NOTHING_FOUND_MESSAGE.format(withdrawn=", ".join(dict.fromkeys(withdrawn)),
+                                                language=reply_language(messages), drawing=_drawing(drawers))
+            command = await ask_orchestrator(state, runtime, note, bool(drawers))
             answer = await handed_off(command, messages, runtime, config) if command.goto in by_route \
                 else command.update["messages"][0]
-        elif len(answers) == 1 and not board.conflicts and not team["forced"] and only.answers_directly:
+        elif len(answers) == 1 and not board.conflicts and not forced and only.answers_directly:
             answer = AIMessage(answers[0]["text"], name=only.message_names[0])
         else:
             emit({"type": "synthesize"})  # only a write-up announces itself
@@ -379,13 +467,17 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
                 differences=_bullets([f"{', '.join(d.routes)}: {d.explanation} ({'; '.join(f'{x.route}: {x.value}, {x.source}, {x.as_of}' for x in d.sides)})"
                                    for d in board.differences]),
                 conflicts=_bullets([f"{c.claim} ({', '.join(c.routes)}): {c.issue}" for c in board.conflicts]),
-                language=reply_language(messages), drawing=_drawing(team["drawers"]))
-            command = await ask_orchestrator(state, runtime, note, bool(team["drawers"]))
+                language=reply_language(messages), drawing=_drawing(drawers))
+            command = await ask_orchestrator(state, runtime, note, bool(drawers))
             did_handoff = command.goto in by_route  # it handed off: the answers stand
             answer = AIMessage("\n\n".join(a["text"] for a in answers), name=ORCHESTRATOR) if did_handoff \
                 else command.update["messages"][0]
-        kwargs = {**answer.additional_kwargs, **_merge([team["artifacts"], collect([answer])]), "team": transcript}
-        if kwargs.get("charts") and not team["drawers"]:
+        artifacts = _merge([r["artifacts"] for r in workspace["results"].values()])
+        # The tables and charts travel on the answer itself, so the transcript keeps only the ids' owners (the results' text and tools).
+        transcript = {k: v for k, v in workspace.items() if k not in ("rounds_at", "artifacts")}
+        transcript["results"] = {k: {f: v for f, v in r.items() if f != "artifacts"} for k, r in workspace["results"].items()}
+        kwargs = {**answer.additional_kwargs, **_merge([artifacts, collect([answer])]), "team": transcript}
+        if kwargs.get("charts") and not drawers:
             emit({"type": "charts", "charts": kwargs["charts"]})
         # An id, so the `draw` step's version replaces this message instead of joining it.
         return {"messages": [answer.model_copy(update={"additional_kwargs": kwargs, "id": answer.id or str(uuid.uuid4())})]}
@@ -394,7 +486,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         """Each drawer runs once on the thread plus the final answer, with no data source, and its charts join the answer."""
         messages, answer = state["messages"], state["messages"][-1]
         drawn, artifacts = [], [collect([answer])]
-        for route in state["team"]["drawers"]:
+        for route in state["workspace"]["drawers"]:
             emit({"type": "speaker", "agent": route, "ns": config["configurable"]["checkpoint_ns"]})
             # With a table on this turn's answer the drawer charts that table: it may not copy numbers.
             deny = ("chart_data",) if answer.additional_kwargs.get("tables") else ()
@@ -420,14 +512,15 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         return {"messages": [answer.model_copy(update={"additional_kwargs": kwargs})]}
 
     graph = StateGraph(TeamState, context_schema=AgentContext)
-    graph.add_node("pick", pick, destinations=("speak", END))
+    graph.add_node("plan", plan, destinations=("dispatch", END))
+    graph.add_node("dispatch", dispatch, destinations=("speak", "synthesize"))
     graph.add_node("speak", speak)
-    graph.add_node("judge", judge, destinations=("speak", "synthesize", "pause"))
-    graph.add_node("pause", pause, destinations=("judge", "speak"))
+    graph.add_node("review", review, destinations=("speak", "dispatch", "pause"))
+    graph.add_node("pause", pause, destinations=("review", "dispatch"))
     graph.add_node("synthesize", synthesize)
     graph.add_node("draw", draw)
-    graph.add_edge(START, "pick")
-    graph.add_edge("speak", "judge")
-    graph.add_conditional_edges("synthesize", lambda state: "draw" if state["team"]["drawers"] else END, ["draw", END])
+    graph.add_edge(START, "plan")
+    graph.add_edge("speak", "review")
+    graph.add_conditional_edges("synthesize", lambda state: "draw" if state["workspace"]["drawers"] else END, ["draw", END])
     graph.add_edge("draw", END)
     return graph.compile(name=TEAM)

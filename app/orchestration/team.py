@@ -34,7 +34,8 @@ from app.core.config import get_settings
 from app.core.llm import get_chat_model
 from app.core.memory import TEAM_MODE, AgentContext
 from app.core.prompts import reply_language
-from app.orchestration.prompts import BOARD_PROMPT, CONFLICT_MESSAGE, DRAW_MESSAGE, DRAWING_NOTE, NOTHING_FOUND_MESSAGE, ROUND_MESSAGE, TEAM_MESSAGE
+from app.orchestration.prompts import BOARD_PROMPT, CONFLICT_MESSAGE, DRAW_MESSAGE, DRAWING_NOTE, NOTHING_FOUND_MESSAGE, PLAN_PROMPT, ROUND_MESSAGE, TEAM_MESSAGE
+from app.orchestration.team_plan import Plan
 from app.orchestration.router import ORCHESTRATOR, AssistantState, available_agents
 
 log = logging.getLogger(__name__)
@@ -129,6 +130,30 @@ async def ask_board(messages: list[AnyMessage], answers: list[dict], config: Run
         Board, method="function_calling")
     system = BOARD_PROMPT.format(language=reply_language(messages))
     return await board.ainvoke([SystemMessage(system), HumanMessage(human)], config=config)
+
+
+async def ask_plan(messages: list[AnyMessage], available: Sequence[tuple[AgentSpec, RouteInfo]], config: RunnableConfig) -> Plan:
+    """The one plan call per message, on the orchestrator model; `config` carries the usage counter's callbacks."""
+    settings = get_settings()
+    question = next((m.text for m in reversed(messages) if isinstance(m, HumanMessage)), "")
+    lines = []
+    for spec, info in available:
+        line = f"- {spec.route}: {spec.description}"
+        if spec.review:
+            line += f" Can review: {spec.review}."
+        if spec.sources:
+            line += f" Reads: {', '.join(sorted(spec.sources))}."
+        if spec.draws:
+            line += " Draws charts."
+        if info.prompt_note:
+            line += f"\n  {info.prompt_note}"
+        lines.append(line)
+    # Texts go into the message, not a template: they may contain braces.
+    human = f"USER MESSAGE:\n{question}\n\nAGENTS:\n" + "\n".join(lines)
+    planner = get_chat_model(settings.openrouter_orchestrator_model or None).with_structured_output(
+        Plan, method="function_calling")
+    system = PLAN_PROMPT.format(language=reply_language(messages), max_tasks=settings.team_max_tasks)
+    return await planner.ainvoke([SystemMessage(system), HumanMessage(human)], config=config)
 
 
 def merge_speeches(old: list[dict] | None, new: list[dict]) -> list[dict]:

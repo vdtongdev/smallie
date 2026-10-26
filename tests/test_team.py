@@ -96,6 +96,34 @@ async def test_ask_board_calls_the_model_once(monkeypatch):
     assert "question?" in human and "SQL SAYS 3T" in human and "DOCS SAYS 2T" in human
 
 
+async def test_ask_plan_calls_the_orchestrator_model_once(monkeypatch):
+    from app.orchestration.team_plan import Plan
+    calls, schemas, asked = [], [], []
+
+    async def ainvoke(messages, config):
+        calls.append((messages, config))
+        return Plan()
+
+    def fake_model(model=None):
+        asked.append(model)
+        return SimpleNamespace(
+            with_structured_output=lambda schema, method: schemas.append((schema, method)) or SimpleNamespace(ainvoke=ainvoke))
+
+    monkeypatch.setattr(team, "get_chat_model", fake_model)
+    config = {"callbacks": []}
+    available = [(SQL, RouteInfo()), (get("docs"), RouteInfo(prompt_note="FILES: handbook.pdf"))]
+    await team.ask_plan([HumanMessage("question?")], available, config)
+    assert len(calls) == 1 and calls[0][1] is config and schemas == [(Plan, "function_calling")]
+    assert asked == [get_settings().openrouter_orchestrator_model or None]
+    human = calls[0][0][1].content
+    assert "question?" in human and "sql" in human and SQL.description in human and "FILES: handbook.pdf" in human
+
+
+def test_plan_prompt_formats():
+    from app.orchestration.prompts import PLAN_PROMPT
+    assert "6" in PLAN_PROMPT.format(language="English", max_tasks=6)
+
+
 @pytest.mark.parametrize("judge, orchestrator, expected", [
     ("judge/model", "orch/model", "judge/model"),
     ("", "orch/model", "orch/model"),

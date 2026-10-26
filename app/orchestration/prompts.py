@@ -120,6 +120,19 @@ Set `question` only when the answers can't go on without information only the us
 
 Write every text field in {language}. Leave a list empty when it has no entry."""
 
+# System prompt of the plan call. {language}: the reply language, for the goals. {max_tasks}: the task cap.
+PLAN_PROMPT = """You plan how a team of agents answers the user's latest message. The human message lists the message and the available agents with what each does and reads. Return the tasks to hand out.
+
+1. Pick only the agents the message needs. Leave out an agent whose sources the message does not call for.
+2. Return no tasks when no agent is needed, for example for small talk or a question you can answer yourself.
+3. Start small. Later reviews can add tasks, so plan only the work you can name now.
+4. Give each task an `id`, the `agent` (its route), and a `goal` in one sentence that says what that agent should find or produce.
+5. List in `depends_on` the ids of the tasks whose output a task needs. A task that needs nothing from another has an empty `depends_on`. Tasks without a dependency between them run at the same time.
+6. A task that draws a chart depends on the task that produces the data to draw.
+7. Return at most {max_tasks} tasks, each with a different `id`.
+
+Write every goal in {language}."""
+
 # Hidden message for the orchestrator's final write-up. {differences} and {conflicts} are "none" when empty.
 TEAM_MESSAGE = """TEAM RESULT for the user's latest message (not visible to the user). The team's work on it is done: write the answer from this now, without calling any tool. Write it in {language}, whatever language the answers are in.
 

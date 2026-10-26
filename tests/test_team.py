@@ -201,16 +201,6 @@ def _board(monkeypatch, *boards, then=None):
     monkeypatch.setattr(team, "ask_board", fake)
 
 
-@pytest.fixture(autouse=True)
-def _plan_call_fails(monkeypatch):
-    """The plan call fails unless a test scripts it, so the team runs the fallback plan (every participant, independent)."""
-    async def boom(*args, **kwargs):
-        raise RuntimeError("no plan model in tests")
-
-    monkeypatch.setattr(team, "get_chat_model", lambda *a, **k: SimpleNamespace(
-        with_structured_output=lambda schema, method: SimpleNamespace(ainvoke=boom)))
-
-
 def _plan(monkeypatch, *plans):
     """Scripted plan call: the plans in order. Returns the list of messages it was asked with."""
     queue, asked = iter(plans), []
@@ -238,6 +228,28 @@ def _events(chunks, kind):
 
 async def _thread(assistant, config=CONFIG):
     return (await assistant.aget_state(config)).values["messages"]
+
+
+def _agents(transcript):
+    """The agents of the workspace's tasks, in task order (was `participants`)."""
+    return [t["agent"] for t in transcript["tasks"]]
+
+
+def _withdrawn(transcript):
+    return [t["agent"] for t in transcript["tasks"] if t["status"] == "withdrew"]
+
+
+def _spoke(transcript):
+    """What each agent said, by agent (newest result)."""
+    return {r["agent"]: r["text"] for r in transcript["results"].values()}
+
+
+def _waves(transcript):
+    return [e for e in transcript["history"] if e["type"] == "wave"]
+
+
+def _reviews(transcript):
+    return [e for e in transcript["history"] if e["type"] == "review"]
 
 
 def _writeups(model):
@@ -273,7 +285,7 @@ async def test_nobody_mentioned_orchestrator_answers_alone(monkeypatch):
     assistant = _assistant(monkeypatch, model)
     chunks = await _stream(assistant, _ask("write a short poem"))
 
-    assert not _events(chunks, "round") and not _events(chunks, "board")
+    assert not _events(chunks, "wave") and not _events(chunks, "review")
     messages = await _thread(assistant)
     assert [(type(m), m.name, m.text) for m in messages][1:] == [(AIMessage, "orchestrator", "Roses are red.")]
     assert "team" not in messages[1].additional_kwargs and len(model.prompts) == 1
@@ -316,7 +328,7 @@ async def test_single_participant_answer_stands(monkeypatch):
 
     reply = (await _thread(assistant))[-1]
     assert (reply.name, reply.text) == ("sql_agent", "Cap is 3T.")
-    assert reply.additional_kwargs["team"]["participants"] == ["sql"]
+    assert _agents(reply.additional_kwargs["team"]) == ["sql"]
     assert not model.prompts and not _events(chunks, "synthesize")
 
 
@@ -326,7 +338,7 @@ async def test_agreement_writes_up_once(monkeypatch):
     model, assistant = _two(monkeypatch, log)
     chunks = await _stream(assistant, _ask())
 
-    assert [e["round"] for e in _events(chunks, "round")] == [1] and len(_events(chunks, "board")) == 1
+    assert [e["wave"] for e in _events(chunks, "wave")] == [1] and len(_events(chunks, "review")) == 1
     assert len(_events(chunks, "synthesize")) == 1
     writeups = _writeups(model)
     assert len(writeups) == 1 and "Cap is 3T." in writeups[0] and "Notes: 3T." in writeups[0]
@@ -343,8 +355,8 @@ async def test_fixable_conflict_runs_a_conflict_round_for_its_routes_only(monkey
     model, assistant, agents = _three(monkeypatch, log)
     chunks = await _stream(assistant, _ask(THREE))
 
-    rounds = _events(chunks, "round")
-    assert [(e["round"], e["kind"]) for e in rounds] == [(1, "answer"), (2, "conflict")]
+    rounds = _events(chunks, "wave")
+    assert [(e["wave"], e["kind"]) for e in rounds] == [(1, "plan"), (2, "conflict")]
     assert sorted(rounds[1]["agents"]) == ["docs", "sql"]
     assert [agents[n].calls for n in ("sql", "docs", "research")] == [2, 2, 1]
     second = [e["last"] for e in log if e["event"] == "start" and e["agent"] == "sql"][1]
@@ -358,9 +370,9 @@ async def test_unfixable_conflict_goes_to_write_up(monkeypatch):
         model, assistant, _ = _three(monkeypatch, [])
         chunks = await _stream(assistant, _ask(THREE))
 
-        assert [e["round"] for e in _events(chunks, "round")] == [1]
+        assert [e["wave"] for e in _events(chunks, "wave")] == [1]
         assert "CAP-CLAIM" in _writeups(model)[0]
-        assert (await _thread(assistant))[-1].additional_kwargs["team"]["forced"] is False
+        assert (await _thread(assistant))[-1].additional_kwargs["team"]["synthesis"]["forced"] is False
 
 
 async def test_cap_forces_write_up_after_the_conflict_round_limit(monkeypatch):
@@ -369,10 +381,9 @@ async def test_cap_forces_write_up_after_the_conflict_round_limit(monkeypatch):
     chunks = await _stream(assistant, _ask(THREE))
 
     limit = get_settings().team_max_rounds  # conflict rounds after round 1
-    assert [e["round"] for e in _events(chunks, "round")] == list(range(1, limit + 2))
-    assert all(e["max_rounds"] == limit + 1 for e in _events(chunks, "round"))
-    assert _events(chunks, "board")[-1]["forced"] is True
-    assert (await _thread(assistant))[-1].additional_kwargs["team"]["forced"] is True
+    assert [e["wave"] for e in _events(chunks, "wave")] == list(range(1, limit + 2))
+    assert _events(chunks, "review")[-1]["forced"] is True
+    assert (await _thread(assistant))[-1].additional_kwargs["team"]["synthesis"]["forced"] is True
     assert len(_events(chunks, "synthesize")) == 1 and len(_writeups(model)) == 1
 
 
@@ -384,9 +395,8 @@ async def test_failed_speaker_forces_write_up(monkeypatch):
     await _stream(assistant, _ask())
 
     last = (await _thread(assistant))[-1]
-    assert last.text == "Final." and last.additional_kwargs["team"]["forced"] is True
-    answers = last.additional_kwargs["team"]["rounds"][0]["answers"]
-    assert {a["agent"]: a["text"] for a in answers}["research"] == "failed: RuntimeError"
+    assert last.text == "Final." and last.additional_kwargs["team"]["synthesis"]["forced"] is True
+    assert _spoke(last.additional_kwargs["team"])["research"] == "failed: RuntimeError"
 
 
 async def test_failed_board_forces_write_up(monkeypatch):
@@ -398,8 +408,8 @@ async def test_failed_board_forces_write_up(monkeypatch):
     chunks = await _stream(assistant, _ask())
 
     last = (await _thread(assistant))[-1]
-    assert last.text == "Final." and last.additional_kwargs["team"]["forced"] is True
-    assert _events(chunks, "board")[-1]["forced"] is True
+    assert last.text == "Final." and last.additional_kwargs["team"]["synthesis"]["forced"] is True
+    assert _events(chunks, "review")[-1]["forced"] is True
     assert "Cap is 3T." in _writeups(model)[0]
 
 
@@ -450,10 +460,10 @@ async def test_drawer_does_not_speak_in_rounds(monkeypatch):
                            chart=chart)
     chunks = await _stream(assistant, _ask("chart AAPL"))
 
-    assert [e["agents"] for e in _events(chunks, "round")] == [["sql", "research"]]
+    assert [e["agents"] for e in _events(chunks, "wave")] == [["sql", "research"]]
     assert boards == [["sql", "research"]] and chart.calls == 1  # the draw only
     transcript = (await _thread(assistant))[-1].additional_kwargs["team"]
-    assert transcript["drawers"] == ["chart"] and transcript["participants"] == ["sql", "research"]
+    assert transcript["drawers"] == ["chart"] and _agents(transcript) == ["sql", "research"]
 
 
 async def test_write_up_note_says_the_drawer_draws_after_the_answer(monkeypatch):
@@ -523,7 +533,7 @@ async def test_needs_human_pauses_and_resume_continues(monkeypatch):
     assert [m.text for m in paused.tasks[0].state.values["messages"]] == [QUESTION, "Which year?"]
 
     second = await _stream(assistant, Command(resume="2024"))
-    assert not _events(second, "round") and sql.calls == 1  # the participants do not run again
+    assert not _events(second, "wave") and sql.calls == 1  # the participants do not run again
     assert not (await assistant.aget_state(CONFIG)).interrupts
     messages = await _thread(assistant)
     assert [(type(m), m.text) for m in messages] == [
@@ -546,24 +556,24 @@ async def _chart_asks(monkeypatch, reply, **kw):
 async def test_reply_to_question_naming_a_new_agent_brings_it_in(monkeypatch):
     assistant, agents, second = await _chart_asks(monkeypatch, "check handbook.pdf")
 
-    assert [(e["round"], e["kind"], e["agents"]) for e in _events(second, "round")] == [(2, "answer", ["docs"])]
+    assert [(e["wave"], e["kind"], e["agents"]) for e in _events(second, "wave")] == [(2, "plan", ["docs"])]
     assert agents["docs"].calls == 1 and agents["sql"].calls == 1
     team_record = (await _thread(assistant))[-1].additional_kwargs["team"]
-    assert team_record["participants"] == ["sql", "docs"] and team_record["drawers"] == ["chart"]
+    assert _agents(team_record) == ["sql", "docs"] and team_record["drawers"] == ["chart"]
 
 
 async def test_reply_without_new_agent_goes_straight_to_judge(monkeypatch):
     assistant, agents, second = await _chart_asks(monkeypatch, "2024 please")
 
-    assert not _events(second, "round") and agents["sql"].calls == 1 and agents["chart"].calls == 1  # the draw only
-    assert all(a["agent"] != "chart" for r in (await _thread(assistant))[-1].additional_kwargs["team"]["rounds"] for a in r["answers"])
+    assert not _events(second, "wave") and agents["sql"].calls == 1 and agents["chart"].calls == 1  # the draw only
+    assert all(e["agent"] != "chart" for e in (await _thread(assistant))[-1].additional_kwargs["team"]["history"] if e["type"] == "result")
 
 
 async def test_reply_naming_an_agent_already_taking_part_does_not_run_it_again(monkeypatch):
     assistant, agents, second = await _chart_asks(monkeypatch, "make it a bar chart")
 
-    assert not _events(second, "round") and agents["chart"].calls == 1  # the draw only
-    assert all(a["agent"] != "chart" for r in (await _thread(assistant))[-1].additional_kwargs["team"]["rounds"] for a in r["answers"])
+    assert not _events(second, "wave") and agents["chart"].calls == 1  # the draw only
+    assert all(e["agent"] != "chart" for e in (await _thread(assistant))[-1].additional_kwargs["team"]["history"] if e["type"] == "result")
     assert (await _thread(assistant))[-1].additional_kwargs["team"]["drawers"] == ["chart"]
 
 
@@ -571,7 +581,7 @@ async def test_reply_never_brings_in_an_unavailable_agent(monkeypatch):
     docs = Fake("docs", "from file", log=[])
     assistant, agents, second = await _chart_asks(monkeypatch, "check the uploaded file", documents=(), docs=docs)
 
-    assert not _events(second, "round") and docs.calls == 0
+    assert not _events(second, "wave") and docs.calls == 0
 
 
 async def test_second_turn_starts_fresh(monkeypatch):
@@ -584,8 +594,8 @@ async def test_second_turn_starts_fresh(monkeypatch):
     await _stream(assistant, _ask("And the AAPL market cap in euro?"))
 
     transcript = (await _thread(assistant))[-1].additional_kwargs["team"]
-    assert len(transcript["rounds"]) == 1 and len(transcript["boards"]) == 1
-    assert {a["agent"]: a["text"] for a in transcript["rounds"][0]["answers"]} == {"sql": "d2", "research": "n2"}
+    assert len(_waves(transcript)) == 1 and len(_reviews(transcript)) == 1
+    assert _spoke(transcript) == {"sql": "d2", "research": "n2"}
 
 
 async def test_only_the_answer_joins_the_thread(monkeypatch):
@@ -626,14 +636,14 @@ async def test_transcript_holds_rounds_tools_and_boards(monkeypatch):
     await _stream(assistant, _ask())
 
     transcript = (await _thread(assistant))[-1].additional_kwargs["team"]
-    assert transcript["participants"] == ["sql", "research"] and transcript["forced"] is False
-    (first,) = transcript["rounds"]
-    assert (first["round"], first["kind"]) == (1, "answer")
-    sql = next(a for a in first["answers"] if a["agent"] == "sql")
+    assert _agents(transcript) == ["sql", "research"] and transcript["synthesis"]["forced"] is False
+    (first,) = _waves(transcript)
+    assert (first["wave"], first["kind"]) == (1, "plan")
+    sql = next(a for a in transcript["results"].values() if a["agent"] == "sql")
     assert sql["text"] == "Cap is 3T."
     assert sql["tools"] == [{"name": "run_sql", "args": {"query": "SELECT 1"}, "result": "1 row"}]
-    assert transcript["boards"][0]["agreements"] == ["same figure"]
-    assert transcript["boards"][0]["differences"][0]["explanation"] == "as-of date"
+    assert _reviews(transcript)[0]["agreements"] == ["same figure"]
+    assert _reviews(transcript)[0]["differences"][0]["explanation"] == "as-of date"
 
 
 async def test_write_up_names_differences_and_the_message_language(monkeypatch):
@@ -695,7 +705,7 @@ async def test_transcript_holds_research_tool_calls(monkeypatch):
     await _stream(assistant, _ask())
 
     transcript = (await _thread(assistant))[-1].additional_kwargs["team"]
-    research = next(a for a in transcript["rounds"][0]["answers"] if a["agent"] == "research")
+    research = next(a for a in transcript["results"].values() if a["agent"] == "research")
     assert research["tools"] == [{"name": "tavily_tavily_search", "args": {"query": "AAPL cap"}, "result": "Apple cap 3T"}]
 
 
@@ -708,8 +718,9 @@ async def test_spoke_event_carries_the_final_entry(monkeypatch):
     spoke = _events(chunks, "spoke")
     assert {e["agent"] for e in spoke} == {"sql", "research"}
     for event in spoke:
-        entry = next(a for a in transcript["rounds"][0]["answers"] if a["agent"] == event["agent"])
-        assert event == {"type": "spoke", "round": 1, **entry}
+        task = next(t for t in transcript["tasks"] if t["agent"] == event["agent"])
+        entry = {**transcript["results"][task["id"]], "withdrew": task["status"] == "withdrew"}
+        assert event == {"type": "spoke", "task": task["id"], **entry}
     assert next(e for e in spoke if e["agent"] == "sql")["tools"] == [
         {"name": "run_sql", "args": {"query": "SELECT 1"}, "result": "1 row"}]
 
@@ -909,7 +920,7 @@ async def test_small_talk_goes_to_the_orchestrator_alone(monkeypatch):
     assistant = _assistant(monkeypatch, model, documents=("handbook.pdf",))
     chunks = await _stream(assistant, _ask("ok cảm ơn"))
 
-    assert not _events(chunks, "round") and not _events(chunks, "board") and len(model.prompts) == 1
+    assert not _events(chunks, "wave") and not _events(chunks, "review") and len(model.prompts) == 1
     assert (await _thread(assistant))[-1].text == "You are welcome."
 
 
@@ -920,7 +931,7 @@ async def test_open_table_runs_every_available_agent_in_one_round(monkeypatch):
     model, assistant, agents = _three(monkeypatch, log)
     chunks = await _stream(assistant, _ask("find in different sources that you can use"))
 
-    assert [(e["round"], sorted(e["agents"])) for e in _events(chunks, "round")] == [(1, ["docs", "research", "sql"])]
+    assert [(e["wave"], sorted(e["agents"])) for e in _events(chunks, "wave")] == [(1, ["docs", "research", "sql"])]
     assert all(a.calls == 1 for a in agents.values())
 
 
@@ -939,8 +950,10 @@ def _boards_log(monkeypatch, *boards, then=None):
     return seen
 
 
-def _entry(final, agent, rnd=0):
-    return next(a for a in final.additional_kwargs["team"]["rounds"][rnd]["answers"] if a["agent"] == agent)
+def _entry(final, agent):
+    team = final.additional_kwargs["team"]
+    task = next(t for t in team["tasks"] if t["agent"] == agent)
+    return {**team["results"][task["id"]], "withdrew": task["status"] == "withdrew"}
 
 
 async def test_one_agent_withdraws_and_the_others_continue(monkeypatch):
@@ -958,7 +971,7 @@ async def test_one_agent_withdraws_and_the_others_continue(monkeypatch):
     assert seen == [["sql", "research"]]  # the board sees no withdrawn agent
     (writeup,) = _writeups(model)
     assert "Cap is 3T." in writeup and "Notes: 3T." in writeup and "DOCS-LEAK" not in writeup
-    assert final.additional_kwargs["team"]["withdrawn"] == ["docs"]
+    assert _withdrawn(final.additional_kwargs["team"]) == ["docs"]
     assert (_entry(final, "docs")["withdrew"], _entry(final, "sql")["withdrew"],
             _entry(final, "research")["withdrew"]) == (True, False, False)
     assert {e["agent"]: e["withdrew"] for e in _events(chunks, "spoke")} == {"docs": True, "sql": False, "research": False}
@@ -969,7 +982,7 @@ async def test_transcript_withdrawn_is_empty_when_everyone_answers(monkeypatch):
     _board(monkeypatch, Board())
     _, assistant = _two(monkeypatch, [])
     await _stream(assistant, _ask())
-    assert (await _thread(assistant))[-1].additional_kwargs["team"]["withdrawn"] == []
+    assert _withdrawn((await _thread(assistant))[-1].additional_kwargs["team"]) == []
 
 
 async def test_withdrawn_agent_is_left_out_of_conflict_rounds(monkeypatch):
@@ -983,9 +996,9 @@ async def test_withdrawn_agent_is_left_out_of_conflict_rounds(monkeypatch):
                            sql=Fake("sql", "sql v1", "sql v2", log=log), research=Fake("research", "notes", log=log))
     chunks = await _stream(assistant, _ask(QUESTION))
 
-    rounds = _events(chunks, "round")
-    assert [(e["round"], e["kind"], e["agents"]) for e in rounds] == [
-        (1, "answer", ["docs", "sql", "research"]), (2, "conflict", ["sql", "research"])]
+    rounds = _events(chunks, "wave")
+    assert [(e["wave"], e["kind"], e["agents"]) for e in rounds] == [
+        (1, "plan", ["docs", "sql", "research"]), (2, "conflict", ["sql", "research"])]
     assert docs.calls == 1
     assert seen == [["sql", "research"], ["sql", "research"]]
     second = [e["last"] for e in log if e["event"] == "start" and e["agent"] == "sql"][1]
@@ -1003,7 +1016,7 @@ async def test_conflict_only_a_withdrawn_agent_could_fix_goes_to_write_up(monkey
                            sql=Fake("sql", "a", log=log), research=Fake("research", "b", log=log))
     chunks = await _stream(assistant, _ask(QUESTION))
 
-    assert [(e["round"], e["agents"]) for e in _events(chunks, "round")] == [(1, ["docs", "sql", "research"])]
+    assert [(e["wave"], e["agents"]) for e in _events(chunks, "wave")] == [(1, ["docs", "sql", "research"])]
     assert "CAP-CLAIM" in _writeups(model)[0]
 
 
@@ -1020,7 +1033,7 @@ async def test_all_but_one_withdraw_skips_the_board_and_that_answer_stands(monke
     final = (await _thread(assistant))[-1]
     assert (final.name, final.text) == ("sql_agent", "Cap is 3T.")
     assert not model.prompts and not _events(chunks, "synthesize")
-    assert final.additional_kwargs["team"]["withdrawn"] == ["docs", "research"]
+    assert _withdrawn(final.additional_kwargs["team"]) == ["docs", "research"]
 
 
 async def test_research_withdraws_on_no_findings_not_on_its_messages(monkeypatch):
@@ -1037,7 +1050,7 @@ async def test_research_withdraws_on_no_findings_not_on_its_messages(monkeypatch
     await _stream(assistant, _ask(QUESTION))
 
     final = (await _thread(assistant))[-1]
-    assert seen == [["sql", "research"]] and final.additional_kwargs["team"]["withdrawn"] == []
+    assert seen == [["sql", "research"]] and _withdrawn(final.additional_kwargs["team"]) == []
     assert _entry(final, "research")["withdrew"] is False
 
 
@@ -1068,7 +1081,7 @@ async def test_every_agent_withdraws_then_the_drawer_still_draws(monkeypatch):
     assistant = _assistant(monkeypatch, model, documents=("handbook.pdf",), docs=Fake("docs", GAVE_UP, log=[]),
                            sql=Fake("sql", GAVE_UP, log=[]), research=Fake("research", "", log=[]), chart=chart)
     chunks = await _stream(assistant, _ask("draw a chart of the top stocks"))
-    assert _events(chunks, "round")[0]["agents"] == ["docs", "sql", "research"] and chart.calls == 1
+    assert _events(chunks, "wave")[0]["agents"] == ["docs", "sql", "research"] and chart.calls == 1
 
 
 async def test_reply_to_a_question_applies_withdrawal_to_the_new_round(monkeypatch):
@@ -1082,9 +1095,9 @@ async def test_reply_to_a_question_applies_withdrawal_to_the_new_round(monkeypat
     await _stream(assistant, _ask(SQL_QUESTION))
     second = await _stream(assistant, Command(resume="check handbook.pdf"))
 
-    assert [(e["round"], e["agents"]) for e in _events(second, "round")] == [(2, ["docs"])]
+    assert [(e["wave"], e["agents"]) for e in _events(second, "wave")] == [(2, ["docs"])]
     assert seen == [["sql", "research"], ["sql", "research"]]
-    assert (await _thread(assistant))[-1].additional_kwargs["team"]["withdrawn"] == ["docs"]
+    assert _withdrawn((await _thread(assistant))[-1].additional_kwargs["team"]) == ["docs"]
     assert all("DOCS-LEAK" not in w for w in _writeups(model))
 
 
@@ -1131,7 +1144,7 @@ async def test_speaker_that_never_used_its_source_withdraws(monkeypatch):
     final = (await _thread(assistant))[-1]
     spoke = {e["agent"]: e["withdrew"] for e in _events(chunks, "spoke")}
     assert spoke == {"docs": True, "sql": False, "research": False}
-    assert final.additional_kwargs["team"]["withdrawn"] == ["docs"]
+    assert _withdrawn(final.additional_kwargs["team"]) == ["docs"]
     assert seen == [["sql", "research"]]
     assert all("DOCS-LEAK" not in w for w in _writeups(model))
 

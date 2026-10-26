@@ -27,7 +27,7 @@ def test_team_settings_defaults():
     from app.core.config import Settings
 
     s = Settings(_env_file=None)
-    assert (s.team_max_rounds, s.team_max_message_model_calls) == (4, 30)
+    assert (s.team_max_rounds, s.team_max_message_model_calls) == (2, 30)
 
 
 def test_every_agent_has_sources():

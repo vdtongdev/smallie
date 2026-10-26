@@ -214,8 +214,8 @@ def merge_workspace(old: dict | None, new: dict) -> dict:
     for key, value in new.items():
         if key == "results":
             workspace["results"] = {**workspace.get("results", {}), **value}
-        elif key == "history":
-            workspace["history"] = [*workspace.get("history", []), *value]
+        elif key in ("history", "evidence"):
+            workspace[key] = [*workspace.get(key, []), *value]
         elif key == "status":  # task id -> status
             workspace["tasks"] = [{**t, "status": value.get(t["id"], t["status"])} for t in workspace["tasks"]]
         else:
@@ -545,6 +545,12 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         update = {"synthesis": {**synthesis, "forced": forced, "open_points": open_points, "not_done": not_done}, "challenged": still}
         if status:
             update["status"] = status
+        task_of_route = {r: [a["task"] for a in answers if a["agent"] == r] for r in live}
+        found = [{"task": ids_[0], "claim": side.value, "source": side.source, "as_of": side.as_of}
+                 for d in board.differences for side in d.sides if len(ids_ := task_of_route.get(side.route, [])) == 1]
+        found += [{"task": c.by_task, "claim": c.evidence, "source": "", "as_of": ""} for c in board.challenges]
+        if found:
+            update["evidence"] = found
         if compare:
             record = {"type": "review", "key": meet, **board.model_dump(), "forced": forced}
             emit({"type": "review", **{k: v for k, v in record.items() if k != "type"}})

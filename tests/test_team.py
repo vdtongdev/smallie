@@ -1787,3 +1787,29 @@ def test_team_message_formats():
     text = TEAM_MESSAGE.format(answers="a", differences="d", conflicts="c", open_points="o", not_done="n",
                                language="Vietnamese", drawing=" DRAW")
     assert "Vietnamese" in text and "DRAW" in text and "{" not in text
+
+
+async def test_review_records_evidence_from_sides_and_challenges(monkeypatch):
+    first = Review(differences=[Difference(routes=["sql", "research"], explanation="dates", sides=SIDES)],
+                   challenges=[Challenge(to_task="t1", by_task="t2", question="recheck?", evidence="research saw 2.9T")])
+    _board(monkeypatch, first, then=Review())
+    model, assistant = _two(monkeypatch, [])
+    await _stream(assistant, _ask())
+
+    team_ws = (await _thread(assistant))[-1].additional_kwargs["team"]
+    ids = {t["agent"]: t["id"] for t in team_ws["tasks"]}
+    assert team_ws["evidence"] == [
+        {"task": ids["sql"], "claim": "v1", "source": "db", "as_of": "2024-01-01"},
+        {"task": ids["research"], "claim": "v2", "source": "a page", "as_of": "2024-02-01"},
+        {"task": "t2", "claim": "research saw 2.9T", "source": "", "as_of": ""}]
+
+
+async def test_evidence_resets_per_message(monkeypatch):
+    first = Review(challenges=[Challenge(to_task="t1", by_task="t2", question="recheck?", evidence="old claim")])
+    _board(monkeypatch, first, then=Review())
+    model = per_agent(orchestrator=[AIMessage("Final."), AIMessage("Again.")])
+    assistant = _assistant(monkeypatch, model, sql=Fake("sql", "Cap is 3T.", log=[]), research=Fake("research", "Notes: 3T.", log=[]))
+    await _stream(assistant, _ask())
+    await _stream(assistant, _ask("And again?"))
+
+    assert (await _thread(assistant))[-1].additional_kwargs["team"]["evidence"] == []

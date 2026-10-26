@@ -76,3 +76,9 @@ def test_planted_error_flagged_by_challenge_or_conflict():
     clean = {"history": [{"type": "review", "challenges": [{"to_task": "t2"}], "conflicts": []}], "tasks": tasks}
     assert bench_chat.planted_flagged(challenge, "docs") and bench_chat.planted_flagged(conflict, "docs")
     assert not bench_chat.planted_flagged(clean, "docs")
+
+
+def test_contribution_evidence_claim_in_answer_is_used():
+    t = {"tasks": [{"id": "t1", "agent": "sql", "status": "done"}], "results": {"t1": {"text": "no links"}},
+         "evidence": [{"task": "t1", "claim": "market cap 3.1T", "source": "db", "as_of": "2025"}]}
+    assert bench_chat.contribution(t, "Its market cap 3.1T today.")["sql"]["used"] is True

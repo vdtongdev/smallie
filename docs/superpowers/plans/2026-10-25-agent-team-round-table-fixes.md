@@ -107,3 +107,22 @@
 ## Known limitation kept
 
 `needs_human` hasn't fired in any run: when nobody is picked the orchestrator asks clarifying questions itself, and the board rarely needs the user. Not in this plan.
+
+### Task 7: Judge model setting (user request, 2026-10-26)
+
+**Why:** the re-run showed the board's judgment fails on the default model (`google/gemma-4-31b-it`): it "agreed" 1.2T and 5.01T, trusted a speaker's claim about a source it can't read, and looped to the cap over a 0.1% gap. The user picked two candidates to test: `deepseek/deepseek-v4.1-flash` and `anthropic/claude-haiku-5.5`.
+
+**Files:** `app/core/config.py` (`openrouter_judge_model: str = ""`), `.env.example`, `app/orchestration/team.py` (`ask_board`), `app/core/llm.py` only if needed. Test: `tests/test_team.py`.
+
+**Interfaces:**
+- `ask_board` uses `settings.openrouter_judge_model or settings.openrouter_orchestrator_model or None` (then the chat model, as `get_chat_model` does).
+- `OPENROUTER_QUANTIZATIONS` is a provider filter on every request; a model whose providers report no quantization (e.g. Anthropic) may then have no provider. Check it with one real call per candidate; if it fails, the judge call doesn't send the quantization filter (smallest change in `get_chat_model`, e.g. a keyword argument), and say why in a one-line comment.
+
+- [ ] **Step 1:** failing test `test_board_uses_the_judge_model` (with the setting set, `ask_board` asks `get_chat_model` for that model; unset, the old fallback)
+- [ ] **Step 2:** implement; one real `ask_board` call per candidate model (tiny board input) to prove it answers with structured output; `uv run pytest -q -rs`; commit `feat: OPENROUTER_JUDGE_MODEL for the team board`
+
+### Task 8: Compare the judge candidates
+
+- [ ] **Step 1:** add bench scenario `team_chart` ("Chart AAPL closing prices over the last month", team mode); commit `test: team chart scenario`
+- [ ] **Step 2:** for each candidate (set `OPENROUTER_JUDGE_MODEL` in the bench process env only; don't edit `.env`), run `--only team,team_conflict,team_chart --runs 1` with the events wrapper
+- [ ] **Step 3:** report per model and scenario: boards (agreements, differences with sides, conflicts), whether the planted file is flagged against the dated sources, rounds, calls, latency, judge-call cost (from the usage totals), errors; recommend one; fix nothing

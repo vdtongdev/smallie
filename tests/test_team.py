@@ -1082,3 +1082,38 @@ async def test_speaker_that_never_used_its_source_withdraws(monkeypatch):
     assert final.additional_kwargs["team"]["withdrawn"] == ["docs"]
     assert seen == [["sql", "research"]]
     assert all("DOCS-LEAK" not in w for w in _writeups(model))
+
+
+# --- diagnosis of the 2026-10-26 chat (uncommitted) ---
+
+class _Seeing(Fake):
+    """A Fake that keeps every message it was sent."""
+
+    async def ainvoke(self, input, config=None, **kwargs):
+        self.seen = [m.text for m in input["messages"]]
+        return await super().ainvoke(input, config, **kwargs)
+
+
+async def test_docs_speaker_is_told_the_users_file_names(monkeypatch):
+    """Bug 1: 'top growing stocks' names no file, so docs (which never sees the file list) did not search."""
+    _board(monkeypatch, Board())
+    docs = _Seeing("docs", "From the file.", log=[])
+    model = per_agent(orchestrator=[AIMessage("Final.")])
+    assistant = _assistant(monkeypatch, model, documents=("top_50_stocks_2024.pdf",), docs=docs,
+                           sql=Fake("sql", "Rows.", log=[]), research=Fake("research", "Notes.", log=[]))
+    await _stream(assistant, _ask("top growing stocks"))
+
+    assert any("top_50_stocks_2024.pdf" in t for t in docs.seen)
+
+
+async def test_orchestrator_cannot_chart_in_the_write_up_when_a_drawer_draws(monkeypatch):
+    """Bug 2: the write-up kept chart_data, so it drew chart #1 and the chart agent drew chart #2."""
+    _board(monkeypatch, Board())
+    model = per_agent(orchestrator=[AIMessage("Final.")], chart=DRAW)
+    assistant = _assistant(monkeypatch, model, sql=Fake("sql", "Cap.", log=[], table=TABLE),
+                           research=Fake("research", "Notes.", log=[]))
+    await _stream(assistant, _ask("chart AAPL"))
+
+    offered = {t["function"]["name"] for prompt, tools in zip(model.prompts, model.tools)
+               if "You are smallie" in prompt[0].content for t in tools}
+    assert offered.isdisjoint({"chart_table", "chart_data"})

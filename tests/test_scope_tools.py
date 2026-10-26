@@ -81,3 +81,53 @@ def test_memories_section_keeps_message_language():
 
     text = MEMORIES_SECTION.lower()
     assert "language" in text and "latest message" in text
+
+
+class _Recording(type(scripted())):
+    """A scripted model that keeps the `tool_choice` of each model call (None = not given)."""
+
+    choices: list = []
+
+    def bind_tools(self, tools, **kwargs):
+        self.choices.append(kwargs.get("tool_choice"))
+        return super().bind_tools(tools, **kwargs)
+
+
+def _forced(choice) -> bool:
+    return choice not in (None, "auto", "none")
+
+
+async def _choices(monkeypatch, *, agent, sources, tools):
+    """The tool choice of each model call: the model calls the first tool, then answers."""
+    model = _Recording(replies=iter([AIMessage("", tool_calls=[{"name": tools[0].name, "args": {}, "id": "c1"}]),
+                                     AIMessage("done")]), prompts=[], tools=[], choices=[])
+    monkeypatch.setattr(factory, "get_chat_model", lambda *a, **k: model)
+    built = factory.build_agent(name="t", system_prompt="x", tools=tools)
+    await built.ainvoke({"messages": [HumanMessage("hi")]}, context=AgentContext(user_id="u", agent=agent, sources=sources))
+    return model.choices
+
+
+async def test_team_speaker_first_call_must_use_a_source_tool(monkeypatch):
+    """Goal 2 + Task 6 fix plan: in a team request with a source tool in scope the first model call requires a
+    tool, so a speaker cannot answer without looking in its source; later calls in the turn are free."""
+    from app.core.memory import TEAM_MODE
+
+    tools = [_tagged("db", "market_db"), _tagged("plain", None)]
+    first, second = await _choices(monkeypatch, agent=TEAM_MODE, sources=("market_db",), tools=tools)
+    assert _forced(first) and not _forced(second)
+
+
+async def test_first_call_is_not_forced_in_normal_mode(monkeypatch):
+    tools = [_tagged("db", "market_db"), _tagged("plain", None)]
+    choices = await _choices(monkeypatch, agent="", sources=("market_db",), tools=tools)
+    assert not any(_forced(c) for c in choices)
+
+
+async def test_first_call_is_not_forced_without_a_source_tool_in_scope(monkeypatch):
+    """The drawer has no data source (sources=NO_SOURCES): it must stay free to draw nothing."""
+    from app.core.memory import TEAM_MODE
+    from app.orchestration.team import NO_SOURCES
+
+    tools = [_tagged("plain", None), _tagged("db", "market_db")]
+    choices = await _choices(monkeypatch, agent=TEAM_MODE, sources=NO_SOURCES, tools=tools)
+    assert not any(_forced(c) for c in choices)

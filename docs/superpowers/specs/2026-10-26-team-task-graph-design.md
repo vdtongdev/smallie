@@ -92,7 +92,7 @@ A follow-up is a new task the results call for, e.g. "docs found a revenue claim
 
 ### When there is no review call
 
-No review call when the wave's tasks took no input and meet nothing yet (wave 1 of the example), or when at most one task is live (as now). Exception: when that wave is the last one (no pending task) and the plan has fewer tasks than `TEAM_MAX_TASKS`, the review still runs, so the plan can grow (scenario E starts with one agent), except when the other tasks withdrew: then the one live answer stands without a review call, as now (those agents already searched their sources and found nothing).
+No review call when the wave's tasks took no input and meet nothing yet (wave 1 of the example), or when at most one task is live (as now). Exception: when that wave is the last one (no pending task), the review still runs with one live task, as the round-table board did, so the plan can grow (scenario E starts with one agent; at `TEAM_MAX_TASKS` its follow-ups are dropped and named), except when the other tasks withdrew: then the one live answer stands without a review call, as now (those agents already searched their sources and found nothing).
 
 ## 3. Checks
 

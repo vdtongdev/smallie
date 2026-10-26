@@ -69,13 +69,11 @@ class Board(BaseModel):
 
 
 def participants(available: list[tuple[AgentSpec, RouteInfo]], message: str) -> list[AgentSpec]:
-    """Who takes part: agents the message points to (one that another mentioned agent `overrides`
-    is dropped unless its own `hints` match), plus the `joins == "with_others"` agents when any
-    other takes part. Registry order."""
+    """Who takes part: agents the message points to, their available `fed_by` routes, plus the
+    `joins == "with_others"` agents when any other takes part. Registry order."""
     mentioned = [spec for spec, info in available if spec.is_mentioned(message, info)]
-    chosen = [spec for spec in mentioned
-              if (spec.hints and spec.hints.search(message))
-              or not any(spec.route in other.overrides for other in mentioned)]
+    fed = {route for spec in mentioned for route in spec.fed_by}
+    chosen = [spec for spec, _ in available if spec in mentioned or spec.route in fed]
     return [spec for spec, _ in available if spec in chosen
             or (chosen and spec.joins == "with_others" and any(c.route != spec.route for c in chosen))]
 
@@ -179,7 +177,9 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
     async def pick(state: TeamState, runtime: Runtime[AgentContext], config: RunnableConfig) -> Command:
         messages = state["messages"]
         available = await available_agents(runtime.context.user_id, specs)
-        chosen = [spec.route for spec in participants(available, messages[-1].text)]
+        everyone = participants(available, messages[-1].text)
+        chosen = [spec.route for spec in everyone if not spec.draws]
+        drawers = [spec.route for spec in everyone if spec.draws]
         if not chosen:
             command = await ask_orchestrator(state, runtime)
             if command.goto not in by_route:
@@ -191,7 +191,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
             answer = AIMessage(spec.result(result), name=spec.message_names[0], additional_kwargs=collect(turn))
             return Command(goto=END, update={"messages": [answer]})
         note = ROUND_MESSAGE.format(language=reply_language(messages))
-        team = {"participants": chosen, "round": 1, "rounds": [], "boards": [], "forced": False, "artifacts": {},
+        team = {"participants": chosen, "drawers": drawers, "round": 1, "rounds": [], "boards": [], "forced": False, "artifacts": {},
                 "question": ""}  # a fresh debate: nothing of an earlier message's carries over
         return Command(update={"team": team, "speeches": [RESET]},
                        goto=sends(chosen, 1, "answer", {r: note for r in chosen}, messages))
@@ -263,9 +263,12 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         reply = interrupt({"question": state["team"]["question"]})
         team, messages = state["team"], [*state["messages"], HumanMessage(reply)]
         available = await available_agents(runtime.context.user_id, specs)
-        new = [s.route for s in participants(available, reply) if s.route not in team["participants"]]
+        named = participants(available, reply)
+        new = [s.route for s in named if not s.draws and s.route not in team["participants"]]
+        drawers = [*team["drawers"], *(s.route for s in named if s.draws and s.route not in team["drawers"])]
+        team = {**team, "drawers": drawers}
         if not new:
-            return Command(update={"messages": messages[-1:]}, goto="judge")
+            return Command(update={"messages": messages[-1:], "team": team}, goto="judge")
         # The reply names an agent that is not taking part yet: it answers one round before the board runs again.
         rnd = team["round"] + 1
         note = ROUND_MESSAGE.format(language=reply_language(messages))
@@ -277,7 +280,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         team, messages = state["team"], state["messages"]
         answers = _latest(state["speeches"], team["participants"])
         board = Board(**team["boards"][-1])
-        transcript = {key: team[key] for key in ("participants", "rounds", "boards", "forced")}
+        transcript = {key: team[key] for key in ("participants", "drawers", "rounds", "boards", "forced")}
         only = by_route[team["participants"][0]]
         if len(answers) == 1 and len(team["participants"]) == 1 and not board.conflicts and not team["forced"] \
                 and only.answers_directly:

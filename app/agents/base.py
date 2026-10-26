@@ -119,6 +119,10 @@ class AgentSpec:
     sources: frozenset[str] = frozenset()
     # Team mode: "mentioned" = joins when the message points to it; "with_others" = also joins whenever another agent does.
     joins: Literal["mentioned", "with_others"] = "mentioned"
+    # Team mode: True = takes no part in rounds or boards; runs once after the write-up, without data sources.
+    draws: bool = False
+    # Team mode: routes brought into the turn whenever this entry takes part (the data it draws from).
+    fed_by: tuple[str, ...] = ()
 
     async def info(self, user_id: str) -> RouteInfo | None:
         return await self.route_info(user_id) if self.route_info else RouteInfo()

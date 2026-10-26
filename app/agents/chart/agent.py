@@ -46,4 +46,6 @@ SPEC = AgentSpec(
     overrides=("sql",),
     review=REVIEW,
     sources=frozenset({"market_db"}),
+    draws=True,
+    fed_by=("sql",),
 )

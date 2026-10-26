@@ -43,8 +43,13 @@ def _routes(message, **kw):
 def test_pick_mentioned_with_others_and_overrides():
     assert _routes(QUESTION) == ["sql", "research"]  # research joins whoever else takes part
     assert _routes(THREE) == ["docs", "sql", "research"]  # registry order
-    assert _routes("chart AAPL") == ["research", "chart"]  # chart overrides sql: only the winner joins
+    assert _routes("chart AAPL") == ["sql", "research", "chart"]  # chart draws from sql, so sql joins too
     assert _routes("what does handbook.pdf say", docs=False) == []  # an unavailable agent is not picked
+
+
+def test_chart_mention_brings_in_sql():
+    assert {"sql", "chart"} <= set(_routes("chart AAPL"))
+    assert {"sql", "chart"} <= set(_routes("plot a chart of prices"))
 
 
 def test_message_naming_sql_and_chart_agents_runs_both():
@@ -361,6 +366,27 @@ async def test_team_write_up_carries_participants_artifacts(monkeypatch):
     assert (await _thread(assistant))[-1].additional_kwargs["charts"] == [{"id": "chart-sql"}]
 
 
+async def test_drawer_does_not_speak_in_rounds(monkeypatch):
+    log = []
+    boards = []
+
+    async def fake(messages, answers, config):
+        boards.append([a["agent"] for a in answers])
+        return Board()
+
+    monkeypatch.setattr(team, "ask_board", fake)
+    model = per_agent(orchestrator=[AIMessage("Final.")])
+    chart = Fake("chart", "drawn", log=log)
+    assistant = _assistant(monkeypatch, model, sql=Fake("sql", "Cap.", log=log), research=Fake("research", "n", log=log),
+                           chart=chart)
+    chunks = await _stream(assistant, _ask("chart AAPL"))
+
+    assert [e["agents"] for e in _events(chunks, "round")] == [["sql", "research"]]
+    assert boards == [["sql", "research"]] and chart.calls == 0
+    transcript = (await _thread(assistant))[-1].additional_kwargs["team"]
+    assert transcript["drawers"] == ["chart"] and transcript["participants"] == ["sql", "research"]
+
+
 async def test_rate_limit_still_propagates(monkeypatch):
     import httpx
     import openai
@@ -405,35 +431,37 @@ async def test_needs_human_pauses_and_resume_continues(monkeypatch):
 
 
 async def _chart_asks(monkeypatch, reply, **kw):
-    """Only chart takes part; the board asks a question; the user's `reply` resumes the turn."""
+    """Chart (a drawer) and sql (its feed) take part; the board asks a question; the user's `reply` resumes the turn."""
     _research_does_not_join(monkeypatch)
     _board(monkeypatch, Board(question="Which data?"), Board())
     log = []
-    agents = {"chart": Fake("chart", "drawn", log=log), "sql": Fake("sql", "rows", log=log)}
-    assistant = _assistant(monkeypatch, per_agent(orchestrator=[AIMessage("Final.")]), **kw, **agents)
+    agents = {"chart": Fake("chart", "drawn", log=log), "sql": Fake("sql", "rows", log=log),
+              "docs": Fake("docs", "from file", log=log)}
+    assistant = _assistant(monkeypatch, per_agent(orchestrator=[AIMessage("Final.")]), **{**agents, **kw})
     await _stream(assistant, _ask("plot a chart of prices"))
     return assistant, agents, await _stream(assistant, Command(resume=reply))
 
 
 async def test_reply_to_question_naming_a_new_agent_brings_it_in(monkeypatch):
-    assistant, agents, second = await _chart_asks(monkeypatch, "use the stock database")
+    assistant, agents, second = await _chart_asks(monkeypatch, "check handbook.pdf")
 
-    assert [(e["round"], e["kind"], e["agents"]) for e in _events(second, "round")] == [(2, "answer", ["sql"])]
-    assert agents["sql"].calls == 1 and agents["chart"].calls == 1
-    answer = (await _thread(assistant))[-1]
-    assert answer.additional_kwargs["team"]["participants"] == ["chart", "sql"]
+    assert [(e["round"], e["kind"], e["agents"]) for e in _events(second, "round")] == [(2, "answer", ["docs"])]
+    assert agents["docs"].calls == 1 and agents["sql"].calls == 1
+    team_record = (await _thread(assistant))[-1].additional_kwargs["team"]
+    assert team_record["participants"] == ["sql", "docs"] and team_record["drawers"] == ["chart"]
 
 
 async def test_reply_without_new_agent_goes_straight_to_judge(monkeypatch):
     assistant, agents, second = await _chart_asks(monkeypatch, "2024 please")
 
-    assert not _events(second, "round") and agents["sql"].calls == 0 and agents["chart"].calls == 1
+    assert not _events(second, "round") and agents["sql"].calls == 1 and agents["chart"].calls == 0
 
 
 async def test_reply_naming_an_agent_already_taking_part_does_not_run_it_again(monkeypatch):
     assistant, agents, second = await _chart_asks(monkeypatch, "make it a bar chart")
 
-    assert not _events(second, "round") and agents["chart"].calls == 1
+    assert not _events(second, "round") and agents["chart"].calls == 0
+    assert (await _thread(assistant))[-1].additional_kwargs["team"]["drawers"] == ["chart"]
 
 
 async def test_reply_never_brings_in_an_unavailable_agent(monkeypatch):

@@ -193,7 +193,7 @@ Reload: `additional_kwargs["team"]` holds the workspace instead of `rounds`/`boa
 | Review has a question for the user | `pause`/`interrupt` as now; resume goes back to that review; a reply naming a new agent adds a task (`origin: reply`) with no dependencies, runs one wave, then reviews again |
 | Plan too large | at most `TEAM_MAX_TASKS` (default 6), follow-ups included; waves are bounded by tasks |
 
-Honest limits: a challenge exists only if the receiver wrote the mismatch down; one review call returning checks and follow-ups is a large structured output, not yet measured on the free judge models (if it proves unreliable, follow-ups move to their own call, +1 per wave); waves make fast tasks wait for slow ones; with 2 rounds per meeting point a large plan can hit the 30-call backstop before finishing, and the write-up then says what is missing.
+Honest limits: a challenge exists only if the receiver wrote the mismatch down; one review call returning checks and follow-ups is a large structured output, not yet measured on the judge model (`deepseek/deepseek-v4.1-flash`); if the benchmark shows it dropping follow-ups or missing planted errors, follow-ups move to their own call (+1 per wave); waves make fast tasks wait for slow ones; with 2 rounds per meeting point a large plan can hit the 30-call backstop before finishing, and the write-up then says what is missing.
 
 ## 8. Tests and benchmark
 
@@ -221,6 +221,7 @@ Measured per request:
 - **choice**: precision and recall of the agents that took part (plan plus follow-ups) against `required ∪ optional`; a missing required agent is an error, an added optional one is not;
 - **contribution (every run, cheap)**: each agent stayed live (not withdrawn) and the final answer uses its evidence (traced through the workspace's evidence and the answer's citations);
 - **contribution by ablation (opt-in `--ablate`)**: the request is rerun without each participating agent in turn and a judge model compares the answers; the real test of whether an agent improves the answer, but it multiplies the calls by about the number of agents, so it runs only when asked;
+- **checks with the combined review**: requests with a planted error (a wrong figure in an uploaded file, as in the earlier board measurement) and with a needed follow-up, run on the configured judge (`deepseek/deepseek-v4.1-flash`, single review call); measured: the planted error is flagged (challenge or conflict) and the follow-up appears. No comparison with other judge models;
 - calls and latency, as `bench_chat` measures now.
 
 Docs in the same branch: `ARCHITECTURE.md` section 11 and the **Team mode** section of `CLAUDE.md`.

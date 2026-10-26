@@ -316,7 +316,8 @@ async def test_lone_participant_reply_reaches_the_answer(monkeypatch):
 
     test_team._research_does_not_join(monkeypatch)
     test_team._board(monkeypatch, test_team.Board())
-    assistant = _assistant(monkeypatch, per_agent(sql=[AIMessage("Cap is 3T.")]))
+    # A speaker answers from its source: the fake calls its source tool (Task 6).
+    assistant = _assistant(monkeypatch, per_agent(), sql=test_team.Fake("sql", "Cap is 3T.", log=[]))
     stream = assistant.astream(test_team._ask(test_team.SQL_QUESTION), test_team.CONFIG, context=test_team.TEAM_CONTEXT,
                                stream_mode=["messages", "updates", "custom"], subgraphs=True)
     events = [e async for e in _events_from(stream)]

@@ -123,8 +123,10 @@ async def test_board_uses_the_judge_model(monkeypatch, judge, orchestrator, expe
 class Fake(Runnable):
     """An agent that logs when it runs and answers with scripted texts (the last one repeats)."""
 
-    def __init__(self, name, *texts, log, delay=0.0, tools=False, chart=None, table=None):
-        self.name, self.texts, self.log, self.delay, self.tools, self.chart = name, list(texts), log, delay, tools, chart
+    def __init__(self, name, *texts, log, delay=0.0, tools=None, chart=None, table=None):
+        self.name, self.texts, self.log, self.delay, self.chart = name, list(texts), log, delay, chart
+        # A speaker answers from its source, so it calls its source tool (Task 6); the drawer has none.
+        self.tools = name != "chart" if tools is None else tools
         self.table = table
         self.calls = 0
 
@@ -140,8 +142,9 @@ class Fake(Runnable):
         self.calls += 1
         out = [AIMessage(text)]
         if self.tools:
-            out = [AIMessage("", tool_calls=[{"name": "run_sql", "args": {"query": "SELECT 1"}, "id": "k1"}]),
-                   ToolMessage("1 row", tool_call_id="k1", name="run_sql"), *out]
+            tool_name = "search_documents" if self.name == "docs" else "run_sql"
+            out = [AIMessage("", tool_calls=[{"name": tool_name, "args": {"query": "SELECT 1"}, "id": "k1"}]),
+                   ToolMessage("1 row", tool_call_id="k1", name=tool_name), *out]
         self.log.append({"event": "end", "agent": self.name, "at": loop.time()})
         if self.table:
             out = [ToolMessage("1 row", tool_call_id="k3", name="run_sql", artifact={"tables": [self.table]}), *out]
@@ -1068,7 +1071,7 @@ async def test_speaker_that_never_used_its_source_withdraws(monkeypatch):
     seen = _boards_log(monkeypatch, Board(agreements=["same"]))
     model = per_agent(orchestrator=[AIMessage("Final.")])
     no_data = "DOCS-LEAK I do not have access to real-time market data, so I cannot give you the current figures for this."
-    assistant = _assistant(monkeypatch, model, documents=("handbook.pdf",), docs=Fake("docs", no_data, log=log),
+    assistant = _assistant(monkeypatch, model, documents=("handbook.pdf",), docs=Fake("docs", no_data, log=log, tools=False),
                            sql=Fake("sql", "Cap is 3T.", log=log, tools=True),
                            research=Fake("research", "Notes: 3T.", log=log, tools=True))
     chunks = await _stream(assistant, _ask(QUESTION))

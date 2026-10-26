@@ -1059,3 +1059,23 @@ async def test_every_agent_withdraws_and_the_orchestrator_hands_off(monkeypatch)
     messages = await _thread(assistant)
     assert [type(m) for m in messages] == [HumanMessage, AIMessage]
     assert messages[-1].text == "Apple's market cap is $3T."
+
+
+async def test_speaker_that_never_used_its_source_withdraws(monkeypatch):
+    """Goal 2 + Task 6: a speaker that made no call to a source tool gave no answer from its source, so it withdraws,
+    even when its text does not look like "nothing found"; one that ran its tool and answered stays."""
+    log = []
+    seen = _boards_log(monkeypatch, Board(agreements=["same"]))
+    model = per_agent(orchestrator=[AIMessage("Final.")])
+    no_data = "DOCS-LEAK I do not have access to real-time market data, so I cannot give you the current figures for this."
+    assistant = _assistant(monkeypatch, model, documents=("handbook.pdf",), docs=Fake("docs", no_data, log=log),
+                           sql=Fake("sql", "Cap is 3T.", log=log, tools=True),
+                           research=Fake("research", "Notes: 3T.", log=log, tools=True))
+    chunks = await _stream(assistant, _ask(QUESTION))
+
+    final = (await _thread(assistant))[-1]
+    spoke = {e["agent"]: e["withdrew"] for e in _events(chunks, "spoke")}
+    assert spoke == {"docs": True, "sql": False, "research": False}
+    assert final.additional_kwargs["team"]["withdrawn"] == ["docs"]
+    assert seen == [["sql", "research"]]
+    assert all("DOCS-LEAK" not in w for w in _writeups(model))

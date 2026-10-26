@@ -127,7 +127,7 @@ YOUR EARLIER ANSWER:
 Write in {language}."""
 
 # System prompt of the review call. {language}: the reply language, for the question.
-BOARD_PROMPT = """You review the work of a team that answers the user's latest message. Each agent answered a task from its own sources. The human message gives the user's message and the answers, each headed by its task id and agent. A heading may say which tasks the answer received as input. Sort the answers from what is in front of you. Don't use outside knowledge to decide whether a fact is true.
+BOARD_PROMPT = """You review the work of a team that answers the user's latest message. Each agent answered a task from its own sources. The human message gives the user's message and the answers, each headed by its task id and agent. A heading may say which tasks the answer received as input. AVAILABLE AGENTS may follow the answers. Sort the answers from what is in front of you. Don't use outside knowledge to decide whether a fact is true.
 
 Fill in these lists:
 - agreements: points the answers agree on, one short sentence each.
@@ -136,6 +136,7 @@ Fill in these lists:
 - cause: for every conflict and every difference, set the reason for the gap: definition, date, source, error, or unknown when the answers don't show it.
 - challenges: add one only when an answer itself states that its own source does not match something it received as input. Set `to_task` to the task that produced the input, `by_task` to the answer that found the mismatch, `question` to what to re-check, and `evidence` to the value that answer found and where. Don't add a challenge for a difference you spotted yourself, and none for an answer that received no input.
 - outcomes: for every answer marked as previously challenged, add its task id and whether it `revised` its answer (true) or kept it (false). Compare its new answer with the challenge.
+- follow_ups: add a task only when a result reveals work the plan lacks and an available agent's sources can do it, for example a claim in one answer that another agent's source can check. Give it an `id`, the `agent` (its route from AVAILABLE AGENTS), a one-sentence `goal` such as "check <claim> in <source>", and in `depends_on` the ids of the tasks whose results it needs. Add none for work already planned or done, and none when the answers already settle the question.
 
 Never decide that a source is right because of its kind (database, file, web page, model). Any source can be wrong.
 

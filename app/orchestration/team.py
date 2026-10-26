@@ -12,6 +12,7 @@ on its `additional_kwargs["team"]`. Progress goes out as `custom` stream events:
 
 import asyncio
 import dataclasses
+import inspect
 import logging
 import uuid
 from collections.abc import Mapping, Sequence
@@ -35,7 +36,7 @@ from app.core.llm import get_chat_model
 from app.core.memory import TEAM_MODE, AgentContext
 from app.core.prompts import reply_language
 from app.orchestration.prompts import BOARD_PROMPT, CHALLENGE_MESSAGE, CONFLICT_MESSAGE, DRAW_MESSAGE, DRAWING_NOTE, NOTHING_FOUND_MESSAGE, PLAN_PROMPT, ROUND_MESSAGE, TASK_MESSAGE, TEAM_MESSAGE
-from app.orchestration.team_plan import Plan, Task, dead_inputs, fallback_tasks, ready, validate_plan
+from app.orchestration.team_plan import Plan, Task, add_follow_ups, dead_inputs, fallback_tasks, ready, validate_plan
 from app.orchestration.router import ORCHESTRATOR, AssistantState, available_agents
 
 log = logging.getLogger(__name__)
@@ -155,8 +156,8 @@ def clean(board: Board, speakers: Sequence[str], tasks: Sequence[str] | None = N
 
 
 async def ask_board(messages: list[AnyMessage], answers: list[dict], config: RunnableConfig, *,
-                    inputs: Mapping[str, list[str]] | None = None) -> Review:
-    """One model call; `config` carries the usage counter's callbacks. `inputs`: task id -> the task ids it received."""
+                    inputs: Mapping[str, list[str]] | None = None, agents: Sequence[AgentSpec] | None = None) -> Review:
+    """One model call; `config` carries the usage counter's callbacks. `inputs`: task id -> the task ids it received; `agents`: the available agents, which follow-ups may use."""
     settings = get_settings()
     question = next((m.text for m in reversed(messages) if isinstance(m, HumanMessage)), "")
     # Texts go into the message, not a template: answers may contain braces.
@@ -174,6 +175,9 @@ async def ask_board(messages: list[AnyMessage], answers: list[dict], config: Run
     board = get_chat_model(judge or settings.openrouter_orchestrator_model or None,
                            **({"exact_model": True} if judge else {})).with_structured_output(
         Review, method="function_calling")
+    if agents:  # texts go into the message, not a template
+        human += "\n\nAVAILABLE AGENTS:\n" + "\n".join(
+            f"- {a.route}: {a.description} Reads: {', '.join(sorted(a.sources)) or 'nothing'}." for a in agents)
     system = BOARD_PROMPT.format(language=reply_language(messages))
     return await board.ainvoke([SystemMessage(system), HumanMessage(human)], config=config)
 
@@ -460,8 +464,11 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         if compare:
             task_of = {t["id"]: t for t in tasks}
             inputs = {a["task"]: got for a in answers if (got := [d for d in task_of[a["task"]]["depends_on"] if d in results])}
+            available = await available_agents(runtime.context.user_id, specs)
+            wanted = {"inputs": inputs or None, "agents": [spec for spec, _ in available]}
+            accepted = inspect.signature(ask_board).parameters  # a stand-in board may take fewer arguments
             try:
-                board = await ask_board(messages, answers, config, **({"inputs": inputs} if inputs else {}))
+                board = await ask_board(messages, answers, config, **{k: v for k, v in wanted.items() if v and k in accepted})
                 if not isinstance(board, Review):
                     board = Review(**board.model_dump())
                 board = clean(board, live, [a["task"] for a in answers])
@@ -519,7 +526,21 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
                 sends.append(job(a["task"], a["agent"], done_rounds + 2, "conflict", note, messages))
                 ids.append(a["task"])
             new_rounds[meet] = done_rounds + 1
-        update = {"synthesis": {**synthesis, "forced": forced, "open_points": open_points}, "challenged": still}
+        # Follow-ups: new pending tasks, once per agent and goal; a chart task waits for the answer, nothing waits for it.
+        added, not_done = [], list(synthesis["not_done"])
+        if compare and not broken and not asks and board.follow_ups:
+            charts = {t["id"] for t in tasks if by_route[t["agent"]].draws}
+            seen = {(t["agent"], " ".join(t["goal"].casefold().split())) for t in tasks}
+            fresh = []
+            for f in board.follow_ups:
+                mark = (f.agent, " ".join(f.goal.casefold().split()))
+                if mark not in seen:
+                    seen.add(mark)
+                    fresh.append(f.model_copy(update={"depends_on": [d for d in f.depends_on if d not in charts]}))
+            _, added, dropped = add_follow_ups(tasks, fresh, [s.route for s in specs], settings.team_max_tasks)
+            added = [{**t, "depends_on": [ANSWER]} if by_route[t["agent"]].draws else t for t in added]
+            not_done += dropped
+        update = {"synthesis": {**synthesis, "forced": forced, "open_points": open_points, "not_done": not_done}, "challenged": still}
         if status:
             update["status"] = status
         if compare:
@@ -530,12 +551,19 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
             emit({"type": "needs_human", "question": board.question})
             return Command(update={"workspace": {**update, "question": board.question},
                                    "messages": [AIMessage(board.question, name=ORCHESTRATOR)]}, goto="pause")
+        if added:  # the new tasks join with the statuses of this review folded in
+            emit({"type": "plan_updated", "tasks": added})
+            final = {**update.get("status", {}), **{i: "running" for i in ids}}
+            update["tasks"] = [{**t, "status": final.get(t["id"], t["status"])} for t in tasks] + added
+            update.pop("status", None)
         if not sends:
             return Command(update={"workspace": update}, goto="dispatch")
         entry = {"type": "wave", "wave": wave, "kind": kind, "tasks": ids, "agents": [by_id[i]["agent"] for i in ids]}
         emit(entry)
         update["history"] = [*update.get("history", []), entry]
-        update.update({"wave": wave, "rounds_at": {**rounds_at, **new_rounds}, "status": {**status, **{i: "running" for i in ids}}})
+        update.update({"wave": wave, "rounds_at": {**rounds_at, **new_rounds}})
+        if not added:
+            update["status"] = {**status, **{i: "running" for i in ids}}
         return Command(update={"workspace": update}, goto=sends)
 
     async def pause(state: TeamState, runtime: Runtime[AgentContext]) -> Command:
@@ -565,7 +593,8 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         answers = _answers(workspace, workspace["tasks"], drawers)
         last = next((e for e in reversed(workspace["history"]) if e["type"] == "review"), None)
         board = Review(**last) if last else Review()
-        forced, open_points = workspace["synthesis"]["forced"], workspace["synthesis"]["open_points"]
+        forced = workspace["synthesis"]["forced"]
+        open_points = workspace["synthesis"]["open_points"] + [f"not done: {g}" for g in workspace["synthesis"]["not_done"]]
         only = by_route[answers[0]["agent"]] if answers else None
         if not answers:  # every agent withdrew: the orchestrator answers as in normal mode and says so
             emit({"type": "synthesize"})

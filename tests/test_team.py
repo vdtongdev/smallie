@@ -195,7 +195,7 @@ def _board(monkeypatch, *boards, then=None):
     """Scripted board: the boards in order, then `then` forever."""
     queue = itertools.chain(boards, itertools.repeat(then) if then else ())
 
-    async def fake(messages, answers, config, inputs=None):
+    async def fake(messages, answers, config, inputs=None, agents=None):
         return next(queue)
 
     monkeypatch.setattr(team, "ask_board", fake)
@@ -1628,3 +1628,91 @@ def test_review_prompt_and_challenge_message_format():
     assert "Vietnamese" in prompts.BOARD_PROMPT.format(language="Vietnamese")
     text = prompts.CHALLENGE_MESSAGE.format(question="Q", evidence="E", own="O", language="Vietnamese")
     assert "{" not in text and "Vietnamese" in text
+
+
+# --- follow-ups ---
+
+def _follow(goal="check the claim", agent="sql", depends_on=("t1",)):
+    return Review(follow_ups=[Task(id="x", agent=agent, goal=goal, depends_on=list(depends_on))])
+
+
+async def test_follow_up_runs_with_its_inputs(monkeypatch):
+    log = []
+    _, assistant, agents = _docs_sql(monkeypatch, Plan(tasks=[Task(id="t1", agent="docs", goal="extract")]), log, board=False)
+    _board(monkeypatch, _follow(), then=Board())
+    chunks = await _stream(assistant, _ask(THREE))
+
+    assert [e["wave"] for e in _events(chunks, "wave")] == [1, 2]
+    assert [t["id"] for t in _events(chunks, "plan_updated")[0]["tasks"]] == ["t2"]
+    note = _starts(log, "sql")[0]["last"].text
+    assert "DOCS TEXT" in note and "check the claim" in note
+    final = (await _thread(assistant))[-1].additional_kwargs["team"]
+    assert [(t["id"], t["origin"]) for t in final["tasks"]] == [("t1", "plan"), ("t2", "follow_up")]
+
+
+async def test_follow_ups_past_the_cap_are_named(monkeypatch):
+    monkeypatch.setattr(get_settings(), "team_max_tasks", 2)
+    log = []
+    plan = Plan(tasks=[Task(id="t1", agent="docs", goal="a"), Task(id="t2", agent="research", goal="b")])
+    model, assistant, agents = _docs_sql(monkeypatch, plan, log, board=False)
+    _board(monkeypatch, _follow(), then=Board())
+    chunks = await _stream(assistant, _ask(THREE))
+
+    assert agents["sql"].calls == 0 and not _events(chunks, "plan_updated")
+    assert "check the claim" in _writeups(model)[0]
+    assert (await _thread(assistant))[-1].additional_kwargs["team"]["synthesis"]["not_done"] == ["check the claim"]
+
+
+async def test_repeated_follow_up_is_dropped(monkeypatch):
+    log = []
+    plan = Plan(tasks=[Task(id="t1", agent="sql", goal="Extract Revenue"), Task(id="t2", agent="research", goal="b")])
+    _, assistant, agents = _docs_sql(monkeypatch, plan, log, board=False)
+    _board(monkeypatch, then=_follow(goal="  extract   revenue ", depends_on=()))
+    chunks = await _stream(assistant, _ask(THREE))
+
+    assert agents["sql"].calls == 1 and not _events(chunks, "plan_updated")
+
+
+async def test_last_wave_with_one_task_is_reviewed_and_may_grow_the_plan_below_the_cap(monkeypatch):
+    for cap, sql_runs, plan_updates in ((6, 1, 1), (1, 0, 0)):
+        monkeypatch.setattr(get_settings(), "team_max_tasks", cap)
+        log, reviewed = [], []
+
+        async def fake(messages, answers, config, inputs=None, agents=None):
+            reviewed.append(answers)
+            return _follow(goal="more", depends_on=()) if len(reviewed) == 1 else Review()
+
+        _, assistant, agents = _docs_sql(monkeypatch, Plan(tasks=[Task(id="t1", agent="docs", goal="a")]), log, board=False)
+        monkeypatch.setattr(team, "ask_board", fake)
+        chunks = await _stream(assistant, _ask(THREE))
+
+        assert len(reviewed[0]) == 1  # a lone task is reviewed, at the cap too
+        assert agents["sql"].calls == sql_runs and len(_events(chunks, "plan_updated")) == plan_updates
+
+
+async def test_failed_review_adds_no_follow_ups(monkeypatch):
+    async def broken(messages, answers, config, inputs=None, agents=None):
+        raise RuntimeError("boom")
+
+    log = []
+    model, assistant, _ = _docs_sql(monkeypatch, Plan(tasks=[Task(id="t1", agent="docs", goal="a")]), log, board=False)
+    monkeypatch.setattr(team, "ask_board", broken)
+    chunks = await _stream(assistant, _ask(THREE))
+
+    assert not _events(chunks, "plan_updated") and (await _thread(assistant))[-1].text == "Final."
+
+
+async def test_chart_follow_up_waits_for_the_answer(monkeypatch):
+    log = []
+    _plan(monkeypatch, Plan(tasks=[Task(id="t1", agent="sql", goal="get caps"), Task(id="t2", agent="research", goal="b")]))
+    follow = Review(follow_ups=[Task(id="x", agent="chart", goal="chart the caps", depends_on=["t1"])])
+    _board(monkeypatch, follow, then=Board())
+    model = per_agent(orchestrator=[AIMessage("Final.")])
+    assistant = _assistant(monkeypatch, model, sql=Fake("sql", "Cap.", log=log, table={**TABLE, "id": "tbl1"}),
+                           research=Fake("research", "Notes.", log=log), chart=Fake("chart", "drawn", log=log, chart="chart-1"))
+    chunks = await _stream(assistant, _ask())
+
+    (event,) = _events(chunks, "plan_updated")
+    assert [(t["agent"], t["depends_on"]) for t in event["tasks"]] == [("chart", ["answer"])]
+    assert len(_starts(log, "chart")) == 1 and [e["wave"] for e in _events(chunks, "wave")] == [1]
+    assert (await _thread(assistant))[-1].additional_kwargs["charts"] == [{"id": "chart-1"}]

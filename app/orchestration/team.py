@@ -28,6 +28,7 @@ from langgraph.types import Command, Send, interrupt
 from pydantic import BaseModel
 
 from app.agents.artifacts import KINDS, collect
+from app.agents.remote import CallBudgetExceeded
 from app.agents.base import MEMORY_TOOL_NAMES, TOOL_RESULT_PREVIEW, AgentSpec, RouteInfo, ToolRecorder, turn_messages
 from app.agents.registry import AGENTS
 from app.core.config import get_settings
@@ -366,6 +367,8 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
     async def dispatch(state: TeamState, runtime: Runtime[AgentContext]) -> Command:
         workspace, messages = state["workspace"], state["messages"]
         tasks = [dict(t) for t in workspace["tasks"]]
+        if any(r.get("budget") for r in workspace["results"].values()):  # the model-call budget is spent
+            return Command(goto="synthesize")
         while True:  # a skipped task settles, which can leave its dependents without input too
             todo = ready(tasks)
             dead = [t for t in todo if dead_inputs(t, tasks)[1]]
@@ -403,8 +406,8 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         messages = [*task["messages"], HumanMessage(task["note"], name=TEAM)]
         entry = {"agent": route, "round": task["round"], "tools": [], "artifacts": {}}
 
-        def done(text: str, status: str) -> dict:
-            result = {**entry, "text": text}
+        def done(text: str, status: str, budget: bool = False) -> dict:
+            result = {**entry, "text": text, **({"budget": True} if budget else {})}
             record = {"type": "result", "task": tid, "kind": task["kind"], "status": status,
                       **{k: result[k] for k in ("agent", "round", "text", "tools")}}
             return {"workspace": {"results": {tid: result}, "status": {tid: status}, "history": [record]}}
@@ -415,6 +418,8 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
                                                  context=context)
         except (openai.RateLimitError, openai.AuthenticationError):
             raise
+        except CallBudgetExceeded as exc:  # no further agent is called; the write-up names what did not run
+            return done(f"failed: {type(exc).__name__}", "failed", budget=True)
         except Exception as exc:  # noqa: BLE001 - the user still gets an answer from the others
             log.exception("Team step by %s failed", route)
             return done(f"failed: {type(exc).__name__}", "failed")
@@ -591,7 +596,10 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         last = next((e for e in reversed(workspace["history"]) if e["type"] == "review"), None)
         board = Review(**last) if last else Review()
         forced = workspace["synthesis"]["forced"]
-        open_points = workspace["synthesis"]["open_points"] + [f"not done: {g}" for g in workspace["synthesis"]["not_done"]]
+        open_points = workspace["synthesis"]["open_points"]
+        # Tasks still pending (the budget stopped them); a chart task waits for the answer and is not unfinished work.
+        not_done = list(dict.fromkeys([*workspace["synthesis"]["not_done"], *(
+            t["goal"] or t["agent"] for t in workspace["tasks"] if t["status"] == "pending" and ANSWER not in t["depends_on"])]))
         only = by_route[answers[0]["agent"]] if answers else None
         if not answers:  # every agent withdrew: the orchestrator answers as in normal mode and says so
             emit({"type": "synthesize"})
@@ -601,15 +609,16 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
             command = await ask_orchestrator(state, runtime, note, bool(drawers))
             answer = await handed_off(command, messages, runtime, config) if command.goto in by_route \
                 else command.update["messages"][0]
-        elif len(answers) == 1 and not board.conflicts and not forced and not open_points and only.answers_directly:
+        elif len(answers) == 1 and not board.conflicts and not forced and not open_points and not not_done and only.answers_directly:
             answer = AIMessage(answers[0]["text"], name=only.message_names[0])
         else:
             emit({"type": "synthesize"})  # only a write-up announces itself
             note = TEAM_MESSAGE.format(
-                answers="\n\n".join(f"{a['agent']}:\n{a['text']}" for a in answers),
-                differences=_bullets([f"{', '.join(d.routes)}: {d.explanation} ({'; '.join(f'{x.route}: {x.value}, {x.source}, {x.as_of}' for x in d.sides)})"
+                answers="\n\n".join(f"{a['task']} ({a['agent']}): {a['text']}" for a in answers),
+                differences=_bullets([f"{', '.join(d.routes)}: {d.explanation}, cause: {d.cause} ({'; '.join(f'{x.route}: {x.value}, {x.source}, {x.as_of}' for x in d.sides)})"
                                    for d in board.differences]),
-                conflicts=_bullets([f"{c.claim} ({', '.join(c.routes)}): {c.issue}" for c in board.conflicts] + open_points),
+                conflicts=_bullets([f"{c.claim} ({', '.join(c.routes)}): {c.issue}, cause: {c.cause}" for c in board.conflicts]),
+                open_points=_bullets(open_points), not_done=_bullets(not_done),
                 language=reply_language(messages), drawing=_drawing(drawers))
             command = await ask_orchestrator(state, runtime, note, bool(drawers))
             did_handoff = command.goto in by_route  # it handed off: the answers stand

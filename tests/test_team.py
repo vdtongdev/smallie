@@ -677,7 +677,7 @@ def test_prompts_format():
     prompts.BOARD_PROMPT.format(language="English")
     prompts.ROUND_MESSAGE.format(language="English", drawing="")
     prompts.CONFLICT_MESSAGE.format(conflicts="", others="", own="", language="English")
-    prompts.TEAM_MESSAGE.format(answers="", differences="none", conflicts="none", language="English", drawing="")
+    prompts.TEAM_MESSAGE.format(answers="", differences="none", conflicts="none", open_points="none", not_done="none", language="English", drawing="")
 
 
 def test_round_message_formats_with_language():
@@ -1716,3 +1716,57 @@ async def test_chart_follow_up_waits_for_the_answer(monkeypatch):
     assert [(t["agent"], t["depends_on"]) for t in event["tasks"]] == [("chart", ["answer"])]
     assert len(_starts(log, "chart")) == 1 and [e["wave"] for e in _events(chunks, "wave")] == [1]
     assert (await _thread(assistant))[-1].additional_kwargs["charts"] == [{"id": "chart-1"}]
+
+
+# --- write-up rules and budget stop ---
+
+class _OverBudget(Runnable):
+    def invoke(self, input, config=None, **kwargs):
+        raise NotImplementedError
+
+    async def ainvoke(self, input, config=None, **kwargs):
+        from app.agents.remote import CallBudgetExceeded
+        raise CallBudgetExceeded("spent")
+
+
+async def test_write_up_names_causes_open_points_and_not_done(monkeypatch):
+    log = []
+    plan = Plan(tasks=[Task(id="t1", agent="sql", goal="get caps"), Task(id="t2", agent="research", goal="b")])
+    model, assistant, _ = _docs_sql(monkeypatch, plan, log, board=False)
+    _board(monkeypatch, Review(conflicts=[Conflict(routes=["sql", "research"], claim="CAP-CLAIM", cause="date")],
+                               challenges=[Challenge(to_task="t1", by_task="t2", question="OPEN-QUESTION", evidence="e")]),
+           then=Board())
+    monkeypatch.setattr(get_settings(), "team_max_rounds", 0)  # the challenge cannot run: it stays open
+    await _stream(assistant, _ask(THREE))
+
+    note = _writeups(model)[0]
+    assert "date" in note and "OPEN-QUESTION" in note and "observed" in note
+    assert "OPEN POINTS" in note and "WORK NOT DONE" in note
+
+
+async def test_write_up_names_the_language(monkeypatch):
+    _board(monkeypatch, Board(conflicts=[Conflict(routes=["sql", "research"], claim="X", cause="error")]))
+    model, assistant = _two(monkeypatch, [])
+    await _stream(assistant, _ask("Vốn hóa của AAPL là bao nhiêu?"))
+    assert "Vietnamese" in _writeups(model)[0]
+
+
+async def test_budget_stops_new_waves(monkeypatch):
+    log = []
+    plan = Plan(tasks=[Task(id="t1", agent="sql", goal="get caps"), Task(id="t2", agent="docs", goal="read notes"),
+                       Task(id="t3", agent="research", goal="compare both", depends_on=["t1", "t2"])])
+    model, assistant, agents = _docs_sql(monkeypatch, plan, log, sql=_OverBudget(), board=False)
+    _board(monkeypatch, _follow(agent="research", goal="check the date", depends_on=()), then=Board())
+    await _stream(assistant, _ask(THREE))
+
+    assert agents["research"].calls == 0
+    note = _writeups(model)[0]
+    assert "compare both" in note and "check the date" in note
+
+
+def test_team_message_formats():
+    from app.orchestration.prompts import TEAM_MESSAGE
+
+    text = TEAM_MESSAGE.format(answers="a", differences="d", conflicts="c", open_points="o", not_done="n",
+                               language="Vietnamese", drawing=" DRAW")
+    assert "Vietnamese" in text and "DRAW" in text and "{" not in text

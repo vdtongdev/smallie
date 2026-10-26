@@ -179,16 +179,29 @@ Write every goal in {language}."""
 # Hidden message for the orchestrator's final write-up. {differences} and {conflicts} are "none" when empty.
 TEAM_MESSAGE = """TEAM RESULT for the user's latest message (not visible to the user). The team's work on it is done: write the answer from this now, without calling any tool. Write it in {language}, whatever language the answers are in.
 
-ANSWERS:
+ANSWERS (task id, agent, text):
 {answers}
 
-EXPLAINED DIFFERENCES:
+EXPLAINED DIFFERENCES (each with its cause):
 {differences}
 
-OPEN CONFLICTS:
+OPEN CONFLICTS (each with its cause):
 {conflicts}
 
-Combine the answers into one answer to the user's message. Where sources gave different values and the differences are explained, give each source's value with its source and date, plus the explanation, so the user sees both. Where OPEN CONFLICTS is not "none", show every value, say plainly that the team could not settle it, and do not pick one. Where the issue says several independent dated sources agree against one, say which values agree and which stands alone, without calling a source right because of its kind. When an answer says it failed, say plainly which part is missing.{drawing}"""
+OPEN POINTS:
+{open_points}
+
+WORK NOT DONE:
+{not_done}
+
+Combine the answers into one answer to the user's message. Follow these rules.
+1. Where sources gave different values and the differences are explained, give each source's value with its source and date, plus the explanation, so the user sees both.
+2. Where OPEN CONFLICTS is not "none", show every value, say plainly that the team could not settle it, and do not pick one.
+3. Name the cause of each disagreement, as listed with it.
+4. Separate what the sql and docs results observed from what research or reasoning only suggests. Say "observed" for the first and "possible explanation" for the second. Never state an explanation as an observation.
+5. Where the issue says several independent dated sources agree against one, say which values agree and which stands alone, without calling a source right because of its kind.
+6. Name every open point and every piece of work not done, unless it says "none".
+7. When an answer says it failed, say plainly which part is missing.{drawing}"""
 
 # Hidden message for the orchestrator when every team agent withdrew. {withdrawn}: their routes, comma-separated.
 NOTHING_FOUND_MESSAGE = """TEAM NOTHING FOUND (not visible to the user). These agents looked in their own sources and found nothing to answer the user's latest message: {withdrawn}. Answer the message yourself, as you would without a team. Say plainly, in one sentence, that those agents could not answer from their sources. Don't ask them again.{drawing} Write in {language}."""

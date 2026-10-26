@@ -778,7 +778,7 @@ The board is one structured model call per round. It is set with `OPENROUTER_JUD
 
 ### In the UI
 
-- **Status line** under each reply (all chats): a spinner while it runs, the round (for example "Round 2 of 5 · conflict") with the agents' badges, "using <tool>" or "writing"; afterwards the number of rounds and explained differences.
+- **Status line** under each reply (all chats): a spinner while it runs, the round (for example "Round 2 of 5 · resolving a conflict") with the agents' badges, "using <tool>" or "writing"; afterwards the number of rounds and explained differences.
 - **Activity popup** (button on the status line): the rounds, each agent's answer and the tools it called with their results, the board's findings and a pending question. It is rebuilt from the saved conversation, so it is still there after a reload.
 - Tool calls no longer appear as lines inside the chat; they live in the popup.
 

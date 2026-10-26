@@ -306,8 +306,10 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
             if tasks is None:  # the participants take the work, a named chart agent draws from the answer
                 tasks = with_drawers(fallback_tasks(chosen), [s.route for s in everyone if s.draws], "fallback")
                 fallback = True
-            else:  # a planned chart task waits for the answer, whatever the plan says
-                tasks = [{**t, "depends_on": [ANSWER]} if by_route[t["agent"]].draws else t for t in tasks]
+            else:  # a planned chart task waits for the answer, whatever the plan says; nothing waits for a chart task
+                charts = {t["id"] for t in tasks if by_route[t["agent"]].draws}
+                tasks = [{**t, "depends_on": [ANSWER]} if t["id"] in charts
+                         else {**t, "depends_on": [d for d in t["depends_on"] if d not in charts]} for t in tasks]
         emit({"type": "plan", "tasks": [_brief(t) for t in tasks], "fallback": fallback})
         workspace = {"reset": True, "goal": messages[-1].text, "tasks": tasks, "results": {}, "evidence": [], "artifacts": {},
                      "history": [], "rounds_at": {}, "wave": 0, "question": "",

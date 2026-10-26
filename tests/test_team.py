@@ -1499,3 +1499,19 @@ async def test_fallback_plan_makes_chart_depend_on_the_answer(monkeypatch):
     (plan,) = _events(chunks, "plan")
     tasks = {t["agent"]: t for t in plan["tasks"]}
     assert plan["fallback"] is True and tasks["chart"]["depends_on"] == ["answer"]
+
+
+async def test_dependency_on_a_chart_task_is_dropped(monkeypatch):
+    log = []
+    plan = Plan(tasks=[Task(id="t1", agent="sql", goal="get caps"), Task(id="t2", agent="chart", goal="chart", depends_on=["t1"]),
+                       Task(id="t3", agent="research", goal="background", depends_on=["t2"])])
+    _plan(monkeypatch, plan)
+    _board(monkeypatch, then=Board())
+    model = per_agent(orchestrator=[AIMessage("Final.")])
+    assistant = _assistant(monkeypatch, model, sql=Fake("sql", "Cap.", log=log), research=Fake("research", "Notes.", log=log),
+                           chart=Fake("chart", "drawn", log=log, chart="chart-1"))
+    chunks = await _stream(assistant, _ask())
+
+    tasks = {t["agent"]: t for t in _events(chunks, "plan")[0]["tasks"]}
+    assert tasks["research"]["depends_on"] == []
+    assert len(_starts(log, "research")) == 1

@@ -28,8 +28,9 @@ def _in_scope(tool, sources) -> bool:
 @wrap_model_call
 async def scope_tools(request: ModelRequest, handler):
     """Team requests limit an agent to the tools of its sources; untagged tools stay."""
-    sources = request.runtime.context.sources
-    return await handler(request.override(tools=[t for t in request.tools if _in_scope(t, sources)]))
+    context = request.runtime.context
+    return await handler(request.override(
+        tools=[t for t in request.tools if _in_scope(t, context.sources) and t.name not in context.deny_tools]))
 
 
 @wrap_model_call
@@ -52,7 +53,8 @@ async def source_first(request: ModelRequest, handler):
 async def refuse_hidden_tools(request, handler):
     """The model may call a tool it was not offered (the prompt names it); the tool node would
     still run it, so refuse here."""
-    if not _in_scope(request.tool, request.runtime.context.sources):
+    context = request.runtime.context
+    if not _in_scope(request.tool, context.sources) or request.tool_call["name"] in context.deny_tools:
         return ToolMessage(f"Tool {request.tool_call['name']} is not available for this request.",
                            tool_call_id=request.tool_call["id"], name=request.tool_call["name"], status="error")
     return await handler(request)

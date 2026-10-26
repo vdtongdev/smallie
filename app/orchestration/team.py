@@ -371,7 +371,9 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         drawn, artifacts = [], [collect([answer])]
         for route in state["team"]["drawers"]:
             emit({"type": "speaker", "agent": route, "ns": config["configurable"]["checkpoint_ns"]})
-            context = dataclasses.replace(runtime.context, sources=NO_SOURCES)
+            # With a table on this turn's answer the drawer charts that table: it may not copy numbers.
+            deny = ("chart_data",) if answer.additional_kwargs.get("tables") else ()
+            context = dataclasses.replace(runtime.context, sources=NO_SOURCES, deny_tools=deny)
             note = HumanMessage(DRAW_MESSAGE.format(language=reply_language(messages)), name=TEAM)
             recorder = ToolRecorder()
             try:

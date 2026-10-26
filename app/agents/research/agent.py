@@ -205,6 +205,8 @@ _SOURCE_ID = re.compile(r"\bS[0-9a-f]{4}\b", re.IGNORECASE)
 # Any bracket around an id, however the model wrote it: [S3fa2], (S3fa2 | "quote"), [source S3fa2].
 _BRACKETED_ID = re.compile(r"[\[(]([^\[\]()]*\bS[0-9a-f]{4}\b[^\[\]()]*)[\])]", re.IGNORECASE)
 _URL_IN_TEXT = re.compile(r"https?://\S+")
+# An id-like token of any shape (letters and digits, optional hyphens, no spaces), e.g. "cf61ec-00".
+_ID_LIKE = re.compile(r"(?=[A-Za-z0-9-]*[A-Za-z])(?=[A-Za-z0-9-]*\d)[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*")
 
 
 def source_id(url: str) -> str:
@@ -288,6 +290,13 @@ def expand_source_ids(findings: str, index: dict[str, tuple[str, str]]) -> str:
         parts = ([f"{_as_label(known[0][1])} | {known[0][0]}"] if known else []) + [url for url, _ in known[1:]]
         return "[source: " + " | ".join(p for p in [*parts, rest] if p.strip(" |")) + "]"
 
+    def without_unknown_ids(m: re.Match) -> str:
+        """A whole `|` part of a [source: ...] that looks like an id but is not a known one."""
+        parts = m[1].split("|")
+        kept = [p for p in parts if not _ID_LIKE.fullmatch(p.strip()) or _normal_id(p.strip()) in index]
+        return m[0] if len(kept) == len(parts) else "[source: " + " | ".join(p.strip() for p in kept) + "]"
+
+    findings = _SOURCE.sub(without_unknown_ids, findings)
     findings = _SOURCE.sub(lambda m: as_source(m[1]) if _SOURCE_ID.search(m[1]) else m[0], findings)
     # Ids outside a [source: ...]: in another bracket, or bare.
     findings = _BRACKETED_ID.sub(lambda m: as_source(m[1]) if not m[0].startswith("[source:") else m[0], findings)

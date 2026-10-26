@@ -163,24 +163,7 @@ def calls_before(messages: Sequence[AnyMessage], call_id: str) -> list[dict]:
     return calls[:ids.index(call_id)] if call_id in ids else calls
 
 
-CHART_TOOLS = frozenset({"chart_table", "chart_data"})
-
-
-@wrap_model_call
-async def drawer_charts(request: ModelRequest, handler):
-    """A team write-up with a drawer draws nothing itself: the drawer's chart is the only one."""
-    if request.runtime.context.drawn:
-        request = request.override(tools=[t for t in request.tools if getattr(t, "name", "") not in CHART_TOOLS])
-    return await handler(request)
-
-
-@wrap_tool_call
-async def refuse_chart(request, handler):
-    if request.runtime.context.drawn and request.tool_call["name"] in CHART_TOOLS:
-        call = request.tool_call
-        return ToolMessage(f"Tool {call['name']} is not available: the chart agent draws the chart.",
-                           tool_call_id=call["id"], name=call["name"], status="error")
-    return await handler(request)
+CHART_TOOLS = ("chart_table", "chart_data")
 
 
 @wrap_tool_call
@@ -285,7 +268,7 @@ def build_orchestrator(specs: Sequence[AgentSpec], agents: Mapping[str, Runnable
         prompt_extra=compose_section,
         middleware=[make_prefer_handoff(targets, frozenset(
             ask_tool_name(spec) for spec in specs if spec.tool_description and not spec.answers_directly)),
-            drawer_charts, refuse_chart, no_repeats],
+            no_repeats],
     )
 
     async def orchestrator(state: AssistantState, runtime: Runtime[AgentContext]) -> Command:
@@ -299,7 +282,7 @@ def build_orchestrator(specs: Sequence[AgentSpec], agents: Mapping[str, Runnable
             hidden.append(HumanMessage(note, name=TEAM_MODE))
         notes, mentioned = await request_notes(runtime.context.user_id, specs, messages)
         context = dataclasses.replace(runtime.context, notes=notes, mentioned=mentioned, failed=failed,
-                                      drawn=state.get("team_drawn", False))
+                                      deny_tools=CHART_TOOLS if state.get("team_drawn") else ())
         result = await agent.ainvoke({"messages": [*messages, *hidden]}, context=context)
         new = result["messages"][len(messages) + len(hidden):]
         if target := handoff_target(new, targets):

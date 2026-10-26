@@ -1031,3 +1031,14 @@ async def test_reply_to_a_question_applies_withdrawal_to_the_new_round(monkeypat
     assert seen == [["sql", "research"], ["sql", "research"]]
     assert (await _thread(assistant))[-1].additional_kwargs["team"]["withdrawn"] == ["docs"]
     assert all("DOCS-LEAK" not in w for w in _writeups(model))
+
+
+def test_named_source_gives_exactly_that_source_plus_research():
+    """Goal 1 (naming a source restricts to it) + Goal 4 (research still joins whoever else takes part)."""
+    assert _routes("Ask the SQL agent about it") == ["sql", "research"]
+    assert _routes("Ask the docs agent about it") == ["docs", "research"]
+
+
+def test_two_named_speakers_run_together_with_research():
+    """Goal 1: naming two sources restricts to those two; Goal 4: research joins."""
+    assert _routes("Ask the docs agent and the SQL agent about it") == ["docs", "sql", "research"]

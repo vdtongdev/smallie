@@ -1117,3 +1117,79 @@ async def test_orchestrator_cannot_chart_in_the_write_up_when_a_drawer_draws(mon
     offered = {t["function"]["name"] for prompt, tools in zip(model.prompts, model.tools)
                if "You are smallie" in prompt[0].content for t in tools}
     assert offered.isdisjoint({"chart_table", "chart_data"})
+
+
+# --- the drawer charts the answer's table (fix plan 2026-10-26-citation-ids-and-drawer-table, goal B) ---
+
+CHART_DATA_CALL = AIMessage("", tool_calls=[{"name": "chart_data", "args": {
+    "type": "bar", "title": "Caps", "labels": ["AAPL", "MSFT"], "series": [{"name": "cap", "values": [3.0, 2.5]}]}, "id": "d2"}])
+
+
+def _recording_per_agent(**scripts):
+    """per_agent that also keeps the `tool_choice` of each model call (None = not given)."""
+    from tests.scripted import PROMPT_PHRASES, PerAgentModel
+
+    class Recording(PerAgentModel):
+        choices: list = []
+
+        def bind_tools(self, tools, **kwargs):
+            self.choices.append(kwargs.get("tool_choice"))
+            return super().bind_tools(tools, **kwargs)
+
+    return Recording(replies=iter(()), prompts=[], tools=[], choices=[],
+                     scripts={PROMPT_PHRASES[n]: iter(r) for n, r in scripts.items()})
+
+
+def _offered(model):
+    return {t["function"]["name"] for tools in model.tools for t in tools}
+
+
+def _unforced(model):
+    return all(c in (None, "auto", "none") for c in model.choices)
+
+
+async def test_drawer_cannot_copy_numbers_when_the_answer_has_a_table(monkeypatch):
+    """Goal B: the final answer carries this turn's table, so the drawer is not offered `chart_data` (a call is
+    refused: no chart from it), and it is never forced to call a tool."""
+    _research_does_not_join(monkeypatch)
+    _board(monkeypatch, Board())
+    model = _recording_per_agent(chart=[CHART_DATA_CALL, AIMessage("Done.")])
+    assistant = _assistant(monkeypatch, model, sql=Fake("sql", "Cap.", log=[], table=TABLE))
+    chunks = await _stream(assistant, _ask(SQL_CHART))
+
+    assert "chart_table" in _offered(model) and "chart_data" not in _offered(model)
+    assert _unforced(model)
+    final = (await _thread(assistant))[-1]
+    assert "charts" not in final.additional_kwargs and not _events(chunks, "charts")
+
+
+async def test_drawer_may_chart_inline_numbers_when_the_answer_has_no_table(monkeypatch):
+    """Goal B: without a table on the final answer `chart_data` stays offered (figures written in the answer are fine);
+    the drawer's first call is not forced."""
+    _research_does_not_join(monkeypatch)
+    _board(monkeypatch, Board())
+    model = _recording_per_agent(chart=[CHART_DATA_CALL, AIMessage("Done.")])
+    assistant = _assistant(monkeypatch, model, sql=Fake("sql", "AAPL 3.0, MSFT 2.5.", log=[]))
+    chunks = await _stream(assistant, _ask(SQL_CHART))
+
+    assert "chart_data" in _offered(model) and _unforced(model)
+    assert (await _thread(assistant))[-1].additional_kwargs["charts"] and _events(chunks, "charts")
+
+
+async def test_a_table_from_an_earlier_turn_does_not_count(monkeypatch):
+    """Review Focus B: only a table on THIS turn's final answer takes `chart_data` away."""
+    class TableOnce(Fake):
+        async def ainvoke(self, input, config=None, **kwargs):
+            out = await super().ainvoke(input, config, **kwargs)
+            self.table = None
+            return out
+
+    _research_does_not_join(monkeypatch)
+    _board(monkeypatch, then=Board())
+    model = _recording_per_agent(chart=[CHART_DATA_CALL, AIMessage("Done.")])
+    assistant = _assistant(monkeypatch, model, sql=TableOnce("sql", "Cap.", log=[], table=TABLE))
+    await _stream(assistant, _ask(SQL_QUESTION))  # turn 1: a table, no drawer
+    assert "tables" in (await _thread(assistant))[-1].additional_kwargs
+    await _stream(assistant, _ask(SQL_CHART))  # turn 2: no table
+
+    assert "chart_data" in _offered(model)

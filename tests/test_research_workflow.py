@@ -292,3 +292,52 @@ async def test_research_prompt_omits_sources_outside_scope(monkeypatch):
     everything = await _research_system_prompt(monkeypatch, ())
     for kept in ("run_sql", "MARKET_SCHEMA_TEXT", "search_documents", "uploaded PDF", "tavily_*"):
         assert kept in everything
+
+
+# --- ids of any shape (fix plan 2026-10-26-citation-ids-and-drawer-table, goal A) ---
+
+def _no_id_left(text: str, *ids: str) -> None:
+    for unknown in ids:
+        assert unknown not in text, (unknown, text)
+
+
+def test_unknown_source_id_of_any_shape_is_dropped():
+    """Goal A: no `[source: <id>]` that is not a known source id reaches the write-up, whatever its shape."""
+    index = {research_agent.source_id("https://a.com/x"): ("https://a.com/x", "Page A")}
+    for unknown in ("cf61ec-00", "S12345", "ab12cd", "S3fa2-1"):
+        out = research_agent.expand_source_ids(f"- X grew 177% [source: {unknown}]", index)
+        _no_id_left(out, unknown)
+        assert "http" not in out  # no URL invented for it
+        linked = research_agent.link_sources(out, [])
+        _no_id_left(linked, unknown)
+        assert "http" not in linked and linked.startswith("- X grew 177%")
+
+
+def test_unknown_id_next_to_a_quote_drops_only_the_id():
+    """Goal A: the quote stays, so `link_sources` still finds the page by it."""
+    quote = "Mắt Biếc - Trên 300.000 Bản"
+    out = research_agent.expand_source_ids(f'- Sold [source: cf61ec-00 | "{quote}"]', {})
+    _no_id_left(out, "cf61ec-00")
+    assert quote in out
+    linked = research_agent.link_sources(out, PAGES)
+    _no_id_left(linked, "cf61ec-00")
+    assert "https://zalopay.vn/sach-hay-1407" in linked and "passage:" in linked
+
+
+def test_known_source_id_still_expands_beside_an_unknown_one():
+    """Goal A: a known `S` id keeps working exactly as before."""
+    url = "https://a.com/x"
+    known = research_agent.source_id(url)
+    out = research_agent.expand_source_ids(f"- A [source: {known}]\n- B [source: cf61ec-00]", {known: (url, "Page A")})
+    first, second = out.splitlines()
+    assert first.endswith(f"[source: Page A | {url}]")
+    _no_id_left(second, "cf61ec-00")
+
+
+def test_text_that_only_looks_like_a_bracket_survives():
+    """Review Focus A: a normal [1] number, a year, a bracketed ticker and file sources are not ids."""
+    index = {research_agent.source_id("https://a.com/x"): ("https://a.com/x", "Page A")}
+    text = ("- Revenue rose [1] in (2024) and 2023 [AAPL] [note]\n"
+            "- From a file [source: report.pdf, p. 2]\n"
+            "- See [2] and [12], year [2025]")
+    assert research_agent.expand_source_ids(text, index) == text

@@ -638,9 +638,9 @@ async function sendMessage(text) {
   let finished = false;
   let waiting = false; // showing "thinking" after a fallback
   let synthesized = false; // the team's write-up started
-  // A drawer runs after the rounds, so an agent that spoke in none of them is one.
+  // A drawer runs after the rounds, so an agent named in none of the rounds' `agents` so far is one.
   const drawerOf = (agent) => {
-    if (!act.rounds.length || act.rounds[0].agents.includes(agent)) return null;
+    if (!act.rounds.length || act.rounds.some((r) => r.agents.includes(agent))) return null;
     return act.drawn.find((d) => d.agent === agent) || act.drawn[act.drawn.push({ agent, text: "", tools: [] }) - 1];
   };
   const answerOf = (agent) => {

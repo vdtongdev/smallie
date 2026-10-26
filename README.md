@@ -127,11 +127,11 @@ Set in `.env`; all calls go through OpenRouter.
 
 ## Architecture
 
-A router, an orchestrator and four specialists that each run as their own agent server. [ARCHITECTURE.md](ARCHITECTURE.md) has the details: [the router](ARCHITECTURE.md#3-router), [the orchestrator](ARCHITECTURE.md#4-orchestrator), [memory](ARCHITECTURE.md#8-memory), [remote agents](ARCHITECTURE.md#10-remote-agents-040), [team mode](ARCHITECTURE.md#11-agent-team-050) and [deployment](ARCHITECTURE.md#13-deployment). Developer notes for coding agents are in [CLAUDE.md](CLAUDE.md).
+A router, an orchestrator and four specialists that each run as their own agent server. [ARCHITECTURE.md](ARCHITECTURE.md) has the details: [the router](ARCHITECTURE.md#3-router), [the orchestrator](ARCHITECTURE.md#4-orchestrator), [memory](ARCHITECTURE.md#8-memory), [remote agents](ARCHITECTURE.md#10-remote-agents-040), [team mode](ARCHITECTURE.md#11-agent-team-050) and [deployment](ARCHITECTURE.md#13-deployment). Developer notes for coding agents are in [CLAUDE.md](CLAUDE.md) and `.claude/rules/`.
 
 ## Adding an agent
 
-An agent is a package under `app/agents/<name>/` (`tools.py`, `prompts.py`, `agent.py` with its `SPEC`). Add the `SPEC` to `AGENTS` in `app/agents/registry.py`, give it a service block in `docker-compose.yml`, and the router, orchestrator, API and UI pick it up. If it needs its own data, add a feature under `app/features/<name>/`. The full checklist is in `CLAUDE.md` ("Adding an agent or workflow").
+An agent is a package under `app/agents/<name>/` (`tools.py`, `prompts.py`, `agent.py` with its `SPEC`). Add the `SPEC` to `AGENTS` in `app/agents/registry.py`, give it a service block in `docker-compose.yml`, and the router, orchestrator, API and UI pick it up. If it needs its own data, add a feature under `app/features/<name>/`. The full checklist is in `.claude/rules/agents.md` ("Adding an agent or workflow").
 
 ## Deploying
 

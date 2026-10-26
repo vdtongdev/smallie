@@ -85,8 +85,11 @@ ATTEMPT_MESSAGE = """ATTEMPT (not visible to the user): the {route} specialist a
 
 Don't run those searches again. If its reply does answer the question after all, give that answer. Otherwise ask `ask_{route}` once more only with a clearly different, more specific question (e.g. naming the file or the exact data), use another specialist or a web search where the rules above allow it, or answer yourself when it needs none of them. If nothing can answer it, tell the user plainly what isn't available."""
 
+# Fills the {drawing} slot of ROUND_MESSAGE and TEAM_MESSAGE when the team has a drawer; {agent}: its route. The slot is empty otherwise.
+DRAWING_NOTE = """ The {agent} agent draws the chart the user asked for from the team's final answer, right after it is written. Never say a chart can't be drawn, never apologise for it, never tell the user to draw it themselves, and never describe a chart. At most say the chart follows."""
+
 # Team mode (app/orchestration/team.py). Hidden message for each participant in the first round: the thread plus this, as the last message (name TEAM).
-ROUND_MESSAGE = """TEAM ROUND (not visible to the user). Answer the user's latest message with your own sources only. Give each figure or claim with its source and as-of date. Say plainly when your sources hold nothing on it, and don't guess. Answer only the part your own sources cover, even when the message gives tasks to other agents: they answer their own parts. You can't see their answers, so never write as another agent, never attribute data to one, and never claim another agent checked your figures. Write in {language}."""
+ROUND_MESSAGE = """TEAM ROUND (not visible to the user). Answer the user's latest message with your own sources only. Give each figure or claim with its source and as-of date. Say plainly when your sources hold nothing on it, and don't guess. Answer only the part your own sources cover, even when the message gives tasks to other agents: they answer their own parts. You can't see their answers, so never write as another agent, never attribute data to one, and never claim another agent checked your figures.{drawing} Write in {language}."""
 
 # Hidden message for the participants of a conflict round. {conflicts}: bullets, one per conflict;
 # {others}: the other side's answers; {own}: this agent's earlier answer.
@@ -129,7 +132,7 @@ EXPLAINED DIFFERENCES:
 OPEN CONFLICTS:
 {conflicts}
 
-Combine the answers into one answer to the user's message. Where sources gave different values and the differences are explained, give each source's value with its source and date, plus the explanation, so the user sees both. Where OPEN CONFLICTS is not "none", show every value, say plainly that the team could not settle it, and do not pick one. Where the issue says several independent dated sources agree against one, say which values agree and which stands alone, without calling a source right because of its kind. When an answer says it failed, say plainly which part is missing."""
+Combine the answers into one answer to the user's message. Where sources gave different values and the differences are explained, give each source's value with its source and date, plus the explanation, so the user sees both. Where OPEN CONFLICTS is not "none", show every value, say plainly that the team could not settle it, and do not pick one. Where the issue says several independent dated sources agree against one, say which values agree and which stands alone, without calling a source right because of its kind. When an answer says it failed, say plainly which part is missing.{drawing}"""
 
 # Hidden last message for a team drawer (the chart agent), after the final answer: the thread plus the final answer plus this (name TEAM).
 DRAW_MESSAGE = """TEAM DRAW (not visible to the user). The message just above is the team's final answer to the user's latest message. Draw the chart the user asked for from the data in that answer. You have no database. 1. When a table listed in this chat holds the data, draw it with chart_table. 2. Otherwise, when the answer writes the figures, draw them with chart_data, copying them exactly. Never add, change or estimate a figure. When the answer holds no data to chart, say so in one line and draw nothing. After drawing, reply with one short line about the chart, not another answer. Write in {language}."""

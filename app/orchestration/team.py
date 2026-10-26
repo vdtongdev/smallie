@@ -33,7 +33,7 @@ from app.core.config import get_settings
 from app.core.llm import get_chat_model
 from app.core.memory import TEAM_MODE, AgentContext
 from app.core.prompts import reply_language
-from app.orchestration.prompts import BOARD_PROMPT, CONFLICT_MESSAGE, DRAW_MESSAGE, ROUND_MESSAGE, TEAM_MESSAGE
+from app.orchestration.prompts import BOARD_PROMPT, CONFLICT_MESSAGE, DRAW_MESSAGE, DRAWING_NOTE, ROUND_MESSAGE, TEAM_MESSAGE
 from app.orchestration.router import ORCHESTRATOR, AssistantState, available_agents
 
 log = logging.getLogger(__name__)
@@ -158,6 +158,10 @@ def _bullets(lines: Sequence[str]) -> str:
     return "\n".join(f"- {line}" for line in lines) or "none"
 
 
+def _drawing(drawers: Sequence[str]) -> str:
+    return DRAWING_NOTE.format(agent=" and ".join(drawers)) if drawers else ""
+
+
 def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
     """The `team` subgraph. `agents`: route -> compiled graph or RemoteAgent; `orchestrator`: the
     orchestrator node function (it reads `team_note` as a hidden message)."""
@@ -192,7 +196,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
             turn = turn_messages(result.get("messages", []))
             answer = AIMessage(spec.result(result), name=spec.message_names[0], additional_kwargs=collect(turn))
             return Command(goto=END, update={"messages": [answer]})
-        note = ROUND_MESSAGE.format(language=reply_language(messages))
+        note = ROUND_MESSAGE.format(language=reply_language(messages), drawing=_drawing(drawers))
         team = {"participants": chosen, "drawers": drawers, "round": 1, "rounds": [], "boards": [], "forced": False, "artifacts": {},
                 "question": ""}  # a fresh debate: nothing of an earlier message's carries over
         return Command(update={"team": team, "speeches": [RESET]},
@@ -273,7 +277,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
             return Command(update={"messages": messages[-1:], "team": team}, goto="judge")
         # The reply names an agent that is not taking part yet: it answers one round before the board runs again.
         rnd = team["round"] + 1
-        note = ROUND_MESSAGE.format(language=reply_language(messages))
+        note = ROUND_MESSAGE.format(language=reply_language(messages), drawing=_drawing(drawers))
         team = {**team, "participants": [*team["participants"], *new], "round": rnd}
         return Command(update={"messages": messages[-1:], "team": team},
                        goto=sends(new, rnd, "answer", {r: note for r in new}, messages))
@@ -294,7 +298,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
                 differences=_bullets([f"{', '.join(d.routes)}: {d.explanation} ({'; '.join(f'{x.route}: {x.value}, {x.source}, {x.as_of}' for x in d.sides)})"
                                    for d in board.differences]),
                 conflicts=_bullets([f"{c.claim} ({', '.join(c.routes)}): {c.issue}" for c in board.conflicts]),
-                language=reply_language(messages))
+                language=reply_language(messages), drawing=_drawing(team["drawers"]))
             command = await ask_orchestrator(state, runtime, note)
             handed_off = command.goto in by_route  # it handed off: the answers stand
             answer = AIMessage("\n\n".join(a["text"] for a in answers), name=ORCHESTRATOR) if handed_off \

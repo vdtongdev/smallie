@@ -390,6 +390,37 @@ async def test_drawer_does_not_speak_in_rounds(monkeypatch):
     assert transcript["drawers"] == ["chart"] and transcript["participants"] == ["sql", "research"]
 
 
+async def test_write_up_note_says_the_drawer_draws_after_the_answer(monkeypatch):
+    log = []
+    _board(monkeypatch, Board())
+    model = per_agent(orchestrator=[AIMessage("Final.")])
+    assistant = _assistant(monkeypatch, model, sql=Fake("sql", "Cap.", log=log), research=Fake("research", "n", log=log),
+                           chart=Fake("chart", "drawn", log=log))
+    await _stream(assistant, _ask("chart AAPL"))
+
+    note = _writeups(model)[0]
+    assert "chart" in note.replace("TEAM RESULT", "").lower()  # names the drawer and that its chart follows the answer
+
+
+async def test_round_note_says_the_drawer_draws(monkeypatch):
+    log = []
+    _board(monkeypatch, Board())
+    model = per_agent(orchestrator=[AIMessage("Final.")])
+    assistant = _assistant(monkeypatch, model, sql=Fake("sql", "Cap.", log=log), research=Fake("research", "n", log=log),
+                           chart=Fake("chart", "drawn", log=log))
+    await _stream(assistant, _ask("chart AAPL"))
+    starts = [e for e in log if e["event"] == "start" and e["agent"] in ("sql", "research")]
+    assert starts and all("chart" in e["last"].text.lower() for e in starts)
+
+    log.clear()
+    model = per_agent(orchestrator=[AIMessage("Final.")])
+    assistant = _assistant(monkeypatch, model, sql=Fake("sql", "Cap.", log=log), research=Fake("research", "n", log=log))
+    await _stream(assistant, _ask(), {"configurable": {"thread_id": "no-drawer"}})
+    starts = [e for e in log if e["event"] == "start"]
+    assert starts and all("chart" not in e["last"].text.lower() for e in starts)
+    assert all("chart" not in note.lower() for note in _writeups(model))
+
+
 async def test_rate_limit_still_propagates(monkeypatch):
     import httpx
     import openai
@@ -567,15 +598,15 @@ def test_prompts_format():
     from app.orchestration import prompts
 
     prompts.BOARD_PROMPT.format(language="English")
-    prompts.ROUND_MESSAGE.format(language="English")
+    prompts.ROUND_MESSAGE.format(language="English", drawing="")
     prompts.CONFLICT_MESSAGE.format(conflicts="", others="", own="", language="English")
-    prompts.TEAM_MESSAGE.format(answers="", differences="none", conflicts="none", language="English")
+    prompts.TEAM_MESSAGE.format(answers="", differences="none", conflicts="none", language="English", drawing="")
 
 
 def test_round_message_formats_with_language():
     from app.orchestration.prompts import ROUND_MESSAGE
 
-    text = ROUND_MESSAGE.format(language="English")
+    text = ROUND_MESSAGE.format(language="English", drawing="")
     assert "English" in text
     assert "{" not in text and "}" not in text
 

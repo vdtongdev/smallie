@@ -126,3 +126,45 @@ Versions are `major.minor.patch`: the major version stays 0 for now, each minor 
 - **LangSmith tracing** (`LANGSMITH_TRACING`, `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT`), off by default: traces chats, with the user id in their metadata. Traces hold full prompts (your messages, file passages, memories)
 - Local Postgres now runs in Docker inside WSL (`docker-compose.yml`, port 5433); `scripts\dev_db.ps1` starts it and keeps WSL running, so DB tests and the app no longer freeze when WSL stops
 - `scripts.bench_chat` counts the agent servers' model calls too
+
+## 0.5.0 - Agent team
+- **Team mode** (`POST /api/chat/team`): a per-chat switch that asks the specialists together at a round table instead of one after another
+  - **The round table**: code picks the participants. They answer in parallel, each from its own sources only (the database, your files, the web)
+    - A judge sorts the answers into agreements, explained differences and conflicts. A difference counts as explained only when both sides have a source and a date; otherwise it is a conflict
+    - Only conflicts that more data can settle get another parallel round, at most `TEAM_MAX_ROUNDS` (default 4) after round 1. The orchestrator then writes the answer, and never picks a source by its kind: a database figure does not beat a web page or a file just for being a database
+    - Calls are capped per message by `TEAM_MAX_MESSAGE_MODEL_CALLS` (default 30). If the judge fails, the team goes straight to the write-up
+    - A lone participant's answer goes to the chat as it is, with no write-up call
+  - **The pause**: the team can stop to ask you a question; your reply resumes it
+  - **Source scoping**: every tool carries a source, and a team request limits each participant to its own. A call outside that scope is refused on the agent servers too, not only hidden from the model's tool list, and the research prompt names only the sources it may use
+  - **Judge model**: new `OPENROUTER_JUDGE_MODEL` (this deployment uses `deepseek/deepseek-v4.1-flash`; empty uses the orchestrator's model). It answers itself, with no fallback model
+  - New settings: `TEAM_MAX_ROUNDS`, `TEAM_MAX_MESSAGE_MODEL_CALLS`, `OPENROUTER_JUDGE_MODEL`
+- **Status line and Activity popup** (every chat, not only team): one status line shows what the answer is doing now, and an Activity popup holds the full tool log. The inline tool lines in the chat are gone. After a reload the popup holds the same steps as the live view
+- **Measured** (one run per scenario, free models for the agents)
+  - The relay design built first on this branch and replaced: a stock question took 7 calls, 38 s
+  - Round table with the DeepSeek judge: a stock question takes 1 round, 6 calls, about 49 s. A chart question, 1 round, 6 calls, about 74 s
+  - A question with a planted wrong figure in a file takes 1 round, 9 calls, about 99 s, and the file's undated figure is flagged against the dated database and web figures
+  - With the default judge model the same conflict question took 29 calls, 189 s, and the conflict was not flagged: the judge model matters
+  - The judge ("board") costs under $0.01 per message
+- **Fix: English questions answered in Vietnamese after a language preference was stored**
+  - A remembered preference ("prefers Vietnamese") in the orchestrator's memories outweighed the language of the message
+  - The orchestrator now names the reply language, taken from the latest message, on every call, even over a remembered preference
+- **Fix: the reloaded chat looked different from the live one**
+  - A reloaded team chat lacked steps the live view showed, and its answer could lose its charts
+  - Live and reload now hold the same steps, and team answers keep their tables and charts
+- **Fix: one odd stream event ended the whole reply**
+  - A single stream event the server could not convert stopped the answer. It is now skipped and the reply goes on
+- **Fix: opened chats kept the mode they were started with**
+  - Continuing an older chat sent its message with the mode the chat began with (for example a single agent) instead of auto routing
+  - Only team chats stay team; every other opened chat uses auto (`chatKind` in `app.js`)
+- **Fix: the test suite depended on a local `.env`**
+  - Tests inherited the judge model from the developer's `.env`. They now ignore it
+- Refactors and tooling
+  - `AgentSpec.review` marks which agents may sit at the round table
+  - `scripts.bench_chat` has team scenarios (stock, conflict, chart); its answer text matches what the chat bubble shows
+  - Testing rule (`.claude/rules/testing.md`): a failing test is fixed in the code, never weakened or changed to pass
+  - The relay (critique, refine and verdict steps, `TEAM_MAX_TURNS`) was built and then removed on purpose
+- Limits
+  - The agents use free models, so latency and answer quality vary
+  - The pause question rarely fires in testing
+  - Shared rooms (phase A in the design spec) are not built
+  - Each number above comes from a single run per scenario, not an average

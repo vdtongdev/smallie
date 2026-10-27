@@ -81,7 +81,7 @@ This file describes `main` plus the 0.4.0 remote agents (section 10) and the 0.5
 │                    Neon Postgres 18                             │
 │                                                                 │
 │  Tables:                                                        │
-│    users, conversations, documents (+ summary)                  │
+│    users, conversations, documents (+ summary, card_embedding)  │
 │    LangGraph checkpointer: checkpoints, checkpoint_blobs,       │
 │                            checkpoint_writes                    │
 │    LangGraph store: store, store_vectors                        │
@@ -295,11 +295,14 @@ Answers from the user's uploaded PDF/DOCX files using RAG (Retrieval-Augmented G
    - one model call on the start of the file: type, summary, up to 10 entities
    - stored in the knowledge graph as File -mentions-> Entity edges
    - `documents.summary` is shown in the file list
+   - `documents.card_embedding`: a vector of `"<filename>: <summary>"` (filename alone without a card), embedded in the same request as the entities; `scripts.build_graph` backfills it, `scripts.reindex` resizes it
 
 ### Search
 
 - `search_documents(query, entity)` searches the user's chunks by similarity
-- Scoped search: when the question names an entity the graph links to some files, only those files are searched
+- Name scope: `entity` or the question names a file without its extension (every file with that name); only those files are searched
+- Graph scope: `entity` or a known entity in the question that the graph links to some files; only those files are searched
+- No scope: the query is embedded once; the `CARD_FILES` = 3 files nearest by `card_embedding` each get one reserved slot with their best passage, nearest card first; the unscoped top `TOP_K` fills the rest, skipping duplicates, so a large file cannot crowd out a small one. With no card vectors, the plain unscoped search
 - Falls back to all files if the scoped search finds nothing
 
 ### Citations

@@ -58,6 +58,7 @@ documents = Table(
     Column("error", Text),
     Column("chunk_count", Integer, nullable=False, server_default="0"),
     Column("summary", Text),  # "<doc type>: <one line>" from the document card (app/features/documents/card.py)
+    Column("card_embedding", Vector(get_settings().embed_dim)),  # of "<filename>: <summary>", ranks files for a search
     Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
 )
 
@@ -150,5 +151,6 @@ def init_db() -> None:
         ))
         # These came with the knowledge graph.
         conn.execute(text("ALTER TABLE documents ADD COLUMN IF NOT EXISTS summary text"))
+        conn.execute(text(f"ALTER TABLE documents ADD COLUMN IF NOT EXISTS card_embedding vector({get_settings().embed_dim})"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS graph_built_at timestamptz"))
         conn.execute(text("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS mined_turns integer NOT NULL DEFAULT 0"))

@@ -7,7 +7,7 @@ import pytest
 from langchain_core.documents import Document
 from langchain_core.embeddings import DeterministicFakeEmbedding
 from pydantic import ValidationError
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 
 from app.core import graph
 from app.core.config import get_settings
@@ -32,6 +32,7 @@ class AliasEmbedding(DeterministicFakeEmbedding):
 def embeddings(monkeypatch):
     fake = AliasEmbedding(size=get_settings().embed_dim)
     monkeypatch.setattr(graph, "get_embeddings", lambda: fake)
+    monkeypatch.setattr("app.agents.docs.tools.get_embeddings", lambda: fake)
     return fake
 
 
@@ -200,8 +201,8 @@ def chunks(monkeypatch):
 
     from app.agents.docs import tools as docs_tools
 
-    store = PGVector(embeddings=DeterministicFakeEmbedding(size=32), connection=get_settings().sqlalchemy_url,
-                     collection_name="test_graph", pre_delete_collection=True, use_jsonb=True)
+    store = PGVector(embeddings=DeterministicFakeEmbedding(size=get_settings().embed_dim),
+                     connection=get_settings().sqlalchemy_url, collection_name="test_graph", pre_delete_collection=True, use_jsonb=True)
     monkeypatch.setattr(docs_tools, "get_vector_store", lambda: store)
     yield store
     store.delete_collection()
@@ -233,6 +234,195 @@ def test_search_follows_the_graph_to_the_linked_file(make_user, embeddings, chun
     unknown = search_with_graph(alice, "termination", entity="Initech")  # falls back to every file
     assert "contract.pdf" in unknown and "resume.pdf" in unknown
     assert search_with_graph(bob, "termination", entity="Acme") == NO_PASSAGES  # never alice's files
+
+
+class CountingEmbedding(DeterministicFakeEmbedding):
+    requests: list = []
+
+    def embed_documents(self, texts):
+        self.requests.append(list(texts))
+        return super().embed_documents(texts)
+
+
+def card_embedding(document_id: str):
+    with get_engine().connect() as conn:
+        return conn.execute(select(documents.c.card_embedding).where(documents.c.id == document_id)).scalar()
+
+
+@requires_db
+def test_save_card_stores_a_vector_of_the_card_in_one_embedding_request(make_user, monkeypatch):
+    fake = CountingEmbedding(size=get_settings().embed_dim)
+    fake.requests = []
+    monkeypatch.setattr(graph, "get_embeddings", lambda: fake)
+    user = make_user()
+    with_summary, without = add_document(user, "contract.pdf"), add_document(user, "notes.docx")
+
+    graph.save_card(user, with_summary, "Contract: supply deal", ["Acme", "Globex"])
+    assert len(fake.requests) == 1 and set(fake.requests[0]) == {"Acme", "Globex", "contract.pdf: Contract: supply deal"}
+    assert list(card_embedding(with_summary)) == pytest.approx(fake.embed_query("contract.pdf: Contract: supply deal"))
+
+    graph.save_card(user, without, "", [])
+    assert list(card_embedding(without)) == pytest.approx(fake.embed_query("notes.docx"))
+
+
+@requires_db
+def test_embed_cards_fills_missing_vectors_and_can_redo_all(make_user, monkeypatch):
+    fake = CountingEmbedding(size=get_settings().embed_dim)
+    fake.requests = []
+    monkeypatch.setattr(graph, "get_embeddings", lambda: fake)
+    user, other = make_user(), make_user()
+    done, missing, others = add_document(user, "a.pdf"), add_document(user, "b.pdf"), add_document(other, "c.pdf")
+    graph.save_card(user, done, "Report", [])
+    with get_engine().begin() as conn:
+        conn.execute(update(documents).where(documents.c.id == missing).values(summary="Notes"))
+        fake.requests.clear()
+        graph.embed_cards(conn, only_missing=True, user_ids=[user])
+        assert [r for r in fake.requests if "b.pdf: Notes" in r] and not [r for r in fake.requests if "a.pdf: Report" in r]
+    assert card_embedding(missing) is not None
+    assert card_embedding(others) is None  # another user's document is untouched
+    with get_engine().begin() as conn:
+        fake.requests.clear()
+        assert graph.embed_cards(conn, only_missing=False, user_ids=[user]) == 2
+    assert any("a.pdf: Report" in r for r in fake.requests)
+    assert card_embedding(others) is None
+
+
+class RecordingStore:
+    def __init__(self):
+        self.filters = []
+
+    def similarity_search(self, query, k, filter):
+        self.filters.append(filter)
+        return []
+
+
+@pytest.fixture
+def recorded(monkeypatch):
+    from app.agents.docs import tools as docs_tools
+
+    store = RecordingStore()
+    monkeypatch.setattr(docs_tools, "get_vector_store", lambda: store)
+    return store
+
+
+def scoped_to(user: str, *ids: str) -> dict:
+    return {"$and": [{"user_id": {"$eq": user}}, {"document_id": {"$in": list(ids)}}]}
+
+
+@requires_db
+def test_naming_a_file_without_its_extension_scopes_the_search_to_it(make_user, embeddings, recorded):
+    from app.agents.docs.tools import search_with_graph
+
+    user = make_user()
+    wanted = add_document(user, "Portfolio summary.docx")
+    add_document(user, "The Intelligent Investor.pdf")
+
+    search_with_graph(user, "summarize my portfolio summary", entity="Portfolio summary")
+
+    assert recorded.filters[0] == scoped_to(user, wanted)
+
+
+@requires_db
+def test_a_file_named_only_in_the_question_scopes_the_search_to_it(make_user, embeddings, recorded):
+    from app.agents.docs.tools import search_with_graph
+
+    user = make_user()
+    wanted = add_document(user, "Portfolio summary.docx")
+    add_document(user, "The Intelligent Investor.pdf")
+
+    search_with_graph(user, "tell me about the portfolio summary doc")
+
+    assert recorded.filters[0] == scoped_to(user, wanted)
+
+
+@requires_db
+def test_two_uploads_with_the_same_name_are_both_searched(make_user, embeddings):
+    user = make_user()
+    first, second = add_document(user, "Portfolio summary.docx"), add_document(user, "Portfolio summary.docx")
+
+    assert sorted(graph.documents_for(user, "portfolio summary", "Portfolio summary")) == sorted([first, second])
+    assert sorted(graph.documents_for(user, "what is in the portfolio summary?")) == sorted([first, second])
+
+
+@requires_db
+def test_a_file_name_shorter_than_the_minimum_does_not_scope_the_search(make_user, embeddings):
+    user = make_user()
+    add_document(user, "cv.pdf")
+
+    assert graph.documents_for(user, "what is on my cv?") == []
+
+
+class RankedStore:
+    """Fake vector store: `passages` are (document_id, text) in order of closeness; it records the
+    filters of by-vector searches and returns what matches them."""
+
+    def __init__(self, passages):
+        self.passages, self.filters = passages, []
+
+    def similarity_search_by_vector(self, embedding, k, filter):
+        self.filters.append(filter)
+        wanted = None
+        for part in filter.get("$and", []):
+            if "document_id" in part:
+                wanted = part["document_id"].get("$in") or [part["document_id"]["$eq"]]
+        return [Document(text, metadata={"document_id": d, "filename": d})
+                for d, text in self.passages if wanted is None or d in wanted][:k]
+
+
+class CountingQueries(CountingEmbedding):
+    queries: list = []
+
+    def embed_query(self, text):
+        self.queries.append(text)
+        return super().embed_query(text)
+
+
+@pytest.fixture
+def card_search(monkeypatch):
+    from app.agents.docs import tools as docs_tools
+
+    fake = CountingQueries(size=get_settings().embed_dim)
+    fake.requests, fake.queries = [], []
+    monkeypatch.setattr(graph, "get_embeddings", lambda: fake)
+    monkeypatch.setattr(docs_tools, "get_embeddings", lambda: fake)
+    return fake
+
+
+@requires_db
+def test_a_small_file_whose_card_matches_is_not_crowded_out_by_large_ones(make_user, card_search, monkeypatch):
+    from app.agents.docs import tools as docs_tools
+
+    user = make_user()
+    big_a, big_b, small = (add_document(user, "alpha.pdf"), add_document(user, "bravo.pdf"),
+                           add_document(user, "q3.xlsx"))
+    for document_id, summary in ((big_a, "Book: investing"), (big_b, "Book: economics"), (small, "Brokerage statement")):
+        graph.save_card(user, document_id, summary, [])
+    store = RankedStore([(big_a, f"alpha passage {i}") for i in range(10)]
+                        + [(big_b, f"bravo passage {i}") for i in range(10)] + [(small, "cash balance")])
+    monkeypatch.setattr(docs_tools, "get_vector_store", lambda: store)
+
+    # The query is the small file's card text, so its card is the nearest (its stem is too short to scope).
+    result = docs_tools.search_with_graph(user, "q3.xlsx: Brokerage statement")
+
+    assert result.startswith("[" + small + "]\ncash balance")  # first: the nearest card's best passage
+    assert "alpha passage 0" in result and "bravo passage 0" in result  # each top card file's best passage
+    assert len(result.split("\n\n---\n\n")) == docs_tools.TOP_K
+    assert card_search.queries == ["q3.xlsx: Brokerage statement"]  # embedded once
+
+
+@requires_db
+def test_without_card_vectors_the_search_is_the_plain_unscoped_one(make_user, card_search, monkeypatch):
+    from app.agents.docs import tools as docs_tools
+
+    user = make_user()
+    add_document(user, "book.pdf")  # no card written
+    store = RecordingStore()
+    monkeypatch.setattr(docs_tools, "get_vector_store", lambda: store)
+
+    docs_tools.search_with_graph(user, "something")
+
+    assert store.filters == [{"user_id": {"$eq": user}}]
+    assert card_search.queries == []
 
 
 async def chat_history(checkpointer, conversation_id: str, questions: list[str]) -> None:

@@ -47,6 +47,16 @@ conversations = Table(
     Column("updated_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
 )
 
+model_settings = Table(
+    "model_settings",
+    metadata,
+    Column("user_id", String(64), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
+    Column("base_url", Text, nullable=False),
+    Column("model", Text, nullable=False),
+    Column("api_key", Text, nullable=False),  # Fernet token (app/core/model_settings.py)
+    Column("updated_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
+)
+
 documents = Table(
     "documents",
     metadata,
@@ -125,7 +135,7 @@ def pool_args() -> dict:
 
 # What the agent servers' agent_reader role (db/init/06_agent_reader.sql) may read: document
 # passages, the graph and the store's chat history. Never users, conversations or checkpoints.
-READER_TABLES = ("documents", "graph_nodes", "graph_edges", "langchain_pg_collection", "langchain_pg_embedding",
+READER_TABLES = ("documents", "model_settings", "graph_nodes", "graph_edges", "langchain_pg_collection", "langchain_pg_embedding",
                  "store", "store_vectors", "store_migrations", "vector_migrations")
 
 

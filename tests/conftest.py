@@ -8,6 +8,7 @@ from app.core.config import get_settings
 def _no_judge_model_from_env(monkeypatch):
     # Tests run on the default config, independent of a developer's .env (env vars beat .env).
     monkeypatch.setenv("OPENROUTER_JUDGE_MODEL", "")
+    monkeypatch.setenv("MODEL_KEY_SECRET", "x8bnmq0DdhOZ5kA3eWj1tTkpb3B8t7sT9bW2g1h0m4c=")  # startup requires one
     get_settings.cache_clear()
     yield
     monkeypatch.undo()

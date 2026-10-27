@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     openrouter_embed_model: str = "baai/bge-m3"
     embed_dim: int = 1024
 
+    model_key_secret: str = ""  # Fernet key; encrypts users' model API keys
     database_url: str = "postgresql://smallie:smallie@localhost:5433/smallie"
     readonly_database_url: str = "postgresql://agent_readonly:readonly@localhost:5433/smallie"
 

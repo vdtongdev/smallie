@@ -92,3 +92,15 @@ def test_agent_server_account_reaches_only_the_agent_databases():
 def test_reader_cannot_read_accounts_or_chats(reader, table):
     with reader.connect() as conn, pytest.raises(DBAPIError, match="permission denied"):
         conn.execute(text(f"SELECT 1 FROM {table} LIMIT 1"))
+
+
+def test_reader_can_read_model_settings_but_not_write(reader):
+    db.init_db()
+    db.grant_reader()
+    with reader.connect() as conn:
+        conn.execute(text("SELECT 1 FROM model_settings LIMIT 1"))
+    with reader.connect() as conn:
+        conn.execute(text("SET TRANSACTION READ WRITE"))
+        with pytest.raises(DBAPIError, match="permission denied"):
+            conn.execute(text("INSERT INTO model_settings (user_id, base_url, model, api_key) "
+                              "VALUES ('x', 'u', 'm', 'k')"))

@@ -22,6 +22,7 @@ from app.agents import registry
 from app.agents.base import ToolRecorder
 from app.agents.remote import RUN_NODE
 from app.core.memory import AgentContext, open_history_store, set_history_store
+from app.core.model_settings import require_secret
 from app.core.usage import UsageCounter
 
 # shortcut: never closed; the process lifetime is the server's (MCP sessions, the store's pool live on it).
@@ -71,6 +72,7 @@ async def make_graph():
 
 
 async def _build():
+    require_secret()
     route = os.environ.get("AGENT_ROUTE", "")
     spec = registry.get(route)
     if spec is None:

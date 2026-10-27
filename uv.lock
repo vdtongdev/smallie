@@ -2241,6 +2241,7 @@ name = "smallie"
 version = "0.5.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "cryptography" },
     { name = "docx2txt" },
     { name = "fastapi" },
     { name = "httpx" },
@@ -2275,6 +2276,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cryptography", specifier = ">=50.0.2" },
     { name = "docx2txt", specifier = ">=0.9" },
     { name = "fastapi", specifier = ">=0.140" },
     { name = "httpx", specifier = ">=0.28.1" },

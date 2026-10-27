@@ -37,7 +37,7 @@ from app.core.llm import get_chat_model
 from app.core.memory import TEAM_MODE, AgentContext
 from app.core.prompts import reply_language
 from app.orchestration.prompts import BOARD_PROMPT, CHALLENGE_MESSAGE, CONFLICT_MESSAGE, DRAW_MESSAGE, DRAWING_NOTE, NOTHING_FOUND_MESSAGE, PLAN_PROMPT, ROUND_MESSAGE, TASK_MESSAGE, TEAM_MESSAGE
-from app.orchestration.team_plan import Plan, Task, add_follow_ups, dead_inputs, fallback_tasks, ready, validate_plan
+from app.orchestration.team_plan import Plan, Task, add_follow_ups, after_user_files, dead_inputs, fallback_tasks, ready, validate_plan
 from app.orchestration.router import ORCHESTRATOR, AssistantState, available_agents
 
 log = logging.getLogger(__name__)
@@ -373,6 +373,8 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
                 charts = {t["id"] for t in tasks if by_route[t["agent"]].draws}
                 tasks = [{**t, "depends_on": [ANSWER]} if t["id"] in charts
                          else {**t, "depends_on": [d for d in t["depends_on"] if d not in charts]} for t in tasks]
+                # inputless planned tasks wait for the tasks that read the user's files (the fallback runs everyone at once)
+                tasks = after_user_files(tasks, {s.route for s, _ in available if "user_files" in s.sources})
         emit({"type": "plan", "tasks": [_brief(t) for t in tasks], "fallback": fallback})
         workspace = {"reset": True, "goal": messages[-1].text, "tasks": tasks, "results": {}, "evidence": [], "artifacts": {},
                      "history": [], "rounds_at": {}, "wave": 0, "question": "",

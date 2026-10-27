@@ -1,7 +1,7 @@
 """Team plan: task models and the pure checks around them (no model calls)."""
 
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 
 from pydantic import BaseModel
 
@@ -67,6 +67,15 @@ def fallback_tasks(routes: Sequence[str]) -> list[dict]:
     return [_item(f"t{i}", r, "", [], "fallback") for i, r in enumerate(routes, 1)]
 
 
+def after_user_files(tasks: list[dict], file_routes: Collection[str]) -> list[dict]:
+    """Tasks with no inputs wait for the tasks that read the user's files, so they see what the files hold.
+    The waited-for ids are also kept in `files_first`: those inputs never make the task skip."""
+    readers = [t["id"] for t in tasks if t["agent"] in file_routes]
+    return [{**t, "depends_on": list(readers), "files_first": list(readers)}
+            if readers and t["agent"] not in file_routes and not t["depends_on"] else dict(t)
+            for t in tasks]
+
+
 def ready(tasks: Sequence[dict]) -> list[dict]:
     status = {x["id"]: x["status"] for x in tasks}
     return [
@@ -77,10 +86,12 @@ def ready(tasks: Sequence[dict]) -> list[dict]:
 
 
 def dead_inputs(task: dict, tasks: Sequence[dict]) -> tuple[list[str], bool]:
-    """The dependencies that produced nothing, and whether the task has no live input left."""
+    """The dependencies that produced nothing, and whether the task has no live input left.
+    Inputs in `files_first` are never counted: the task still runs when they are dead."""
     status = {x["id"]: x["status"] for x in tasks}
     dead = [d for d in task["depends_on"] if status.get(d) in DEAD]
-    return dead, bool(task["depends_on"]) and len(dead) == len(task["depends_on"])
+    planned = [d for d in task["depends_on"] if d not in task.get("files_first", [])]
+    return dead, bool(planned) and all(status.get(d) in DEAD for d in planned)
 
 
 def add_follow_ups(

@@ -221,6 +221,7 @@ async def test_paused_turn_is_not_remembered(monkeypatch):
     monkeypatch.setattr(routes_chat, "create_conversation", lambda u, k, m: {"id": "c1", "title": "t"})
     monkeypatch.setattr(routes_chat, "touch_conversation", lambda cid: None)
     monkeypatch.setattr(routes_chat, "recall_facts", lambda u: "")
+    monkeypatch.setattr(routes_chat, "load_settings", lambda u: object())  # setup for the new settings check
     monkeypatch.setattr(routes_chat, "_recent_chats", none)
     monkeypatch.setattr(routes_chat, "_user", none)
     monkeypatch.setattr(routes_chat, "add_usage", spy)
@@ -395,3 +396,76 @@ async def test_parallel_asks_name_the_agent_behind_each_tool_step(monkeypatch):
 
     seen = {(e["name"], e.get("agent")) for e in events if e["type"] in ("tool_call", "tool_result")}
     assert ("run_sql", "sql") in seen and ("tavily_tavily_search", "research") in seen
+
+
+async def _run_chat(monkeypatch, settings, astream):
+    import json
+    from types import SimpleNamespace
+
+    from app.api.routes_chat import ChatRequest, chat
+
+    async def none(*args, **kwargs):
+        return ""
+
+    async def aget_state(config):
+        return SimpleNamespace(values={"messages": []}, interrupts=[])
+
+    monkeypatch.setattr(routes_chat, "create_conversation", lambda u, k, m: {"id": "c1", "title": "t"})
+    monkeypatch.setattr(routes_chat, "touch_conversation", lambda cid: None)
+    monkeypatch.setattr(routes_chat, "recall_facts", lambda u: "")
+    monkeypatch.setattr(routes_chat, "load_settings", lambda u: settings)
+    monkeypatch.setattr(routes_chat, "_recent_chats", none)
+    monkeypatch.setattr(routes_chat, "_user", none)
+    monkeypatch.setattr(routes_chat, "add_usage", none)
+    monkeypatch.setattr(routes_chat, "_chat_input", lambda *a: none())
+    assistant = SimpleNamespace(aget_state=aget_state, astream=astream)
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(assistant=assistant, store=None)))
+    response = await chat("auto", ChatRequest(message="hi"), request, "u1")
+    return [json.loads(c.removeprefix("data: ")) async for c in response.body_iterator]
+
+
+def _settings(base_url="https://api.deepseek.com/v1"):
+    from app.core.model_settings import ModelSettings
+
+    return ModelSettings(base_url=base_url, model="m", api_key="sk-secret")
+
+
+def _raising(exc):
+    async def astream(*args, **kwargs):
+        raise exc
+        yield
+
+    return astream
+
+
+async def test_chat_without_settings_sends_no_model_and_calls_nothing(monkeypatch):
+    calls = []
+
+    async def astream(*args, **kwargs):
+        calls.append(args)
+        return
+        yield
+
+    events = await _run_chat(monkeypatch, None, astream)
+    assert [e["type"] for e in events] == ["conversation", "error", "done"]
+    assert events[1]["code"] == "no_model"
+    assert calls == []
+
+
+async def test_auth_error_names_the_users_host(monkeypatch):
+    import httpx
+    import openai
+
+    exc = openai.AuthenticationError("bad", response=httpx.Response(401, request=httpx.Request("POST", "http://x")), body=None)
+    events = await _run_chat(monkeypatch, _settings(), _raising(exc))
+    error = events[1]
+    assert error["code"] == "auth"
+    assert "api.deepseek.com" in error["message"] and "OPENROUTER" not in error["message"]
+    assert "sk-secret" not in error["message"]
+
+
+async def test_no_model_raised_inside_a_run_maps_to_no_model(monkeypatch):
+    from app.core.llm import NoModelSettings
+
+    events = await _run_chat(monkeypatch, _settings(), _raising(NoModelSettings()))
+    assert events[1]["code"] == "no_model"

@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+from urllib.parse import urlparse
 from collections.abc import AsyncIterator
 
 import openai
@@ -21,6 +22,8 @@ from app.orchestration.router import ORCHESTRATOR
 from app.core.auth import get_current_user
 from app.core.config import get_settings
 from app.core.conversations import create_conversation, get_conversation, list_conversations, touch_conversation
+from app.core.llm import NoModelSettings
+from app.core.model_settings import load_settings
 from app.core.graph import extract_facts, recall_facts
 from app.core.memory import TEAM_MODE, AgentContext, load_recent_chats, save_turn, turns
 from app.core.usage import UsageCounter, add_usage
@@ -34,6 +37,13 @@ TEAM_EVENTS = frozenset({"plan", "plan_updated", "wave", "review", "synthesize",
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=8000)
     conversation_id: str | None = None
+
+
+_NO_MODEL = {"type": "error", "code": "no_model", "message": "Set your API key in Settings to start chatting."}
+
+
+def _host(settings) -> str:
+    return (urlparse(settings.base_url).hostname if settings else None) or "unknown"
 
 
 def _sse(event: dict) -> str:
@@ -66,7 +76,11 @@ async def chat(
     async def events():
         nonlocal finished
         yield _sse({"type": "conversation", "id": conversation["id"], "title": conversation["title"]})
+        settings = None
         try:
+            settings = await asyncio.to_thread(load_settings, user_id)
+            if settings is None:
+                raise NoModelSettings()  # answered by the handler below; no model call is made
             memories, recent_chats, user = await asyncio.gather(
                 asyncio.to_thread(recall_facts, user_id),
                 _recent_chats(request, user_id, conversation["id"]) if cross_chat else _empty(),
@@ -83,11 +97,14 @@ async def chat(
             async for event in _events_from(stream):
                 yield _sse(event)
             finished = True
+        except NoModelSettings:
+            yield _sse(_NO_MODEL)
         except openai.RateLimitError:
             yield _sse({"type": "error", "code": "rate_limit",
-                        "message": "OpenRouter rate limit reached. Wait a minute or check your daily free quota."})
+                        "message": f"Your model server ({_host(settings)}) is rate limiting or out of credit."})
         except openai.AuthenticationError:
-            yield _sse({"type": "error", "code": "auth", "message": "Invalid or missing OPENROUTER_API_KEY."})
+            yield _sse({"type": "error", "code": "auth",
+                        "message": f"Your model server ({_host(settings)}) rejected the API key. Check it in Settings."})
         except Exception as exc:  # noqa: BLE001 - surface the failure to the UI
             log.exception("Agent run failed")
             yield _sse({"type": "error", "code": "internal", "message": str(exc)[:500]})

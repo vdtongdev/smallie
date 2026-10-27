@@ -26,6 +26,7 @@ from langgraph.runtime import Runtime
 from langgraph_sdk.client import LangGraphClient
 
 from app.core.config import get_settings
+from app.core.llm import NoModelSettings
 from app.core.memory import TEAM_MODE, AgentContext
 from app.core.usage import UsageCounter
 
@@ -189,6 +190,8 @@ def _usage_counters(config: RunnableConfig) -> list[UsageCounter]:
 
 def _openai_error(exc: RemoteException, url: str) -> Exception:
     data = exc.args[0] if exc.args and isinstance(exc.args[0], dict) else {}
+    if data.get("error") == "NoModelSettings":
+        return NoModelSettings()
     if found := _OPENAI_ERRORS.get(data.get("error", "")):
         cls, status = found
         response = httpx.Response(status, request=httpx.Request("POST", url))

@@ -472,6 +472,7 @@ One-node StateGraph:
 
 - `search_memory(query)`: the 5 nearest entity nodes by embedding, then the edges touching them
 - Available to every agent
+- `same_memory_results` middleware (`app/agents/factory.py`): a memory tool result equal to an earlier result of the same tool in this run comes back as a short note (`SAME_RESULT`), not the same text again
 
 ### Cross-Chat Memory
 

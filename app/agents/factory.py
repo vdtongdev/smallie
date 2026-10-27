@@ -22,7 +22,7 @@ from langgraph.store.base import BaseStore
 from app.core.config import get_settings
 from app.core.llm import get_chat_model, placeholder_model
 from app.core.memory import MEMORY_TOOLS, TEAM_MODE, TOOL_SOURCE, AgentContext
-from app.core.prompts import LAST_CALL_NOTE, MEMORIES_SECTION, RECENT_CHATS_SECTION, USER_SECTION, reply_language
+from app.core.prompts import LAST_CALL_NOTE, MEMORIES_SECTION, RECENT_CHATS_SECTION, SAME_RESULT, USER_SECTION, reply_language
 
 log = logging.getLogger(__name__)
 
@@ -135,6 +135,21 @@ async def tool_errors(request, handler):
                            tool_call_id=request.tool_call["id"], name=request.tool_call["name"], status="error")
 
 
+@wrap_tool_call
+async def same_memory_results(request, handler):
+    """A memory search whose result equals an earlier result of the same tool in this run (after the
+    last user message) comes back as a short note: the model reads the same text only once."""
+    name = request.tool_call["name"]
+    result = await handler(request)
+    if name not in {t.name for t in MEMORY_TOOLS} or not isinstance(result, ToolMessage):
+        return result
+    messages = request.state["messages"]
+    last_human = max((i for i, m in enumerate(messages) if isinstance(m, HumanMessage)), default=-1)
+    if any(isinstance(m, ToolMessage) and m.name == name and m.text == result.text for m in messages[last_human + 1:]):
+        return ToolMessage(SAME_RESULT.format(name=name), tool_call_id=request.tool_call["id"], name=name)
+    return result
+
+
 def build_agent(
     *,
     name: str,
@@ -173,7 +188,7 @@ def build_agent(
     return create_agent(
         placeholder_model(),
         tools=[*tools, *MEMORY_TOOLS],
-        middleware=[user_model, prompt_with_memories, *([make_last_call(limit)] if last_call_writes else []), call_limit, trim_tool_calls, scope_tools, source_first, tool_errors, refuse_hidden_tools,
+        middleware=[user_model, prompt_with_memories, *([make_last_call(limit)] if last_call_writes else []), call_limit, trim_tool_calls, scope_tools, source_first, tool_errors, same_memory_results, refuse_hidden_tools,
                     *middleware],
         context_schema=AgentContext,
         checkpointer=checkpointer,

@@ -227,6 +227,20 @@ def card_text(filename: str, summary: str | None) -> str:
     return f"{filename}: {summary}" if summary else filename
 
 
+def embed_cards(conn: Connection, only_missing: bool, batch: int = 64) -> int:
+    """Write card_embedding for ready documents (only those without one, or all); returns how many."""
+    query = select(documents.c.id, documents.c.filename, documents.c.summary).where(documents.c.status == "ready")
+    if only_missing:
+        query = query.where(documents.c.card_embedding.is_(None))
+    rows = conn.execute(query).all()
+    for start in range(0, len(rows), batch):
+        part = rows[start:start + batch]
+        vectors = get_embeddings().embed_documents([card_text(r.filename, r.summary) for r in part])
+        for row, vector in zip(part, vectors):
+            conn.execute(update(documents).where(documents.c.id == row.id).values(card_embedding=vector))
+    return len(rows)
+
+
 def save_card(user_id: str, document_id: str, summary: str, entities: list[str]) -> None:
     """A document card: the file's summary plus File -mentions-> Entity edges. Re-running replaces it."""
     entities = [e.strip() for e in entities if e.strip()]

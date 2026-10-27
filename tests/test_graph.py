@@ -7,7 +7,7 @@ import pytest
 from langchain_core.documents import Document
 from langchain_core.embeddings import DeterministicFakeEmbedding
 from pydantic import ValidationError
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 
 from app.core import graph
 from app.core.config import get_settings
@@ -263,6 +263,26 @@ def test_save_card_stores_a_vector_of_the_card_in_one_embedding_request(make_use
 
     graph.save_card(user, without, "", [])
     assert list(card_embedding(without)) == pytest.approx(fake.embed_query("notes.docx"))
+
+
+@requires_db
+def test_embed_cards_fills_missing_vectors_and_can_redo_all(make_user, monkeypatch):
+    fake = CountingEmbedding(size=get_settings().embed_dim)
+    fake.requests = []
+    monkeypatch.setattr(graph, "get_embeddings", lambda: fake)
+    user = make_user()
+    done, missing = add_document(user, "a.pdf"), add_document(user, "b.pdf")
+    graph.save_card(user, done, "Report", [])
+    with get_engine().begin() as conn:
+        conn.execute(update(documents).where(documents.c.id == missing).values(summary="Notes"))
+        fake.requests.clear()
+        graph.embed_cards(conn, only_missing=True)
+        assert [r for r in fake.requests if "b.pdf: Notes" in r] and not [r for r in fake.requests if "a.pdf: Report" in r]
+    assert card_embedding(missing) is not None
+    with get_engine().begin() as conn:
+        fake.requests.clear()
+        assert graph.embed_cards(conn, only_missing=False) >= 2
+    assert any("a.pdf: Report" in r for r in fake.requests)
 
 
 class RecordingStore:

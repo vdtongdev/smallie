@@ -54,6 +54,7 @@
       <button id="newChatBtn" class="primary" data-i18n="newChat"></button>
       <label class="team-switch"><input id="teamMode" type="checkbox"> <span data-i18n="teamMode"></span></label>
       <ul id="conversationList" class="conversation-list"></ul>
+      <button id="settingsBtn" class="ghost" data-i18n="settings"></button>
       <div id="usageBox" class="usage-box" hidden>
         <strong data-i18n="usage"></strong>
         <div id="usageTokens"></div>
@@ -157,6 +158,22 @@
           <li>Everyone has their own account: your chats, files and memories are visible only to you.</li>
         </ul>
 
+        <h2>Your model server</h2>
+        <table>
+          <thead><tr><th>Provider</th><th>Key page</th><th>API endpoint</th><th>Model</th></tr></thead>
+          <tbody>
+            <tr><td>DeepSeek (cheap, takes local cards)</td><td>platform.deepseek.com</td><td>https://api.deepseek.com/v1</td><td>deepseek-chat</td></tr>
+            <tr><td>OpenAI</td><td>platform.openai.com</td><td>https://api.openai.com/v1</td><td>gpt-4o-mini</td></tr>
+            <tr><td>OpenRouter</td><td>openrouter.ai</td><td>https://openrouter.ai/api/v1</td><td>your choice</td></tr>
+            <tr><td>Alibaba DashScope</td><td>dashscope.aliyun.com</td><td>https://dashscope-intl.aliyuncs.com/compatible-mode/v1</td><td>qwen-plus</td></tr>
+          </tbody>
+        </table>
+        <p>Any OpenAI-compatible service works.</p>
+        <p>Open <strong>Settings</strong> in the left sidebar and enter your API key, the API endpoint that matches the key's provider, and a model. It saves when you leave a field, and "Saved" appears.</p>
+        <p class="muted">Using one provider's key with another provider's endpoint is the most common mistake; the app says so directly.</p>
+        <p class="muted">Your key is stored encrypted on the server and sent only to the provider you chose. The app's own key is used only for embeddings (document and memory search).</p>
+
+
         <h2>Tips</h2>
         <ul>
           <li>Name what you want: a company or ticker, a time range, the number of results.</li>
@@ -239,6 +256,22 @@
           <li>Mỗi người có tài khoản riêng: cuộc trò chuyện, tệp và ghi nhớ của bạn chỉ mình bạn thấy được.</li>
         </ul>
 
+        <h2>Máy chủ model của bạn</h2>
+        <table>
+          <thead><tr><th>Nhà cung cấp</th><th>Trang lấy key</th><th>API endpoint</th><th>Model</th></tr></thead>
+          <tbody>
+            <tr><td>DeepSeek (rẻ, nhận thẻ nội địa)</td><td>platform.deepseek.com</td><td>https://api.deepseek.com/v1</td><td>deepseek-chat</td></tr>
+            <tr><td>OpenAI</td><td>platform.openai.com</td><td>https://api.openai.com/v1</td><td>gpt-4o-mini</td></tr>
+            <tr><td>OpenRouter</td><td>openrouter.ai</td><td>https://openrouter.ai/api/v1</td><td>tuỳ chọn</td></tr>
+            <tr><td>Alibaba DashScope</td><td>dashscope.aliyun.com</td><td>https://dashscope-intl.aliyuncs.com/compatible-mode/v1</td><td>qwen-plus</td></tr>
+          </tbody>
+        </table>
+        <p>Bất kỳ dịch vụ nào tương thích chuẩn OpenAI đều dùng được.</p>
+        <p>Mở <strong>Cài đặt</strong> ở thanh bên trái rồi nhập API key, API endpoint khớp với nhà cung cấp của key, và một model. Mọi thứ tự lưu khi bạn rời khỏi ô nhập, và chữ "Đã lưu" hiện ra.</p>
+        <p class="muted">Dùng key của nhà cung cấp này với endpoint của nhà cung cấp khác là lỗi hay gặp nhất; ứng dụng sẽ nói thẳng điều đó.</p>
+        <p class="muted">Key được lưu mã hoá trên máy chủ và chỉ gửi tới nhà cung cấp bạn chọn. Key riêng của ứng dụng chỉ dùng cho embedding (tìm kiếm tài liệu và trí nhớ).</p>
+
+
         <h2>Mẹo</h2>
         <ul>
           <li>Nói rõ điều bạn cần: tên công ty hoặc mã cổ phiếu, khoảng thời gian, số lượng kết quả.</li>
@@ -262,6 +295,21 @@
     <p id="accountCount" class="muted"></p>
     <ul id="accountList" class="dialog-list account-list"></ul>
     <form method="dialog"><button class="primary" data-i18n="close"></button></form>
+  </dialog>
+
+  <dialog id="settingsDialog" aria-labelledby="settingsTitle">
+    <h2 id="settingsTitle" data-i18n="settings"></h2>
+    <p id="settingsStatus" class="muted" role="status"></p>
+    <label for="settingsKey" data-i18n="apiKey"></label>
+    <input id="settingsKey" type="password" autocomplete="off">
+    <label for="settingsUrl" data-i18n="apiEndpoint"></label>
+    <input id="settingsUrl" type="text" autocomplete="off">
+    <label for="settingsModel" data-i18n="model"></label>
+    <input id="settingsModel" type="text" autocomplete="off">
+    <div>
+      <button id="settingsClear" type="button" data-i18n="clear"></button>
+      <button id="settingsClose" class="primary" type="button" data-i18n="close"></button>
+    </div>
   </dialog>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>

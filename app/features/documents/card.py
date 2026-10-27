@@ -9,7 +9,6 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.store.base import BaseStore
 from pydantic import BaseModel, Field
 
-from app.core.config import get_settings
 from app.core.graph import save_card
 from app.core.llm import get_chat_model
 from app.core.usage import UsageCounter, add_usage
@@ -40,7 +39,7 @@ async def write_card(store: BaseStore, document_id: str, user_id: str, filename:
     written = False
     try:
         opening = "\n".join(c.page_content for c in chunks)[:CARD_CHARS]
-        model = get_chat_model(get_settings().openrouter_orchestrator_model or None)
+        model = await asyncio.to_thread(get_chat_model, user_id)
         card = await model.with_structured_output(DocumentCard, method="function_calling").ainvoke(
             [SystemMessage(CARD_PROMPT), HumanMessage(f"File name: {filename}\n\n{opening}")],
             config={"callbacks": [usage]},

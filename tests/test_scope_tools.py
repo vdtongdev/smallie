@@ -131,3 +131,28 @@ async def test_first_call_is_not_forced_without_a_source_tool_in_scope(monkeypat
     tools = [_tagged("plain", None), _tagged("db", "market_db")]
     choices = await _choices(monkeypatch, agent=TEAM_MODE, sources=NO_SOURCES, tools=tools)
     assert not any(_forced(c) for c in choices)
+
+
+async def test_each_user_gets_their_own_model(monkeypatch):
+    models = {"u-1": scripted(AIMessage(content="from one")), "u-2": scripted(AIMessage(content="from two"))}
+    monkeypatch.setattr(factory, "get_chat_model", lambda user_id, **k: models[user_id])
+    agent = factory.build_agent(name="t", system_prompt="x", tools=[])
+    replies = []
+    for user in ("u-1", "u-2"):
+        out = await agent.ainvoke({"messages": [HumanMessage("hi")]}, context=AgentContext(user_id=user))
+        replies.append(out["messages"][-1].content)
+    assert replies == ["from one", "from two"]
+
+
+async def test_agent_without_settings_fails_with_no_model(monkeypatch):
+    import pytest
+
+    from app.core.llm import NoModelSettings
+
+    def none(user_id, **k):
+        raise NoModelSettings()
+
+    monkeypatch.setattr(factory, "get_chat_model", none)
+    agent = factory.build_agent(name="t", system_prompt="x", tools=[])
+    with pytest.raises(NoModelSettings):
+        await agent.ainvoke({"messages": [HumanMessage("hi")]}, context=AgentContext(user_id="u-1"))

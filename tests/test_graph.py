@@ -532,3 +532,27 @@ async def test_document_card_is_best_effort(make_user, embeddings, monkeypatch):
                                       .where(documents.c.user_id == user)).all())
     assert summaries == {"a.pdf": "Contract: A supply deal.", "b.pdf": None, "c.pdf": None}
     assert node_names(user) == ["Acme"]
+
+
+@requires_db
+async def test_extraction_and_card_use_the_users_model(monkeypatch, make_user, embeddings):
+    from langgraph.store.memory import InMemoryStore
+
+    from app.features.documents import card as card_module
+
+    user = make_user()
+    asked = []
+
+    async def ainvoke(messages, config):
+        raise RuntimeError("stop here")
+
+    def fake_model(user_id):
+        asked.append(user_id)
+        return SimpleNamespace(with_structured_output=lambda schema, method: SimpleNamespace(ainvoke=ainvoke))
+
+    monkeypatch.setattr(graph, "get_chat_model", fake_model)
+    monkeypatch.setattr(card_module, "get_chat_model", fake_model)
+    with pytest.raises(RuntimeError):
+        await graph.extract_from_turns(user, "User: hi", [])
+    await card_module.write_card(InMemoryStore(), "d1", user, "a.pdf", [Document("Opening text.")])
+    assert asked == [user, user]

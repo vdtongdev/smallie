@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import Callable, Sequence
 
 from langchain.agents import create_agent
@@ -16,7 +17,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.store.base import BaseStore
 
 from app.core.config import get_settings
-from app.core.llm import get_chat_model
+from app.core.llm import get_chat_model, placeholder_model
 from app.core.memory import MEMORY_TOOLS, TEAM_MODE, TOOL_SOURCE, AgentContext
 from app.core.prompts import MEMORIES_SECTION, RECENT_CHATS_SECTION, USER_SECTION
 
@@ -24,6 +25,13 @@ from app.core.prompts import MEMORIES_SECTION, RECENT_CHATS_SECTION, USER_SECTIO
 def _in_scope(tool, sources) -> bool:
     tag = (getattr(tool, "metadata", None) or {}).get(TOOL_SOURCE)
     return not sources or tag is None or tag in sources
+
+
+@wrap_model_call
+async def user_model(request: ModelRequest, handler):
+    """Agents are built once at startup; the model is the calling user's, chosen per model call."""
+    model = await asyncio.to_thread(get_chat_model, request.runtime.context.user_id)
+    return await handler(request.override(model=model))
 
 
 @wrap_model_call
@@ -82,15 +90,13 @@ def build_agent(
     checkpointer: BaseCheckpointSaver | None = None,
     store: BaseStore | None = None,
     max_model_calls: int | None = None,
-    model: str | None = None,
     prompt_extra: Callable[[ModelRequest], str] | None = None,
     middleware: Sequence[AgentMiddleware] = (),
 ):
     """An agent with the given tools plus long-term memory tools and a memory-aware prompt.
 
     Leave checkpointer/store unset when the agent runs as a subgraph of the assistant
-    (app/orchestration/graph.py); it then uses the parent graph's. `model` overrides
-    OPENROUTER_CHAT_MODEL; `prompt_extra(request)` is appended to the prompt on every model call;
+    (app/orchestration/graph.py); it then uses the parent graph's. `prompt_extra(request)` is appended to the prompt on every model call;
     `middleware` runs after the built-in ones.
     """
 
@@ -107,15 +113,14 @@ def build_agent(
             prompt += prompt_extra(request)
         return prompt
 
-    # Stops runaway tool loops from burning the free quota; the fallback model is handled
-    # by OpenRouter inside each request (app/llm.py).
+    # Stops runaway tool loops from burning the user's quota.
     call_limit = ModelCallLimitMiddleware(
         run_limit=max_model_calls or get_settings().max_model_calls, exit_behavior="end"
     )
     return create_agent(
-        get_chat_model(model),
+        placeholder_model(),
         tools=[*tools, *MEMORY_TOOLS],
-        middleware=[prompt_with_memories, call_limit, scope_tools, source_first, tool_errors, refuse_hidden_tools,
+        middleware=[user_model, prompt_with_memories, call_limit, scope_tools, source_first, tool_errors, refuse_hidden_tools,
                     *middleware],
         context_schema=AgentContext,
         checkpointer=checkpointer,

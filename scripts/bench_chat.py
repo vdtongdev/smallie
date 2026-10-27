@@ -194,14 +194,11 @@ def planted_flagged(transcript: dict, agent: str) -> bool:
         agent in c["routes"] for r in reviews for c in r["conflicts"])
 
 
-async def judge(question: str, full: str, without: str) -> dict:
-    """One structured call on OPENROUTER_JUDGE_MODEL (the pattern of `ask_board`); the order is shuffled. better: with | without | tie."""
-    settings = get_settings()
+async def judge(user_id: str, question: str, full: str, without: str) -> dict:
+    """One structured call on the bench user's model (the pattern of `ask_board`); the order is shuffled. better: with | without | tie."""
     swap = random.random() < 0.5
     first, second = (without, full) if swap else (full, without)
-    model = settings.openrouter_judge_model
-    board = get_chat_model(model or settings.openrouter_orchestrator_model or None,
-                           **({"exact_model": True} if model else {})).with_structured_output(Comparison, method="function_calling")
+    board = (await asyncio.to_thread(get_chat_model, user_id)).with_structured_output(Comparison, method="function_calling")
     human = f"QUESTION:\n{question}\n\nANSWER A:\n{first}\n\nANSWER B:\n{second}"
     verdict = await board.ainvoke([SystemMessage("Compare two answers to the question. Say which is better (more correct, complete and "
                                                  "better supported): A, B or tie. Give the reason in one sentence."),
@@ -366,7 +363,7 @@ async def ablate(assistant, store, user_id: str, name: str, result: Result) -> N
         with patch.object(team_module, "available_agents", without):
             rerun = await run_scenario(assistant, store, user_id, name, 1)
         result.ablation[agent] = ({"better": "error", "why": rerun.error} if rerun.error
-                                  else await judge(messages_of(name)[-1], result.answer, rerun.answer))
+                                  else await judge(user_id, messages_of(name)[-1], result.answer, rerun.answer))
 
 
 def messages_of(name: str) -> list[str]:

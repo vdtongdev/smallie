@@ -16,9 +16,6 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     embed_api_key: str = ""
-    openrouter_chat_model: str = "google/gemma-4-31b-it:free"
-    openrouter_orchestrator_model: str = ""  # the front-door agent; empty = chat model
-    openrouter_judge_model: str = ""  # the team board; empty = orchestrator model, then chat model
     openrouter_embed_model: str = "baai/bge-m3"
     embed_dim: int = 1024
 

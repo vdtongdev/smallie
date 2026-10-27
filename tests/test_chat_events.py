@@ -370,3 +370,28 @@ async def test_specialist_tool_events_inside_an_ask_name_their_agent(monkeypatch
     inner = [e for e in events if e["type"] in ("tool_call", "tool_result") and e["name"] == "run_sql"]
     assert len(inner) == 2
     assert all(e.get("agent") == "sql" for e in inner)
+
+
+async def test_parallel_asks_name_the_agent_behind_each_tool_step(monkeypatch):
+    """Two specialists asked in one orchestrator step run side by side: each one's tool events carry its own agent."""
+    from langchain_core.messages import HumanMessage
+    from tests.scripted import per_agent
+    from tests.test_orchestrator import CONFIG, _assistant, _call, _fake_db
+    from app.core.memory import AgentContext
+
+    _fake_db(monkeypatch)
+    model = per_agent(
+        orchestrator=[AIMessage("", tool_calls=[
+            {"name": "ask_sql", "args": {"question": "AAPL close?"}, "id": "c1"},
+            {"name": "ask_research", "args": {"question": "AAPL news?"}, "id": "c2"},
+        ]), AIMessage("done")],
+        sql=[_call("run_sql", {"query": "SELECT ticker, close FROM market.daily_prices"}), AIMessage("AAPL 250.")],
+        research=[_call("tavily_tavily_search", {"query": "AAPL news"}), AIMessage("news")],
+    )
+    assistant = _assistant(monkeypatch, model)
+    stream = assistant.astream({"messages": [HumanMessage("which tech company is the most valuable?")]}, CONFIG,
+                               context=AgentContext(user_id="u1"), stream_mode=["messages", "updates"], subgraphs=True)
+    events = [e async for e in _events_from(stream)]
+
+    seen = {(e["name"], e.get("agent")) for e in events if e["type"] in ("tool_call", "tool_result")}
+    assert ("run_sql", "sql") in seen and ("tavily_tavily_search", "research") in seen

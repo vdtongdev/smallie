@@ -100,7 +100,9 @@ async def source_first(request: ModelRequest, handler):
     """In a team request an agent with source tools in scope must call one on its first model call
     of the turn, so it cannot answer without looking in its sources. A request without scope (the
     orchestrator) or without a source tool (the drawer) is left free. The tool is named when there
-    is only one, else any tool is required."""
+    is only one, else any tool is required. A call already barred from tools stays barred."""
+    if request.tool_choice == "none":
+        return await handler(request)
     context = request.runtime.context
     last_human = max((i for i, m in enumerate(request.messages) if isinstance(m, HumanMessage)), default=-1)
     first_call = not any(isinstance(m, ToolMessage) for m in request.messages[last_human + 1:])
@@ -138,14 +140,16 @@ async def tool_errors(request, handler):
 @wrap_tool_call
 async def same_memory_results(request, handler):
     """A memory search whose result equals an earlier result of the same tool in this run (after the
-    last user message) comes back as a short note: the model reads the same text only once."""
+    last user message) comes back as a short note: the model reads the same text only once. Equal
+    means the same set of lines, in any order."""
     name = request.tool_call["name"]
     result = await handler(request)
     if name not in {t.name for t in MEMORY_TOOLS} or not isinstance(result, ToolMessage):
         return result
     messages = request.state["messages"]
     last_human = max((i for i, m in enumerate(messages) if isinstance(m, HumanMessage)), default=-1)
-    if any(isinstance(m, ToolMessage) and m.name == name and m.text == result.text for m in messages[last_human + 1:]):
+    if any(isinstance(m, ToolMessage) and m.name == name
+           and set(m.text.split("\n")) == set(result.text.split("\n")) for m in messages[last_human + 1:]):
         return ToolMessage(SAME_RESULT.format(name=name), tool_call_id=request.tool_call["id"], name=name)
     return result
 

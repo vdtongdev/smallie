@@ -32,7 +32,9 @@ async function api(path, options = {}) {
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.detail || res.statusText);
+    const err = new Error(body.detail || res.statusText);
+    err.status = res.status;
+    throw err;
   }
   return res.status === 204 ? null : res.json();
 }
@@ -1003,7 +1005,12 @@ function setSettingsStatus(text) {
 }
 
 async function loadSettings() {
-  const s = await api("/model-settings").catch(() => null); // 404 = nothing saved yet
+  let s = null;
+  try {
+    s = await api("/model-settings");
+  } catch (err) {
+    if (err.status !== 404) return setSettingsStatus(err.message); // 404 = nothing saved yet; else keep the form
+  }
   $("settingsKey").value = "";
   $("settingsKey").placeholder = s?.key_hint || "";
   $("settingsUrl").value = s?.base_url || "";

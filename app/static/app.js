@@ -1004,6 +1004,8 @@ function setSettingsStatus(text) {
   $("settingsStatus").textContent = text;
 }
 
+let loadedSettings = { base_url: "", model: "" };
+
 async function loadSettings() {
   let s = null;
   try {
@@ -1015,6 +1017,7 @@ async function loadSettings() {
   $("settingsKey").placeholder = s?.key_hint || "";
   $("settingsUrl").value = s?.base_url || "";
   $("settingsModel").value = s?.model || "";
+  loadedSettings = { base_url: s?.base_url || "", model: s?.model || "" };
   setSettingsStatus(s ? t("settingsKeySaved") : t("settingsNone"));
 }
 
@@ -1023,11 +1026,16 @@ function openSettings() {
   $("settingsDialog").showModal();
 }
 
+// Saves, then closes the dialog only if the save worked.
 async function saveSettings() {
   const key = $("settingsKey").value.trim();
   const base_url = $("settingsUrl").value.trim();
   const model = $("settingsModel").value.trim();
-  if (!base_url || !model || (!key && !$("settingsKey").placeholder)) return;
+  const hasKey = key || $("settingsKey").placeholder;
+  if (!base_url || !model || !hasKey) return setSettingsStatus(t("settingsFieldsRequired"));
+  if (!key && base_url === loadedSettings.base_url && model === loadedSettings.model) {
+    return $("settingsDialog").close(); // nothing changed since the last load
+  }
   try {
     const res = await api("/model-settings", {
       method: "PUT",
@@ -1035,15 +1043,15 @@ async function saveSettings() {
       body: JSON.stringify({ base_url, model, api_key: key || null }),
     });
     await loadSettings();
-    setSettingsStatus(res.warning ? `${t("saved")}. ${res.warning}` : t("saved"));
+    if (res.warning) setSettingsStatus(`${t("saved")}. ${res.warning}`);
+    else $("settingsDialog").close();
   } catch (err) {
     setSettingsStatus(err.message);
   }
 }
 
-["settingsKey", "settingsUrl", "settingsModel"].forEach((id) => $(id).addEventListener("change", saveSettings));
 $("settingsBtn").onclick = openSettings;
-$("settingsClose").onclick = () => $("settingsDialog").close();
+$("settingsSave").onclick = saveSettings;
 $("settingsClear").onclick = async () => {
   if (!confirm(t("confirmClearSettings"))) return;
   try {

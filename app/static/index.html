@@ -169,7 +169,7 @@
           </tbody>
         </table>
         <p>Any OpenAI-compatible service works.</p>
-        <p>Open <strong>Settings</strong> in the left sidebar and enter your API key, the API endpoint that matches the key's provider, and a model. It saves when you leave a field, and "Saved" appears.</p>
+        <p>Open <strong>Settings</strong> in the left sidebar and enter your API key, the API endpoint that matches the key's provider, and a model. Then press <strong>Save</strong>, which checks the connection and saves.</p>
         <p class="muted">Using one provider's key with another provider's endpoint is the most common mistake; the app says so directly.</p>
         <p class="muted">Your key is stored encrypted on the server and sent only to the provider you chose. Your messages, parts of the answers and the documents you upload are also turned into search vectors (embeddings) through OpenRouter, on the app's account.</p>
 
@@ -267,7 +267,7 @@
           </tbody>
         </table>
         <p>Bất kỳ dịch vụ nào tương thích chuẩn OpenAI đều dùng được.</p>
-        <p>Mở <strong>Cài đặt</strong> ở thanh bên trái rồi nhập API key, API endpoint khớp với nhà cung cấp của key, và một model. Mọi thứ tự lưu khi bạn rời khỏi ô nhập, và chữ "Đã lưu" hiện ra.</p>
+        <p>Mở <strong>Cài đặt</strong> ở thanh bên trái rồi nhập API key, API endpoint khớp với nhà cung cấp của key, và một model. Sau đó bấm <strong>Lưu</strong> để kiểm tra kết nối và lưu.</p>
         <p class="muted">Dùng key của nhà cung cấp này với endpoint của nhà cung cấp khác là lỗi hay gặp nhất; ứng dụng sẽ nói thẳng điều đó.</p>
         <p class="muted">Key được lưu mã hoá trên máy chủ và chỉ gửi tới nhà cung cấp bạn chọn. Tin nhắn, một phần câu trả lời và tài liệu bạn tải lên cũng được chuyển thành vector tìm kiếm (embedding) qua OpenRouter, bằng tài khoản của ứng dụng.</p>
 
@@ -306,9 +306,21 @@
     <input id="settingsUrl" type="text" autocomplete="off">
     <label for="settingsModel" data-i18n="model"></label>
     <input id="settingsModel" type="text" autocomplete="off">
-    <div>
+    <div class="provider-table">
+      <table>
+        <thead><tr><th data-i18n="colProvider"></th><th data-i18n="colKeyPage"></th><th data-i18n="apiEndpoint"></th><th data-i18n="model"></th></tr></thead>
+        <tbody>
+          <tr><td data-i18n="provDeepseek"></td><td>platform.deepseek.com</td><td>https://api.deepseek.com/v1</td><td>deepseek-chat</td></tr>
+          <tr><td>OpenAI</td><td>platform.openai.com</td><td>https://api.openai.com/v1</td><td>gpt-4o-mini</td></tr>
+          <tr><td>OpenRouter</td><td>openrouter.ai</td><td>https://openrouter.ai/api/v1</td><td data-i18n="modelYourChoice"></td></tr>
+          <tr><td>Alibaba DashScope</td><td>dashscope.aliyun.com</td><td>https://dashscope-intl.aliyuncs.com/compatible-mode/v1</td><td>qwen-plus</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="muted" data-i18n="anyOpenAI"></p>
+    <div class="dialog-actions">
       <button id="settingsClear" type="button" data-i18n="clear"></button>
-      <button id="settingsClose" class="primary" type="button" data-i18n="close"></button>
+      <button id="settingsSave" class="primary" type="button" data-i18n="save"></button>
     </div>
   </dialog>
 

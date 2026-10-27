@@ -39,7 +39,10 @@ from pydantic import BaseModel
 from app.agents.registry import AGENTS
 from app.api.routes_chat import _events_from
 from app.core.config import get_settings
-from app.core.db import init_db
+from sqlalchemy import text
+
+from app.core.accounts import ADMIN_USER_ID
+from app.core.db import get_engine, init_db
 from app.core.graph import recall_facts
 from app.core.llm import get_chat_model
 from app.core.memory import AgentContext, open_persistence
@@ -400,9 +403,24 @@ def report(results: list[Result]) -> None:
               f"max {max(seconds):.1f}s; errors: {sum(1 for r in results for c in r.calls if c.error)}")
 
 
+COPY_SETTINGS = text("""
+    INSERT INTO model_settings (user_id, base_url, model, api_key, updated_at)
+    SELECT :bench, base_url, model, api_key, now() FROM model_settings WHERE user_id = :admin
+    ON CONFLICT (user_id) DO UPDATE SET base_url = EXCLUDED.base_url, model = EXCLUDED.model,
+        api_key = EXCLUDED.api_key, updated_at = now()""")
+
+
+def copy_admin_settings(bench_user: str) -> int:
+    """The bench user calls the admin's model server; returns rows copied."""
+    with get_engine().begin() as conn:
+        return conn.execute(COPY_SETTINGS, {"bench": bench_user, "admin": ADMIN_USER_ID}).rowcount
+
+
 async def main(args) -> None:
     init_db()
     user_id = os.environ.get("BENCH_USER", "team")
+    if not copy_admin_settings(user_id):
+        sys.exit("Save model settings for the admin account first.")
     names = args.only.split(",") if args.only else list(SCENARIOS)
     results: list[Result] = []
     async with AsyncExitStack() as stack:

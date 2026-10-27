@@ -27,6 +27,7 @@ from sqlalchemy import func, select, update
 from app.core.db import conversations, documents, get_engine, init_db, users
 from app.core.graph import embed_cards, extract_from_turns, format_turn
 from app.core.memory import memory_namespace, open_persistence, turns
+from app.core.model_settings import load_settings
 from app.core.usage import UsageCounter, add_usage
 from app.features.documents.card import write_card
 from app.features.documents.ingest import chunk_ids, get_vector_store
@@ -66,6 +67,9 @@ async def pending_chats(checkpointer, user_id: str) -> list[tuple[str, int, list
 
 async def build_user(store, checkpointer, user_id: str) -> int:
     """Memories and past chats of one user into the graph; returns facts saved."""
+    if await asyncio.to_thread(load_settings, user_id) is None:  # not marked done: a later run builds them
+        print(f"  skipped {user_id}: no model settings", flush=True)
+        return 0
     facts = 0
     namespace = memory_namespace(user_id)
     items = await store.asearch(namespace, limit=10_000)

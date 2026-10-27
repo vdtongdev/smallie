@@ -45,9 +45,9 @@ Search (`search_with_graph` in `app/agents/docs/tools.py`), when step A and the 
 
 1. Embed the query once (`embed_query`) and reuse the vector for every step below (`similarity_search_by_vector`), so the call count per search is unchanged.
 2. Card ranking: the user's `CARD_FILES = 3` files with a non-null `card_embedding`, ordered by cosine distance to the query vector, `status != 'failed'`.
-3. Passages from those files (filter `document_id $in`), k = `TOP_K`.
+3. For each of those files, its best passage (filter `document_id $eq`, k = 1).
 4. Passages from every file, k = `TOP_K`.
-5. Result: the best `CARD_SLOTS = 3` passages of step 3, then step 4's passages in order, skipping duplicates, up to `TOP_K`. Reserved slots, not a merge by distance: merged by distance the large file wins again.
+5. Result: one reserved slot per file of step 2, in card order (nearest card first), holding that file's best passage; then step 4's passages in order, skipping duplicates, up to `TOP_K`. Reserved per file, not pooled and not merged by distance: pooled or merged, a large file's many close passages win the slots again (seen 2026-10-27: "what is my cash balance" ranked "Portfolio summary.docx" nearest by card, 0.43 vs 0.57, but two books took the pooled slots).
 6. When no file has a card vector, the result is step 4 alone (today's behaviour).
 
 When A or the graph gives a scope, the search stays as today: scoped first, unscoped when the scope has no passages.
@@ -65,7 +65,7 @@ All with real Postgres (`requires_db`), fake embeddings and a fake vector store 
 2. The name only in the question ("tell me about the portfolio summary doc", `entity` empty) scopes the search to that file.
 3. Two uploads with the same name: both ids are returned.
 4. A stem shorter than `MIN_TEXT_MATCH` does not scope the search.
-5. B: a one-passage file whose card is nearest to the query appears in the results while a large file fills the unscoped top `TOP_K`.
+5. B: a one-passage file whose card is nearest to the query appears in the results, first, while two large files are also among the top card files and fill the unscoped top `TOP_K` (no patching of `CARD_FILES`).
 6. B: no card vectors -> the result equals the unscoped search.
 7. `save_card` writes `card_embedding` and makes one embedding request for card text plus entities.
 

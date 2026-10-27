@@ -8,8 +8,8 @@ from app.features.documents.ingest import get_vector_store
 from app.core.memory import TOOL_SOURCE, AgentContext
 
 TOP_K = 6
-CARD_FILES = 3  # files whose card is nearest the question, when nothing names or links a file
-CARD_SLOTS = 3  # of the TOP_K passages, kept for those files so a big file can't crowd them out
+CARD_FILES = 3  # files whose card is nearest the question, when nothing names or links a file;
+# each gets one of the TOP_K passages, so a big file's many close passages can't crowd the others out
 NO_PASSAGES = "No matching passages in the user's documents."
 
 
@@ -47,14 +47,15 @@ def search_with_graph(user_id: str, query: str, entity: str = "") -> str:
 
 
 def _search_by_cards(user_id: str, query: str) -> str:
-    """Reserved slots for the files whose card is nearest, then the plain search for the rest."""
+    """The best passage of each file whose card is nearest, then the plain search for the rest."""
     vector = get_embeddings().embed_query(query)  # the one embedding of this search
     where = {"user_id": {"$eq": user_id}}
     store = get_vector_store()
-    carded = store.similarity_search_by_vector(vector, k=TOP_K, filter={"$and": [where, {"document_id": {
-        "$in": card_files(user_id, vector, CARD_FILES)}}]})
+    carded = [hit for document_id in card_files(user_id, vector, CARD_FILES)
+              for hit in store.similarity_search_by_vector(vector, k=1, filter={"$and": [where, {"document_id": {
+                  "$eq": document_id}}]})]
     hits, seen = [], set()
-    for doc in [*carded[:CARD_SLOTS], *store.similarity_search_by_vector(vector, k=TOP_K, filter=where)]:
+    for doc in [*carded, *store.similarity_search_by_vector(vector, k=TOP_K, filter=where)]:
         key = (doc.metadata.get("document_id"), doc.page_content)
         if key not in seen and len(hits) < TOP_K:
             seen.add(key)

@@ -364,7 +364,7 @@ class RankedStore:
         wanted = None
         for part in filter.get("$and", []):
             if "document_id" in part:
-                wanted = part["document_id"]["$in"]
+                wanted = part["document_id"].get("$in") or [part["document_id"]["$eq"]]
         return [Document(text, metadata={"document_id": d, "filename": d})
                 for d, text in self.passages if wanted is None or d in wanted][:k]
 
@@ -389,22 +389,24 @@ def card_search(monkeypatch):
 
 
 @requires_db
-def test_a_small_file_whose_card_matches_is_not_crowded_out_by_a_large_one(make_user, card_search, monkeypatch):
+def test_a_small_file_whose_card_matches_is_not_crowded_out_by_large_ones(make_user, card_search, monkeypatch):
     from app.agents.docs import tools as docs_tools
 
     user = make_user()
-    book, small = add_document(user, "book.pdf"), add_document(user, "q3.xlsx")
-    graph.save_card(user, book, "Book: investing", [])
-    graph.save_card(user, small, "Brokerage statement", [])
-    store = RankedStore([(book, f"book passage {i}") for i in range(10)] + [(small, "cash balance")])
+    big_a, big_b, small = (add_document(user, "alpha.pdf"), add_document(user, "bravo.pdf"),
+                           add_document(user, "q3.xlsx"))
+    for document_id, summary in ((big_a, "Book: investing"), (big_b, "Book: economics"), (small, "Brokerage statement")):
+        graph.save_card(user, document_id, summary, [])
+    store = RankedStore([(big_a, f"alpha passage {i}") for i in range(10)]
+                        + [(big_b, f"bravo passage {i}") for i in range(10)] + [(small, "cash balance")])
     monkeypatch.setattr(docs_tools, "get_vector_store", lambda: store)
-    monkeypatch.setattr(docs_tools, "CARD_FILES", 1)  # only the nearest card's file, as with many files
 
     # The query is the small file's card text, so its card is the nearest (its stem is too short to scope).
     result = docs_tools.search_with_graph(user, "q3.xlsx: Brokerage statement")
 
-    assert "cash balance" in result
-    assert result.count("book passage") == docs_tools.TOP_K - 1
+    assert result.startswith("[" + small + "]\ncash balance")  # first: the nearest card's best passage
+    assert "alpha passage 0" in result and "bravo passage 0" in result  # each top card file's best passage
+    assert len(result.split("\n\n---\n\n")) == docs_tools.TOP_K
     assert card_search.queries == ["q3.xlsx: Brokerage statement"]  # embedded once
 
 

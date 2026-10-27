@@ -235,6 +235,71 @@ def test_search_follows_the_graph_to_the_linked_file(make_user, embeddings, chun
     assert search_with_graph(bob, "termination", entity="Acme") == NO_PASSAGES  # never alice's files
 
 
+class RecordingStore:
+    def __init__(self):
+        self.filters = []
+
+    def similarity_search(self, query, k, filter):
+        self.filters.append(filter)
+        return []
+
+
+@pytest.fixture
+def recorded(monkeypatch):
+    from app.agents.docs import tools as docs_tools
+
+    store = RecordingStore()
+    monkeypatch.setattr(docs_tools, "get_vector_store", lambda: store)
+    return store
+
+
+def scoped_to(user: str, *ids: str) -> dict:
+    return {"$and": [{"user_id": {"$eq": user}}, {"document_id": {"$in": list(ids)}}]}
+
+
+@requires_db
+def test_naming_a_file_without_its_extension_scopes_the_search_to_it(make_user, embeddings, recorded):
+    from app.agents.docs.tools import search_with_graph
+
+    user = make_user()
+    wanted = add_document(user, "Portfolio summary.docx")
+    add_document(user, "The Intelligent Investor.pdf")
+
+    search_with_graph(user, "summarize my portfolio summary", entity="Portfolio summary")
+
+    assert recorded.filters[0] == scoped_to(user, wanted)
+
+
+@requires_db
+def test_a_file_named_only_in_the_question_scopes_the_search_to_it(make_user, embeddings, recorded):
+    from app.agents.docs.tools import search_with_graph
+
+    user = make_user()
+    wanted = add_document(user, "Portfolio summary.docx")
+    add_document(user, "The Intelligent Investor.pdf")
+
+    search_with_graph(user, "tell me about the portfolio summary doc")
+
+    assert recorded.filters[0] == scoped_to(user, wanted)
+
+
+@requires_db
+def test_two_uploads_with_the_same_name_are_both_searched(make_user, embeddings):
+    user = make_user()
+    first, second = add_document(user, "Portfolio summary.docx"), add_document(user, "Portfolio summary.docx")
+
+    assert sorted(graph.documents_for(user, "portfolio summary", "Portfolio summary")) == sorted([first, second])
+    assert sorted(graph.documents_for(user, "what is in the portfolio summary?")) == sorted([first, second])
+
+
+@requires_db
+def test_a_file_name_shorter_than_the_minimum_does_not_scope_the_search(make_user, embeddings):
+    user = make_user()
+    add_document(user, "cv.pdf")
+
+    assert graph.documents_for(user, "what is on my cv?") == []
+
+
 async def chat_history(checkpointer, conversation_id: str, questions: list[str]) -> None:
     from langchain_core.messages import AIMessage
     from langgraph.graph import START, MessagesState, StateGraph

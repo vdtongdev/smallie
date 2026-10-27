@@ -72,3 +72,8 @@ LAST_CALL_NOTE = """LAST STEP FOR THIS MESSAGE. You have no tool calls left, so 
 Write the answer now, from what you found so far.
 Say briefly what you could not check.
 Write the answer in {language}."""
+
+
+SAME_RESULT = """This is the same result as your earlier call of {name}. It has nothing new.
+Use what you already have.
+Call {name} again only to look for something else."""

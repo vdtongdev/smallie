@@ -546,13 +546,15 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
                 sends.append(job(a["task"], a["agent"], done_rounds + 2, "conflict", note, messages))
                 ids.append(a["task"])
             new_rounds[meet] = done_rounds + 1
-        # Follow-ups: new pending tasks, once per agent and goal; a chart task waits for the answer, nothing waits for it.
+        # Follow-ups: new pending tasks, once per agent and goal; a chart task waits for the answer, nothing waits for it. A turn with a chart task drops chart follow-ups.
         added, not_done = [], list(synthesis["not_done"])
         if compare and not broken and not asks and board.follow_ups:
             charts = {t["id"] for t in tasks if by_route[t["agent"]].draws}
             seen = {(t["agent"], " ".join(t["goal"].casefold().split())) for t in tasks}
             fresh = []
             for f in board.follow_ups:
+                if charts and f.agent in by_route and by_route[f.agent].draws:
+                    continue
                 mark = (f.agent, " ".join(f.goal.casefold().split()))
                 if mark not in seen:
                     seen.add(mark)

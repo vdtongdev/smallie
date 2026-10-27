@@ -1764,6 +1764,21 @@ async def test_chart_follow_up_waits_for_the_answer(monkeypatch):
     assert (await _thread(assistant))[-1].additional_kwargs["charts"] == [{"id": "chart-1"}]
 
 
+async def test_review_follow_up_does_not_add_a_second_chart(monkeypatch):
+    log = []
+    _plan(monkeypatch, Plan(tasks=[Task(id="t1", agent="sql", goal="get caps"), Task(id="t2", agent="research", goal="b"),
+                                   Task(id="t3", agent="chart", goal="chart the caps", depends_on=["t1"])]))
+    follow = Review(follow_ups=[Task(id="x", agent="chart", goal="draw a bar chart of the market caps", depends_on=["t1"])])
+    _board(monkeypatch, follow, then=Board())
+    model = per_agent(orchestrator=[AIMessage("Final.")])
+    assistant = _assistant(monkeypatch, model, sql=Fake("sql", "Cap.", log=log, table={**TABLE, "id": "tbl1"}),
+                           research=Fake("research", "Notes.", log=log), chart=Fake("chart", "drawn", log=log, chart="chart-1"))
+    await _stream(assistant, _ask())
+
+    assert len(_starts(log, "chart")) == 1
+    assert len((await _thread(assistant))[-1].additional_kwargs["charts"]) == 1
+
+
 # --- write-up rules and budget stop ---
 
 class _OverBudget(Runnable):

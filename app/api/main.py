@@ -9,7 +9,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app.core import auth
 from app.core.accounts import ensure_admin
-from app.api import routes_admin, routes_agents, routes_chat, routes_conversations, routes_memories, routes_usage
+from app.api import routes_admin, routes_agents, routes_chat, routes_conversations, routes_memories, routes_model_settings, routes_usage
 from app.agents.registry import AGENTS
 from app.core.config import export_tracing, get_settings
 from app.core.db import grant_reader, init_db
@@ -82,6 +82,7 @@ app.include_router(routes_agents.router, prefix="/api")
 app.include_router(routes_chat.router, prefix="/api")
 app.include_router(routes_conversations.router, prefix="/api")
 app.include_router(routes_memories.router, prefix="/api")
+app.include_router(routes_model_settings.router, prefix="/api")
 app.include_router(routes_usage.router, prefix="/api")
 for feature in FEATURES:
     for feature_router in feature.routers:

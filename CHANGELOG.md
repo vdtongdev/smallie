@@ -128,43 +128,41 @@ Versions are `major.minor.patch`: the major version stays 0 for now, each minor 
 - `scripts.bench_chat` counts the agent servers' model calls too
 
 ## 0.5.0 - Agent team
-- **Team mode** (`POST /api/chat/team`): a per-chat switch that asks the specialists together at a round table instead of one after another
-  - **The round table**: code picks the participants. They answer in parallel, each from its own sources only (the database, your files, the web)
-    - A judge sorts the answers into agreements, explained differences and conflicts. A difference counts as explained only when both sides have a source and a date; otherwise it is a conflict
-    - Only conflicts that more data can settle get another parallel round, at most `TEAM_MAX_ROUNDS` (default 4) after round 1. The orchestrator then writes the answer, and never picks a source by its kind: a database figure does not beat a web page or a file just for being a database
-    - Calls are capped per message by `TEAM_MAX_MESSAGE_MODEL_CALLS` (default 30). If the judge fails, the team goes straight to the write-up
-    - A lone participant's answer goes to the chat as it is, with no write-up call
-  - **The pause**: the team can stop to ask you a question; your reply resumes it
-  - **Source scoping**: every tool carries a source, and a team request limits each participant to its own. A call outside that scope is refused on the agent servers too, not only hidden from the model's tool list, and the research prompt names only the sources it may use
+- **Team mode** (`POST /api/chat/team`): a per-chat switch next to the message box. The orchestrator plans the question as tasks; each agent does its task from its own sources only (the database, your files, the web), in parallel when tasks are independent and one after another when one needs another's result. A judge reviews the results after each step, and the answer shows agreements, explained differences and open conflicts instead of hiding them
+  - **Plan**: one model call writes the tasks (agent, goal, the tasks it depends on), at most `TEAM_MAX_TASKS` (default 6). If the call fails or the plan is unusable, every agent the message points to answers on its own. Small talk and a message naming one agent skip the plan call; a message that names no source brings in every available agent
+  - **Hand-off challenges**: an agent that receives another's output and finds a mismatch with its own source sends it back once. If the producer revises, the tasks that used the old output run again
+  - **Conflicts**: a difference counts as explained only when each side gives a source and an as-of date and the explanation fits the size of the gap; otherwise it is a conflict. A conflict an agent can fix with its own tools (a wrong query, a wrong name) gets another round for those agents only. The judge never trusts a source because of its kind: a database figure does not beat a file or a web page for being a database
+  - **Follow-ups**: the same review call can add tasks the results call for (a file's revenue claim checked by sql), within the same task cap
+  - **Chart task**: a chart asked for in team mode runs after the answer, draws from its final table and joins the answer; charts never change what the answer says
+  - **Write-up**: the orchestrator writes one answer that names causes, open points, follow-ups dropped by the cap and tasks that never ran
+  - **Pause**: the team can stop to ask you a question; your reply resumes it
+  - **Source scoping**: each participant is limited to its own sources, and the agent servers refuse a call outside them, not only hide the tool
   - **Judge model**: new `OPENROUTER_JUDGE_MODEL` (this deployment uses `deepseek/deepseek-v4.1-flash`; empty uses the orchestrator's model). It answers itself, with no fallback model
-  - New settings: `TEAM_MAX_ROUNDS`, `TEAM_MAX_MESSAGE_MODEL_CALLS`, `OPENROUTER_JUDGE_MODEL`
-- **Status line and Activity popup** (every chat, not only team): one status line shows what the answer is doing now, and an Activity popup holds the full tool log. The inline tool lines in the chat are gone. After a reload the popup holds the same steps as the live view
-- **Measured** (one run per scenario, free models for the agents)
-  - The relay design built first on this branch and replaced: a stock question took 7 calls, 38 s
-  - Round table with the DeepSeek judge: a stock question takes 1 round, 6 calls, about 49 s. A chart question, 1 round, 6 calls, about 74 s
-  - A question with a planted wrong figure in a file takes 1 round, 9 calls, about 99 s, and the file's undated figure is flagged against the dated database and web figures
-  - With the default judge model the same conflict question took 29 calls, 189 s, and the conflict was not flagged: the judge model matters
-  - The judge ("board") costs under $0.01 per message
+  - **Settings**: new `TEAM_MAX_TASKS` (6), `TEAM_MAX_ROUNDS` (2 extra rounds per meeting point), `TEAM_MAX_MESSAGE_MODEL_CALLS` (30) and `OPENROUTER_JUDGE_MODEL`
+  - **Replaced design**: the first version, a round table where every agent answered the same question and a board compared the answers, was replaced by the task graph. Its numbers are history: a stock question 6 calls, about 49 s; a planted wrong figure 9 calls, about 99 s, flagged; with the default judge model 29 calls, 189 s, not flagged. The relay built before it was removed
+  - **Measured** (task graph, `scripts/bench_chat.py`, 2026-10-26; one run per scenario, free models for the agents): 15 scenarios, 100 model calls, no errors, no fallback to every agent. 2 calls when no specialist is needed, 4 for the stock question (26 s), 7 for the planted wrong figure (flagged), 15 with all agents. Choice precision and recall 1.00
+  - **Limits**: team mode costs more calls and time than a normal answer; a large plan can reach the call limit before it finishes, and the write-up then says what is missing; a follow-up and a file-versus-database conflict are not yet seen in a live run; the pause rarely fires in testing; shared rooms are not built
+- **File search by file name and card** (`search_documents`): naming one of your files in a question limits the search to that file. Each upload gets a card (type, summary, names), and its vector finds the files a question is about; each of the 3 nearest files keeps one passage slot, so a large file cannot crowd out a small one
+  - Files uploaded before this release have no card vector until `uv run python -m scripts.build_graph` runs once after deploying (it skips the graph work for users already built, and spends one card call per file that has no card). Until then those files use the plain search
+  - Limit: a name must be written in full in the question ("Graham" doesn't match "Benjamin Graham")
+- **Status line and Activity popup** (every chat, not only team): one status line shows what the answer is doing now, and an Activity popup holds the full tool log (in team mode also the plan, each wave and each review). The inline tool lines are gone. A reloaded chat shows the same steps as the live view, and team answers keep their tables and charts
+- **Tool errors** return to the model as an error it can correct or answer around, instead of ending the run (see the fix below)
+- **Fix: a failing tool ended the whole reply**
+  - A tool that raised an exception stopped the agent's run, so the answer was lost
+  - The agents' middleware (`tool_errors` in `app/agents/factory.py`) now returns the error as the tool's result. Interrupts and handoffs still pass through
+- **Fix: the Activity popup did not say which agent ran a tool step**
+  - When the orchestrator asked several specialists in parallel, their tool steps looked alike
+  - Each tool step now names the agent behind it (`app/agents/delegation.py`, `app/api/routes_chat.py`, `app/static/app.js`)
+- **Fix: browsers kept an old `app.js`**
+  - Static files had no `Cache-Control`, so a browser could keep a days-old script after a deploy
+  - Static files now send `no-cache` (`NoCacheStaticFiles` in `app/api/main.py`): the browser checks each time, and an unchanged file still comes back as a 304. `/api` is unchanged
 - **Fix: English questions answered in Vietnamese after a language preference was stored**
   - A remembered preference ("prefers Vietnamese") in the orchestrator's memories outweighed the language of the message
   - The orchestrator now names the reply language, taken from the latest message, on every call, even over a remembered preference
-- **Fix: the reloaded chat looked different from the live one**
-  - A reloaded team chat lacked steps the live view showed (research's tool calls), and research's text showed short source ids live but full links after a reload
-  - Live and reload now hold the same steps, and team answers keep their tables and charts
 - **Fix: one unexpected stream event ended the whole reply**
   - In the browser, a single malformed or unexpected stream event stopped the rest of the reply from showing. It is now skipped and the reply goes on
-- **Fix: opened chats kept the mode they were started with**
-  - Continuing an older chat sent its message with the mode the chat began with (for example a single agent) instead of auto routing
-  - Only team chats stay team; every other opened chat uses auto (`chatKind` in `app.js`)
-- **Fix: the test suite depended on a local `.env`**
-  - Tests inherited the judge model from the developer's `.env`. They now ignore it
 - Refactors and tooling
-  - `AgentSpec.review` marks which agents may sit at the round table
+  - `AgentSpec.review`, `sources` and `joins` describe what each agent may do in team mode
   - `scripts.bench_chat` has team scenarios (stock, conflict, chart); its answer text matches what the chat bubble shows
+  - The test suite ignores the developer's `.env` for the judge model
   - Testing rule (`.claude/rules/testing.md`): a failing test is fixed in the code, never weakened or changed to pass
-  - The relay (critique, refine and verdict steps, `TEAM_MAX_TURNS`) was built and then removed on purpose
-- Limits
-  - The agents use free models, so latency and answer quality vary
-  - The pause question rarely fires in testing
-  - Shared rooms (phase A in the design spec) are not built
-  - Each number above comes from a single run per scenario, not an average

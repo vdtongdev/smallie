@@ -165,3 +165,32 @@ Versions are `major.minor.patch`: the major version stays 0 for now, each minor 
   - `scripts.bench_chat` has team scenarios (stock, conflict, chart); its answer text matches what the chat bubble shows
   - The test suite ignores the developer's `.env` for the judge model
   - Testing rule (`.claude/rules/testing.md`): a failing test is fixed in the code, never weakened or changed to pass
+
+## 0.5.1 - User model keys and fixes
+- **Chat uses each user's own model server**: every account sets an OpenAI-compatible endpoint, API key and model in the Settings dialog. The key is stored encrypted, and chat calls go to that server, not to the operator's OpenRouter account
+  - An account without saved settings can't chat: the chat asks it to open Settings, and no model call is made
+  - Auth and rate-limit errors name the user's server host
+  - An endpoint must be `https://`, must not contain a user name or password, and must not point to a private or internal address (`app/core/endpoint.py`). Setting `ALLOW_PRIVATE_MODEL_URLS=true` allows private addresses, for local development only, e.g. a local Ollama
+  - Chat models come only from `get_chat_model(user_id)` (`app/core/llm.py`); the agents, orchestrator and judge all use the calling user's model
+- **Embeddings stay on OpenRouter**: the operator's OpenRouter key is renamed `EMBED_API_KEY` and is used only for document and memory search
+- **New setting `MODEL_KEY_SECRET`**: a Fernet key that encrypts the saved keys. Set the same value on the app and all four agent servers, and never change it: a changed value makes every saved key unreadable, and users must enter them again
+- **Removed settings**: `OPENROUTER_CHAT_MODEL`, `OPENROUTER_ORCHESTRATOR_MODEL`, `OPENROUTER_JUDGE_MODEL`, `OPENROUTER_FALLBACK_MODEL`, `OPENROUTER_QUANTIZATIONS` and `OPENROUTER_PROVIDER_SORT`. Drop them from your env file if you set them
+- **Cut-over**: after the deploy that adds `MODEL_KEY_SECRET` and `EMBED_API_KEY`, no account, the admin's included, can chat until it saves its model settings. Tell users before deploying (`DEPLOYING.md`, section 5)
+- **Fix: a model server address with a malformed port gave no clear error**
+  - The port was read outside the address check, so a bad port raised a raw `ValueError` instead of the message shown for other bad addresses
+  - A bad port now gives "The address is not a valid URL" (`check_endpoint` in `app/core/endpoint.py`)
+- **Fix: the Settings dialog showed an empty form when the saved settings failed to load**
+  - A load error looked like "nothing saved yet", so a user could enter the key again without knowing the old one was unreadable
+  - The dialog now shows the load error (`app/static/app.js`)
+
+## 0.5.2 - Fixes
+- **Fix: a reply that repeated itself ran hundreds of tool calls at once**
+  - One repeating reply was measured with 1,392 tool calls of 6 distinct queries, all run together (figure from the code comment in `app/agents/factory.py`)
+  - `trim_tool_calls` (`app/agents/factory.py`) drops a call identical to an earlier call of the same reply (ignoring case, spacing and argument order) and keeps at most 8 of the rest (`MAX_TOOL_CALLS_PER_STEP`). The orchestrator's repeat guard uses the same comparison
+  - Limit: the cap of 8 is fixed in code, not a setting
+- **Fix: a looping reply could run on without an output limit**
+  - A reply stopped only by the model's own limit, so one that repeated itself could run for a very long time
+  - New setting `MAX_OUTPUT_TOKENS` (`app/core/config.py`, passed to the chat model in `app/core/llm.py`) caps the output one model reply may produce, reasoning tokens included. It defaults to 32768: the first cap of 8192 left too little room when a model reasons before it answers
+- **Fix: the Settings dialog was cramped, and changes were saved without a Save button**
+  - Fields were narrow and spaced badly, and settings saved when a field lost focus, with no visible action
+  - The dialog now has full-width fields, a table of common providers with their endpoints and example models, and a **Save** button that checks the connection before saving (`app/static/index.html`, `app/static/style.css`, `app/static/app.js`)

@@ -11,6 +11,7 @@ from langchain.agents.middleware import (
 )
 from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_core.tools import BaseTool
+from langgraph.errors import GraphBubbleUp
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.store.base import BaseStore
 
@@ -60,6 +61,19 @@ async def refuse_hidden_tools(request, handler):
     return await handler(request)
 
 
+@wrap_tool_call
+async def tool_errors(request, handler):
+    """A tool that raises comes back to the model as an error message it can correct, instead of
+    ending the run. Interrupts and handoffs (GraphBubbleUp) and cancellation pass through."""
+    try:
+        return await handler(request)
+    except GraphBubbleUp:
+        raise
+    except Exception as e:
+        return ToolMessage(f"Tool {request.tool_call['name']} failed: {e}"[:500],
+                           tool_call_id=request.tool_call["id"], name=request.tool_call["name"], status="error")
+
+
 def build_agent(
     *,
     name: str,
@@ -101,7 +115,8 @@ def build_agent(
     return create_agent(
         get_chat_model(model),
         tools=[*tools, *MEMORY_TOOLS],
-        middleware=[prompt_with_memories, call_limit, scope_tools, source_first, refuse_hidden_tools, *middleware],
+        middleware=[prompt_with_memories, call_limit, scope_tools, source_first, tool_errors, refuse_hidden_tools,
+                    *middleware],
         context_schema=AgentContext,
         checkpointer=checkpointer,
         store=store,

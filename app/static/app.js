@@ -32,7 +32,9 @@ async function api(path, options = {}) {
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.detail || res.statusText);
+    const err = new Error(body.detail || res.statusText);
+    err.status = res.status;
+    throw err;
   }
   return res.status === 204 ? null : res.json();
 }
@@ -497,7 +499,6 @@ async function loadUsage() {
   $("usageTokens").textContent = t("usageTokens").replace("{n}", n(usage.input_tokens + usage.output_tokens));
   $("usageTokens").title = t("usageDetail").replace("{input}", n(usage.input_tokens)).replace("{output}", n(usage.output_tokens));
   $("usageCost").textContent = t("usageCost").replace("{cost}", usage.cost.toFixed(usage.cost < 0.01 ? 6 : 4)); // one call costs ~$0.000005
-  $("usageBox").hidden = false;
 }
 
 // Readme examples go into the message box, ready to send or edit.
@@ -676,10 +677,18 @@ function addCharts(charts, before = null) {
   scrollToBottom();
 }
 
-function addError(message) {
+function addError(message, code) {
   const div = document.createElement("div");
   div.className = "msg error";
   div.textContent = `⚠ ${message}`;
+  if (code === "no_model") {
+    const open = document.createElement("button");
+    open.type = "button";
+    open.className = "link-btn";
+    open.textContent = t("openSettings");
+    open.onclick = openSettings;
+    div.append(" ", open);
+  }
   $("messages").append(div);
   scrollToBottom();
 }
@@ -853,7 +862,7 @@ async function sendMessage(text) {
             current = addAssistantMessage();
             break;
           case "error":
-            addError(event.message);
+            addError(event.message, event.code);
             break;
         }
         } catch (err) {
@@ -988,6 +997,61 @@ async function loadAccounts() {
 $("adminBtn").onclick = () => {
   loadAccounts();
   $("adminDialog").showModal();
+};
+
+// ---------- model settings ----------
+function setSettingsStatus(text) {
+  $("settingsStatus").textContent = text;
+}
+
+async function loadSettings() {
+  let s = null;
+  try {
+    s = await api("/model-settings");
+  } catch (err) {
+    if (err.status !== 404) return setSettingsStatus(err.message); // 404 = nothing saved yet; else keep the form
+  }
+  $("settingsKey").value = "";
+  $("settingsKey").placeholder = s?.key_hint || "";
+  $("settingsUrl").value = s?.base_url || "";
+  $("settingsModel").value = s?.model || "";
+  setSettingsStatus(s ? t("settingsKeySaved") : t("settingsNone"));
+}
+
+function openSettings() {
+  loadSettings();
+  $("settingsDialog").showModal();
+}
+
+async function saveSettings() {
+  const key = $("settingsKey").value.trim();
+  const base_url = $("settingsUrl").value.trim();
+  const model = $("settingsModel").value.trim();
+  if (!base_url || !model || (!key && !$("settingsKey").placeholder)) return;
+  try {
+    const res = await api("/model-settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ base_url, model, api_key: key || null }),
+    });
+    await loadSettings();
+    setSettingsStatus(res.warning ? `${t("saved")}. ${res.warning}` : t("saved"));
+  } catch (err) {
+    setSettingsStatus(err.message);
+  }
+}
+
+["settingsKey", "settingsUrl", "settingsModel"].forEach((id) => $(id).addEventListener("change", saveSettings));
+$("settingsBtn").onclick = openSettings;
+$("settingsClose").onclick = () => $("settingsDialog").close();
+$("settingsClear").onclick = async () => {
+  if (!confirm(t("confirmClearSettings"))) return;
+  try {
+    await api("/model-settings", { method: "DELETE" });
+    await loadSettings();
+  } catch (err) {
+    setSettingsStatus(err.message);
+  }
 };
 
 // ---------- login ----------

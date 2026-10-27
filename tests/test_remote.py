@@ -163,6 +163,14 @@ async def test_remote_errors_become_openai_errors(name, expected):
         await agent(remote).ainvoke({"messages": []}, context=CTX)
 
 
+async def test_remote_no_model_is_raised_again():
+    from app.core.llm import NoModelSettings
+
+    remote = FakeRemote(error=RemoteException({"error": "NoModelSettings", "message": "x"}))
+    with pytest.raises(NoModelSettings):
+        await agent(remote).ainvoke({"messages": []}, context=CTX)
+
+
 async def test_unreachable_agent_raises_quickly():
     remote = FakeRemote(error=httpx.ConnectError("connection refused"))
     with pytest.raises(httpx.ConnectError):

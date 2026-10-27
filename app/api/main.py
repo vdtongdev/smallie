@@ -9,10 +9,11 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app.core import auth
 from app.core.accounts import ensure_admin
-from app.api import routes_admin, routes_agents, routes_chat, routes_conversations, routes_memories, routes_usage
+from app.api import routes_admin, routes_agents, routes_chat, routes_conversations, routes_memories, routes_model_settings, routes_usage
 from app.agents.registry import AGENTS
 from app.core.config import export_tracing, get_settings
 from app.core.db import grant_reader, init_db
+from app.core.model_settings import require_secret
 from app.features.registry import FEATURES
 from app.core.memory import open_persistence
 from app.orchestration.graph import build_assistant
@@ -26,8 +27,9 @@ SESSION_MAX_AGE = 60 * 60 * 24 * 30  # stay logged in for 30 days
 async def lifespan(app: FastAPI):
     settings = get_settings()
     export_tracing(settings)
-    if not settings.openrouter_api_key:
-        logging.warning("OPENROUTER_API_KEY is not set; chat and document indexing will fail.")
+    require_secret()
+    if not settings.embed_api_key:
+        logging.warning("EMBED_API_KEY is not set; document indexing and memory search will fail.")
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
     init_db()
     ensure_admin(settings.app_password)
@@ -80,6 +82,7 @@ app.include_router(routes_agents.router, prefix="/api")
 app.include_router(routes_chat.router, prefix="/api")
 app.include_router(routes_conversations.router, prefix="/api")
 app.include_router(routes_memories.router, prefix="/api")
+app.include_router(routes_model_settings.router, prefix="/api")
 app.include_router(routes_usage.router, prefix="/api")
 for feature in FEATURES:
     for feature_router in feature.routers:

@@ -456,6 +456,7 @@ async def test_build_graph_mines_every_past_turn_once_per_user(make_user, monkey
         return 1
 
     monkeypatch.setattr(build_graph, "extract_from_turns", extract)
+    monkeypatch.setattr(build_graph, "load_settings", lambda user_id: object())
     store, checkpointer = InMemoryStore(), InMemorySaver()
     user, resumed = make_user(), make_user()
     chat, empty, other = (str(uuid.uuid4()) for _ in range(3))
@@ -486,6 +487,27 @@ async def test_build_graph_mines_every_past_turn_once_per_user(make_user, monkey
     assert user not in remaining and resumed not in remaining  # never built twice
     with get_engine().connect() as conn:
         assert conn.execute(select(conversations.c.mined_turns).where(conversations.c.id == chat)).scalar() == 5
+
+
+@requires_db
+async def test_build_user_skips_users_without_settings(make_user, monkeypatch):
+    from langgraph.checkpoint.memory import InMemorySaver
+    from langgraph.store.memory import InMemoryStore
+
+    from app.core.memory import memory_namespace
+    from scripts import build_graph
+
+    async def extract(*args, **kwargs):
+        raise AssertionError("no model call without settings")
+
+    monkeypatch.setattr(build_graph, "extract_from_turns", extract)
+    monkeypatch.setattr(build_graph, "load_settings", lambda user_id: None)
+    store, user = InMemoryStore(), make_user()
+    await store.aput(memory_namespace(user), "m1", {"text": "User likes tea"})
+
+    assert await build_graph.build_user(store, InMemorySaver(), user) == 0
+    assert len(await store.asearch(memory_namespace(user))) == 1
+    assert user in build_graph.users_to_build()
 
 
 @requires_db
@@ -532,3 +554,44 @@ async def test_document_card_is_best_effort(make_user, embeddings, monkeypatch):
                                       .where(documents.c.user_id == user)).all())
     assert summaries == {"a.pdf": "Contract: A supply deal.", "b.pdf": None, "c.pdf": None}
     assert node_names(user) == ["Acme"]
+
+
+@requires_db
+async def test_extraction_and_card_use_the_users_model(monkeypatch, make_user, embeddings):
+    from langgraph.store.memory import InMemoryStore
+
+    from app.features.documents import card as card_module
+
+    user = make_user()
+    asked = []
+
+    async def ainvoke(messages, config):
+        raise RuntimeError("stop here")
+
+    def fake_model(user_id):
+        asked.append(user_id)
+        return SimpleNamespace(with_structured_output=lambda schema, method: SimpleNamespace(ainvoke=ainvoke))
+
+    monkeypatch.setattr(graph, "get_chat_model", fake_model)
+    monkeypatch.setattr(card_module, "get_chat_model", fake_model)
+    with pytest.raises(RuntimeError):
+        await graph.extract_from_turns(user, "User: hi", [])
+    await card_module.write_card(InMemoryStore(), "d1", user, "a.pdf", [Document("Opening text.")])
+    assert asked == [user, user]
+
+
+@requires_db
+def test_bench_copies_admin_settings(make_user, monkeypatch):
+    from app.core.db import model_settings
+    from scripts import bench_chat
+
+    admin, bench = make_user(), make_user()
+    monkeypatch.setattr(bench_chat, "ADMIN_USER_ID", admin)
+    assert bench_chat.copy_admin_settings(bench) == 0  # admin has none: nothing to copy
+    with get_engine().begin() as conn:
+        conn.execute(model_settings.insert().values(user_id=admin, base_url="http://x/v1", model="m", api_key="token"))
+    assert bench_chat.copy_admin_settings(bench) == 1
+    assert bench_chat.copy_admin_settings(bench) == 1  # again: updates
+    with get_engine().connect() as conn:
+        row = conn.execute(select(model_settings).where(model_settings.c.user_id == bench)).one()
+    assert (row.base_url, row.model, row.api_key) == ("http://x/v1", "m", "token")

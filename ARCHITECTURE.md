@@ -25,7 +25,7 @@ This file describes `main` plus the 0.4.0 remote agents (section 10) and the 0.5
 - FastAPI on Google Cloud Run (Python 3.12, async)
 - LangGraph for workflow orchestration (message routing + agent management)
 - LangChain agents (specialists + orchestrator)
-- OpenRouter API for LLM and embedding calls (free tier + server-side fallback models)
+- Each user's own OpenAI-compatible endpoint for chat calls (section 14); OpenRouter API for embeddings only
 - MCP (Model Context Protocol) servers for web search, Wikipedia, arXiv
 - Optional LangSmith tracing for debugging (section 12)
 
@@ -535,7 +535,7 @@ Every agent prompt ends with `LANGUAGE_RULE` + `MEMORY_RULE`:
 
 ### Free Tier Constraints
 
-- ~20 requests/min and a low daily cap
+- Rate limits and daily caps are the user's own endpoint's (the figures below were measured on OpenRouter's free models, ~20 requests/min and a low daily cap)
 - Strategies:
   - prefer handoff (saves the orchestrator's write-up call)
   - cap tool results (data doesn't bloat prompts)
@@ -668,7 +668,7 @@ The servers never write app data. Every login below has only what its job needs:
 | Login | Used by | Can | Cannot |
 |---|---|---|---|
 | Owner (`DATABASE_URL` of the main app) | The main app only | Everything: creates tables, writes accounts, chats, documents, the graph, stock data | Never given to a server |
-| `agent_reader` (`DATABASE_URL` of a server) | docs and research searches, the memory store, graph and chat-history tools | `SELECT` on `READER_TABLES` (`documents`, `graph_nodes`, `graph_edges`, the pgvector tables, the store tables), in read-only transactions with a 10 s timeout. `grant_reader` (`core/db.py`) grants them at the end of every app start, because on a fresh database the tables exist only after the app creates them. | Read accounts, conversations or checkpoints; any write or DDL |
+| `agent_reader` (`DATABASE_URL` of a server) | docs and research searches, the memory store, graph and chat-history tools | `SELECT` on `READER_TABLES` (`documents`, `graph_nodes`, `graph_edges`, `model_settings`, the pgvector tables, the store tables), in read-only transactions with a 10 s timeout. `grant_reader` (`core/db.py`) grants them at the end of every app start, because on a fresh database the tables exist only after the app creates them. | Read accounts, conversations or checkpoints; any write or DDL |
 | `agent_readonly` (`READONLY_DATABASE_URL`) | sql and chart stock queries | `SELECT` on the `market` schema; read-only transactions, 10 s timeout, search path `market` | Read any app table |
 | `agent_server` (`DATABASE_URI` of a server) | The Agent Server's own tables | Own the four `agent_<route>` databases (`05_agent_databases.sql`) | Open the app's database: `06_agent_reader.sql` revokes `CONNECT` from `PUBLIC` and grants it only to named roles |
 
@@ -778,7 +778,7 @@ The same review call can add tasks the results call for: a document reveals a re
 
 ### The judge model
 
-The judge is one structured model call per reviewed wave. It is set with `OPENROUTER_JUDGE_MODEL` and is used exactly (no provider quantization filter, no fallback model). The plan call uses the orchestrator's model. Three judges were measured on the round table's board, on the same scenarios:
+The judge is one structured model call per reviewed wave. It uses the account's own model from Settings, the same one as the plan call and the agents (there is no separate judge model setting any more). Three judges were measured on the round table's board, on the same scenarios, with the old fixed models:
 
 | Judge | Result |
 |---|---|
@@ -802,7 +802,7 @@ The judge is one structured model call per reviewed wave. It is set with `OPENRO
 
 ### Measured cost and latency
 
-First measurement of the task graph (2026-10-26, `scripts/bench_chat.py` on the real models: judge and orchestrator `deepseek/deepseek-v4.1-flash`, chat model `google/gemma-4-31b-it`). 15 team scenarios, 100 model calls in all, no errors, and the plan never fell back.
+First measurement of the task graph (2026-10-26, `scripts/bench_chat.py` on the real models: judge and orchestrator `deepseek/deepseek-v4.1-flash`, chat model `google/gemma-4-31b-it`; these numbers predate per-user models, so the models are no longer chosen by the operator). 15 team scenarios, 100 model calls in all, no errors, and the plan never fell back.
 
 | Scenario | Calls | Seconds |
 |---|---|---|
@@ -832,7 +832,7 @@ Latency varies with the free-tier models' load. A task graph adds one plan call 
 
 ### Limits
 
-- The chat models are free ones, so answers vary; the judge's quality depends on the judge model.
+- The chat models are the users' own, so answers and speed vary with the model each user chose; the judge's quality depends on that model.
 - A challenge exists only if the receiving agent wrote the mismatch down. Weak models may skip it.
 - One review call returns the checks and the follow-ups together, which is a large structured output. The planted error was flagged on the judge model, but a follow-up has not been seen live: in the follow-up scenario the planner already put sql in the plan, so none was needed. If it drops follow-ups, they would move to their own call (one more call per wave).
 - The file-versus-database conflict scenario did not exercise a conflict: docs withdrew because it found nothing in the test file (cause not investigated).
@@ -876,6 +876,49 @@ Traces contain full prompts (users' messages, file passages, memories), so traci
 - Google Cloud Run (project `smallie-review`, region `asia-southeast1`): `smallie` plus `smallie-docs`, `smallie-sql`, `smallie-research`, `smallie-chart`
 - Neon Postgres 18 (Singapore)
 - Upstash Redis (free; the agent servers' streaming pipe, one key prefix per server)
-- OpenRouter (free tier or paid; chat and embedding models)
+- OpenRouter (embeddings, with the operator's `EMBED_API_KEY`); chat uses each user's own endpoint (section 14)
 - Tavily (optional, web search)
 - LangSmith (optional, tracing)
+
+---
+
+## 14. User Model Settings (0.5.1)
+
+### What it is
+
+Every account, the admin's included, chats on its own model server: an OpenAI-compatible endpoint, an API key and one model name, entered in the Settings dialog. The operator's OpenRouter key pays only for embeddings (`EMBED_API_KEY`) and is never used for chat, not even as a fallback. An account without settings gets SSE `no_model` ("Set your API key in Settings to start chatting.") and no model call is made.
+
+### Storage
+
+- Table `model_settings`: `user_id` (PK, FK to `users`, deleted with the account), `base_url`, `model`, `api_key` (Fernet token), `updated_at`. Created by `init_db`; `READER_TABLES` lists it, so `agent_reader` can SELECT it.
+- `MODEL_KEY_SECRET` (Fernet key) encrypts the key. It is required at startup of the main app and of every agent server. Changing it makes saved keys unreadable, so users enter them again.
+- `GET /api/model-settings` returns `base_url`, `model` and `key_hint` (`sk-…` + last 4), never the key. `PUT` saves, `DELETE` clears. All three are scoped by `user_id` (`app/api/routes_model_settings.py`, `app/core/model_settings.py`).
+
+### Saving: the connection check
+
+`PUT` runs, in order:
+
+1. **Endpoint safety** (below). Refused gives 400 with the reason.
+2. **Key-prefix hints**, no network: an `sk-or-` key on another host than `openrouter.ai` and an `sk-ant-` key both get 400 with the right endpoint.
+3. **`GET {endpoint}/models`** with the key, 10 s timeout: 401/403 gives 400 "The key was rejected"; unreachable, timeout or a body without `data` gives 400 with what happened; a model not in `data` is saved with a warning, because some providers list models incompletely.
+
+### Model calls
+
+- `get_chat_model(user_id)` (`app/core/llm.py`) loads the user's row, checks endpoint safety and returns a `ChatOpenAI` client for that endpoint, key and model (temperature 0, `stream_usage=True`, `max_retries=1`). `_build_chat_model` is `lru_cache`d on (base_url, model, api_key, streaming), so saving new settings yields a new client; the endpoint check runs when a client is built. No row raises `NoModelSettings`. It never reads `EMBED_API_KEY`.
+- **Agents** (`app/agents/factory.py`): a `user_model` middleware, first in the list, replaces each call's model with the user's. `build_agent` gets a placeholder model with no usable key, so a call that skipped the middleware fails rather than spending anyone's key.
+- **Direct calls** pass the `user_id` they already have: the team planner and judge, fact extraction, document cards.
+- **Agent servers** call the same `get_chat_model`. They read the row themselves as `agent_reader` and decrypt it with the same `MODEL_KEY_SECRET`. The key never travels in request bodies, headers or `AgentContext`, so it stays out of traces and run records.
+- **Errors**: `openai.AuthenticationError` and `RateLimitError` messages name the user's server host. The OpenRouter `usage.cost` capture stays, so a cost figure shows only when the endpoint reports one.
+
+### Endpoint safety
+
+The server calls the endpoint, not the browser, so a user could otherwise make it call internal services (the Cloud Run metadata server, Redis, Postgres). `check_endpoint(url)` (`app/core/endpoint.py`) requires:
+
+- scheme `https`, a host and no user-info;
+- every address the host resolves to is public (no private, loopback, link-local, multicast, reserved or unspecified, IPv4 or IPv6).
+
+It runs on save and each time a client is built. `ALLOW_PRIVATE_MODEL_URLS=true` (dev only, default `false`) allows `http` and private addresses, so a local Ollama works on the same machine. Known limit: DNS rebinding is not caught (a host that resolves to a private address between the check and the request).
+
+### Usage box
+
+The usage box is hidden in the UI for now. Usage is still counted: the model-call budget depends on it.

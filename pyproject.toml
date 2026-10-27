@@ -27,6 +27,7 @@ dependencies = [
     "langchain-mcp-adapters>=0.3.2",
     "mcp>=1.30.0",
     "httpx>=0.28.1",
+    "cryptography>=50.0.2",
 ]
 
 [dependency-groups]

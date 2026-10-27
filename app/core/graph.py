@@ -19,7 +19,6 @@ from sqlalchemy import Connection, and_, delete, exists, func, or_, select, upda
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import aliased
 
-from app.core.config import get_settings
 from app.core.db import documents, get_engine, graph_edges, graph_nodes
 from app.core.llm import get_chat_model, get_embeddings
 from app.core.prompts import EXTRACT_PROMPT
@@ -403,7 +402,7 @@ async def extract_from_turns(user_id: str, turns: str, callbacks: list, source: 
     turn = (f"The user's files: {', '.join(files)}\n" if files else "") + \
         (f"Relations already in the user's graph: {', '.join(relations)}\n" if relations else "") + \
         ("\n" if files or relations else "") + turns
-    model = get_chat_model(get_settings().openrouter_orchestrator_model or None)
+    model = await asyncio.to_thread(get_chat_model, user_id)
     extractor = model.with_structured_output(FactUpdate, method="function_calling")
     update_ = await extractor.ainvoke([SystemMessage(EXTRACT_PROMPT), HumanMessage(turn)], config={"callbacks": callbacks})
     if not update_.facts:

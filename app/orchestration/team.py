@@ -171,9 +171,8 @@ def clean(board: Board, speakers: Sequence[str], tasks: Sequence[str] | None = N
 
 
 async def ask_board(messages: list[AnyMessage], answers: list[dict], config: RunnableConfig, *,
-                    inputs: Mapping[str, list[str]] | None = None, agents: Sequence[AgentSpec] | None = None) -> Review:
+                    user_id: str, inputs: Mapping[str, list[str]] | None = None, agents: Sequence[AgentSpec] | None = None) -> Review:
     """One model call; `config` carries the usage counter's callbacks. `inputs`: task id -> the task ids it received; `agents`: the available agents, which follow-ups may use."""
-    settings = get_settings()
     question = next((m.text for m in reversed(messages) if isinstance(m, HumanMessage)), "")
     # Texts go into the message, not a template: answers may contain braces.
     def head(a: dict) -> str:
@@ -185,10 +184,7 @@ async def ask_board(messages: list[AnyMessage], answers: list[dict], config: Run
         return line
 
     human = f"USER MESSAGE:\n{question}\n\nANSWERS:\n" + "\n\n".join(f"{head(a)}:\n{a['text']}" for a in answers)
-    judge = settings.openrouter_judge_model
-    # A chosen judge may be a closed model, which the quantization filter would leave without a provider.
-    board = get_chat_model(judge or settings.openrouter_orchestrator_model or None,
-                           **({"exact_model": True} if judge else {})).with_structured_output(
+    board = (await asyncio.to_thread(get_chat_model, user_id)).with_structured_output(
         Review, method="function_calling")
     if agents:  # texts go into the message, not a template
         human += "\n\nAVAILABLE AGENTS:\n" + "\n".join(
@@ -197,8 +193,9 @@ async def ask_board(messages: list[AnyMessage], answers: list[dict], config: Run
     return await board.ainvoke([SystemMessage(system), HumanMessage(human)], config=config)
 
 
-async def ask_plan(messages: list[AnyMessage], available: Sequence[tuple[AgentSpec, RouteInfo]], config: RunnableConfig) -> Plan:
-    """The one plan call per message, on the orchestrator model; `config` carries the usage counter's callbacks."""
+async def ask_plan(messages: list[AnyMessage], available: Sequence[tuple[AgentSpec, RouteInfo]], config: RunnableConfig, *,
+                   user_id: str) -> Plan:
+    """The one plan call per message, on the user's model; `config` carries the usage counter's callbacks."""
     settings = get_settings()
     question = next((m.text for m in reversed(messages) if isinstance(m, HumanMessage)), "")
     lines = []
@@ -215,7 +212,7 @@ async def ask_plan(messages: list[AnyMessage], available: Sequence[tuple[AgentSp
         lines.append(line)
     # Texts go into the message, not a template: they may contain braces.
     human = f"USER MESSAGE:\n{question}\n\nAGENTS:\n" + "\n".join(lines)
-    planner = get_chat_model(settings.openrouter_orchestrator_model or None).with_structured_output(
+    planner = (await asyncio.to_thread(get_chat_model, user_id)).with_structured_output(
         Plan, method="function_calling")
     system = PLAN_PROMPT.format(language=reply_language(messages), max_tasks=settings.team_max_tasks)
     return await planner.ainvoke([SystemMessage(system), HumanMessage(human)], config=config)
@@ -360,7 +357,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
             tasks = [{**t, "origin": "plan"} for t in fallback_tasks(chosen)]
         else:
             try:
-                tasks = validate_plan(await ask_plan(messages, available, config), [s.route for s, _ in available],
+                tasks = validate_plan(await ask_plan(messages, available, config, user_id=runtime.context.user_id), [s.route for s, _ in available],
                                       get_settings().team_max_tasks)
             except (openai.RateLimitError, openai.AuthenticationError):
                 raise
@@ -488,7 +485,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
             inputs = {a["task"]: got for a in answers if (got := [d for d in task_of[a["task"]]["depends_on"] if d in results])}
             available = await available_agents(runtime.context.user_id, specs)
             try:
-                board = await ask_board(messages, answers, config, inputs=inputs, agents=[spec for spec, _ in available])
+                board = await ask_board(messages, answers, config, user_id=runtime.context.user_id, inputs=inputs, agents=[spec for spec, _ in available])
                 if not isinstance(board, Review):
                     board = Review(**board.model_dump())
                 board = clean(board, live, [a["task"] for a in answers])

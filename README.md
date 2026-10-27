@@ -69,7 +69,7 @@ The old data stays in `/var/lib/postgresql` inside WSL until you remove the `pos
 ### App and stock data
 
 ```powershell
-copy .env.example .env          # then put your OPENROUTER_API_KEY in .env
+copy .env.example .env          # then put EMBED_API_KEY and MODEL_KEY_SECRET (see .env.example) in .env
 uv sync                         # creates .venv and installs dependencies
 uv run pytest                   # tests that need Postgres are skipped if it isn't running
 uv run python -m scripts.load_stocks   # 200 stocks into the market schema, about 2 minutes
@@ -115,11 +115,10 @@ It only runs while this PC is on. For access from anywhere, see [Deploying](#dep
 
 ## Models and cost
 
-Set in `.env`; all calls go through OpenRouter.
+Each user sets their own model server in **Settings** (the button in the sidebar): an OpenAI-compatible endpoint, an API key and one model name, used for every chat role. Keys are stored encrypted on the server (`MODEL_KEY_SECRET`) and sent only to the endpoint you chose. The Readme dialog lists example providers. An account without settings cannot chat until it saves them. Messages, answer excerpts and uploaded documents are embedded through OpenRouter on the operator's `EMBED_API_KEY`.
 
-- `OPENROUTER_CHAT_MODEL`: defaults to a free model with tool calling (list: https://openrouter.ai/models?supported_parameters=tools&max_price=0). `OPENROUTER_FALLBACK_MODEL` (comma-separated, tried in order) kicks in when the main one fails or is rate-limited; pick models that write good Vietnamese. With a paid model, `OPENROUTER_QUANTIZATIONS=bf16,fp8` keeps OpenRouter off the cheapest fp4 providers, which slip more.
-- `OPENROUTER_ORCHESTRATOR_MODEL`: the orchestrator's model; empty means `OPENROUTER_CHAT_MODEL`. The orchestrator is skipped when a message clearly points to one agent. `ORCHESTRATOR_MAX_MODEL_CALLS` (4) caps its calls per message.
-- `TEAM_MAX_TASKS` (6), `TEAM_MAX_ROUNDS` (2, per check point), `TEAM_MAX_MESSAGE_MODEL_CALLS` (30) and `OPENROUTER_JUDGE_MODEL` (the model that reviews the results in team mode; empty means the orchestrator's model): team mode takes 1 plan call + each task's calls + 1 judge call per reviewed step + 1 write-up. Measured on the task graph: 4 calls for a stock question, 7 with a planted wrong figure, 15 with all agents.
+- The orchestrator is skipped when a message clearly points to one agent. `ORCHESTRATOR_MAX_MODEL_CALLS` (4) caps its calls per message.
+- `TEAM_MAX_TASKS` (6), `TEAM_MAX_ROUNDS` (2, per check point) and `TEAM_MAX_MESSAGE_MODEL_CALLS` (30): team mode takes 1 plan call + each task's calls + 1 judge call per reviewed step + 1 write-up. Measured on the task graph with the old fixed models: 4 calls for a stock question, 7 with a planted wrong figure, 15 with all agents.
 - `TAVILY_API_KEY`: web search (free 1,000 credits/month at https://app.tavily.com). Without it, research uses the other sources. `MCP_SERVERS` adds remote MCP servers and `EXTERNAL_DATABASE_URL` lets the researcher read another Postgres (see `.env.example`).
 - `LANGSMITH_TRACING` + `LANGSMITH_API_KEY`: records every model call, tool call and routing step as a trace. Off by default. Traces contain full prompts (users' messages, file passages), so enable it in production only if you accept that.
 - `OPENROUTER_EMBED_MODEL`: defaults to `baai/bge-m3` (multilingual, about $0.01 per 1M tokens). The free `liquid/lfm-2.5-embedding-350m:free` may keep and train on your data. After changing it or `EMBED_DIM`, stop the app and run `uv run python -m scripts.reindex`.

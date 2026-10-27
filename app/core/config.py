@@ -15,16 +15,11 @@ log = logging.getLogger(__name__)
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    openrouter_api_key: str = ""
-    openrouter_chat_model: str = "google/gemma-4-31b-it:free"
-    openrouter_fallback_model: str = ""  # comma-separated, tried in order
-    openrouter_quantizations: str = ""  # comma-separated provider precisions, e.g. "bf16,fp8"; empty = any
-    openrouter_provider_sort: str = ""  # provider order: "throughput", "latency" or "price"; empty = OpenRouter's default (price-weighted)
-    openrouter_orchestrator_model: str = ""  # the front-door agent; empty = chat model
-    openrouter_judge_model: str = ""  # the team board; empty = orchestrator model, then chat model
+    embed_api_key: str = ""
     openrouter_embed_model: str = "baai/bge-m3"
     embed_dim: int = 1024
 
+    model_key_secret: str = ""  # Fernet key; encrypts users' model API keys
     database_url: str = "postgresql://smallie:smallie@localhost:5433/smallie"
     readonly_database_url: str = "postgresql://agent_readonly:readonly@localhost:5433/smallie"
 
@@ -33,6 +28,8 @@ class Settings(BaseSettings):
     session_secret: str = ""
     session_https_only: bool = False  # set true when served over HTTPS
     max_accounts: int = 20  # accounts people can create, not counting admin
+    # Dev only: lets http and private addresses through as a user's model server (e.g. a local Ollama).
+    allow_private_model_urls: bool = False
 
     upload_dir: Path = Path("uploads")
     max_upload_mb: int = 25

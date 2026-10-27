@@ -92,33 +92,28 @@ async def test_ask_board_calls_the_model_once(monkeypatch):
         with_structured_output=lambda schema, method: schemas.append((schema, method)) or SimpleNamespace(ainvoke=ainvoke)))
     config = {"callbacks": []}
     answers = [{"round": 1, "agent": "sql", "text": "SQL SAYS 3T"}, {"round": 1, "agent": "docs", "text": "DOCS SAYS 2T"}]
-    await team.ask_board([HumanMessage("question?")], answers, config)
+    await team.ask_board([HumanMessage("question?")], answers, config, user_id="u")
     assert len(calls) == 1 and calls[0][1] is config and schemas == [(Review, "function_calling")]
     human = calls[0][0][1].content
     assert "question?" in human and "SQL SAYS 3T" in human and "DOCS SAYS 2T" in human
 
 
-async def test_ask_plan_calls_the_orchestrator_model_once(monkeypatch):
+async def test_ask_plan_uses_the_users_model_once(monkeypatch):
     from app.orchestration.team_plan import Plan
-    calls, schemas, asked = [], [], []
+    calls, asked = [], []
 
     async def ainvoke(messages, config):
         calls.append((messages, config))
         return Plan()
 
-    def fake_model(model=None):
-        asked.append(model)
-        return SimpleNamespace(
-            with_structured_output=lambda schema, method: schemas.append((schema, method)) or SimpleNamespace(ainvoke=ainvoke))
+    def fake_model(user_id):
+        asked.append(user_id)
+        return SimpleNamespace(with_structured_output=lambda schema, method: SimpleNamespace(ainvoke=ainvoke))
 
     monkeypatch.setattr(team, "get_chat_model", fake_model)
-    config = {"callbacks": []}
-    available = [(SQL, RouteInfo()), (get("docs"), RouteInfo(prompt_note="FILES: handbook.pdf"))]
-    await team.ask_plan([HumanMessage("question?")], available, config)
-    assert len(calls) == 1 and calls[0][1] is config and schemas == [(Plan, "function_calling")]
-    assert asked == [get_settings().openrouter_orchestrator_model or None]
-    human = calls[0][0][1].content
-    assert "question?" in human and "sql" in human and SQL.description in human and "FILES: handbook.pdf" in human
+    available = [(SQL, RouteInfo())]
+    await team.ask_plan([HumanMessage("question?")], available, {"callbacks": []}, user_id="u-7")
+    assert asked == ["u-7"] and len(calls) == 1
 
 
 def test_plan_prompt_formats():
@@ -126,26 +121,20 @@ def test_plan_prompt_formats():
     assert "6" in PLAN_PROMPT.format(language="English", max_tasks=6)
 
 
-@pytest.mark.parametrize("judge, orchestrator, expected", [
-    ("judge/model", "orch/model", "judge/model"),
-    ("", "orch/model", "orch/model"),
-    ("", "", None),
-])
-async def test_board_uses_the_judge_model(monkeypatch, judge, orchestrator, expected):
+async def test_board_uses_the_users_model(monkeypatch):
     asked = []
 
     async def ainvoke(messages, config):
         return Board()
 
-    def fake_model(model=None, **kwargs):
-        asked.append(model)
+    def fake_model(user_id):
+        asked.append(user_id)
         return SimpleNamespace(with_structured_output=lambda schema, method: SimpleNamespace(ainvoke=ainvoke))
 
     monkeypatch.setattr(team, "get_chat_model", fake_model)
-    monkeypatch.setattr(team, "get_settings", lambda: SimpleNamespace(
-        openrouter_judge_model=judge, openrouter_orchestrator_model=orchestrator))
-    await team.ask_board([HumanMessage("question?")], [{"round": 1, "agent": "sql", "text": "x"}], {"callbacks": []})
-    assert asked == [expected]
+    await team.ask_board([HumanMessage("question?")], [{"round": 1, "agent": "sql", "text": "x"}],
+                         {"callbacks": []}, user_id="u-7")
+    assert asked == ["u-7"]
 
 
 # --- the team subgraph in the real assistant graph, with scripted models and a scripted board ---
@@ -195,7 +184,7 @@ def _board(monkeypatch, *boards, then=None):
     """Scripted board: the boards in order, then `then` forever."""
     queue = itertools.chain(boards, itertools.repeat(then) if then else ())
 
-    async def fake(messages, answers, config, inputs=None, agents=None):
+    async def fake(messages, answers, config, user_id=None, inputs=None, agents=None):
         return next(queue)
 
     monkeypatch.setattr(team, "ask_board", fake)
@@ -205,7 +194,7 @@ def _plan(monkeypatch, *plans):
     """Scripted plan call: the plans in order. Returns the list of messages it was asked with."""
     queue, asked = iter(plans), []
 
-    async def fake(messages, available, config):
+    async def fake(messages, available, config, user_id=None):
         asked.append(messages)
         return next(queue)
 
@@ -400,7 +389,7 @@ async def test_failed_speaker_forces_write_up(monkeypatch):
 
 
 async def test_failed_board_forces_write_up(monkeypatch):
-    async def broken(messages, answers, config, inputs=None, agents=None):
+    async def broken(messages, answers, config, user_id=None, inputs=None, agents=None):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(team, "ask_board", broken)
@@ -417,7 +406,7 @@ async def test_failed_board_rate_limit_still_propagates(monkeypatch):
     import httpx
     import openai
 
-    async def limited(messages, answers, config, inputs=None, agents=None):
+    async def limited(messages, answers, config, user_id=None, inputs=None, agents=None):
         raise openai.RateLimitError("slow", response=httpx.Response(429, request=httpx.Request("POST", "http://x")), body=None)
 
     monkeypatch.setattr(team, "ask_board", limited)
@@ -449,7 +438,7 @@ async def test_drawer_does_not_speak_in_rounds(monkeypatch):
     log = []
     boards = []
 
-    async def fake(messages, answers, config, inputs=None, agents=None):
+    async def fake(messages, answers, config, user_id=None, inputs=None, agents=None):
         boards.append([a["agent"] for a in answers])
         return Board()
 
@@ -959,7 +948,7 @@ def _boards_log(monkeypatch, *boards, then=None):
     seen = []
     queue = itertools.chain(boards, itertools.repeat(then) if then else ())
 
-    async def fake(messages, answers, config, inputs=None, agents=None):
+    async def fake(messages, answers, config, user_id=None, inputs=None, agents=None):
         seen.append([a["agent"] for a in answers])
         return next(queue)
 
@@ -1408,7 +1397,7 @@ async def test_task_with_some_inputs_dead_runs_and_is_told(monkeypatch):
 async def test_no_review_for_a_wave_without_inputs_or_meeting(monkeypatch):
     log, reviewed = [], []
 
-    async def fake(messages, answers, config, inputs=None, agents=None):
+    async def fake(messages, answers, config, user_id=None, inputs=None, agents=None):
         reviewed.append([a["agent"] for a in answers])
         return Board()
 
@@ -1652,7 +1641,7 @@ async def test_ask_board_lists_what_each_task_received(monkeypatch):
     monkeypatch.setattr(team, "get_chat_model", lambda model=None, **kw: SimpleNamespace(
         with_structured_output=lambda schema, method: SimpleNamespace(ainvoke=ainvoke)))
     answers = [{"task": "t1", "agent": "docs", "text": "D"}, {"task": "t2", "agent": "sql", "text": "S"}]
-    await team.ask_board([HumanMessage("q?")], answers, {"callbacks": []}, inputs={"t2": ["t1"]})
+    await team.ask_board([HumanMessage("q?")], answers, {"callbacks": []}, user_id="u", inputs={"t2": ["t1"]})
     assert "t2 (sql) received: t1" in seen[0]
 
 
@@ -1724,7 +1713,7 @@ async def test_last_wave_with_one_task_is_reviewed_and_may_grow_the_plan_below_t
         monkeypatch.setattr(get_settings(), "team_max_tasks", cap)
         log, reviewed = [], []
 
-        async def fake(messages, answers, config, inputs=None, agents=None):
+        async def fake(messages, answers, config, user_id=None, inputs=None, agents=None):
             reviewed.append(answers)
             return _follow(goal="more", depends_on=()) if len(reviewed) == 1 else Review()
 
@@ -1737,7 +1726,7 @@ async def test_last_wave_with_one_task_is_reviewed_and_may_grow_the_plan_below_t
 
 
 async def test_failed_review_adds_no_follow_ups(monkeypatch):
-    async def broken(messages, answers, config, inputs=None, agents=None):
+    async def broken(messages, answers, config, user_id=None, inputs=None, agents=None):
         raise RuntimeError("boom")
 
     log = []

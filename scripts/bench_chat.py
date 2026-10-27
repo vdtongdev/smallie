@@ -39,7 +39,10 @@ from pydantic import BaseModel
 from app.agents.registry import AGENTS
 from app.api.routes_chat import _events_from
 from app.core.config import get_settings
-from app.core.db import init_db
+from sqlalchemy import text
+
+from app.core.accounts import ADMIN_USER_ID
+from app.core.db import get_engine, init_db
 from app.core.graph import recall_facts
 from app.core.llm import get_chat_model
 from app.core.memory import AgentContext, open_persistence
@@ -194,14 +197,11 @@ def planted_flagged(transcript: dict, agent: str) -> bool:
         agent in c["routes"] for r in reviews for c in r["conflicts"])
 
 
-async def judge(question: str, full: str, without: str) -> dict:
-    """One structured call on OPENROUTER_JUDGE_MODEL (the pattern of `ask_board`); the order is shuffled. better: with | without | tie."""
-    settings = get_settings()
+async def judge(user_id: str, question: str, full: str, without: str) -> dict:
+    """One structured call on the bench user's model (the pattern of `ask_board`); the order is shuffled. better: with | without | tie."""
     swap = random.random() < 0.5
     first, second = (without, full) if swap else (full, without)
-    model = settings.openrouter_judge_model
-    board = get_chat_model(model or settings.openrouter_orchestrator_model or None,
-                           **({"exact_model": True} if model else {})).with_structured_output(Comparison, method="function_calling")
+    board = (await asyncio.to_thread(get_chat_model, user_id)).with_structured_output(Comparison, method="function_calling")
     human = f"QUESTION:\n{question}\n\nANSWER A:\n{first}\n\nANSWER B:\n{second}"
     verdict = await board.ainvoke([SystemMessage("Compare two answers to the question. Say which is better (more correct, complete and "
                                                  "better supported): A, B or tie. Give the reason in one sentence."),
@@ -366,7 +366,7 @@ async def ablate(assistant, store, user_id: str, name: str, result: Result) -> N
         with patch.object(team_module, "available_agents", without):
             rerun = await run_scenario(assistant, store, user_id, name, 1)
         result.ablation[agent] = ({"better": "error", "why": rerun.error} if rerun.error
-                                  else await judge(messages_of(name)[-1], result.answer, rerun.answer))
+                                  else await judge(user_id, messages_of(name)[-1], result.answer, rerun.answer))
 
 
 def messages_of(name: str) -> list[str]:
@@ -403,9 +403,24 @@ def report(results: list[Result]) -> None:
               f"max {max(seconds):.1f}s; errors: {sum(1 for r in results for c in r.calls if c.error)}")
 
 
+COPY_SETTINGS = text("""
+    INSERT INTO model_settings (user_id, base_url, model, api_key, updated_at)
+    SELECT :bench, base_url, model, api_key, now() FROM model_settings WHERE user_id = :admin
+    ON CONFLICT (user_id) DO UPDATE SET base_url = EXCLUDED.base_url, model = EXCLUDED.model,
+        api_key = EXCLUDED.api_key, updated_at = now()""")
+
+
+def copy_admin_settings(bench_user: str) -> int:
+    """The bench user calls the admin's model server; returns rows copied."""
+    with get_engine().begin() as conn:
+        return conn.execute(COPY_SETTINGS, {"bench": bench_user, "admin": ADMIN_USER_ID}).rowcount
+
+
 async def main(args) -> None:
     init_db()
     user_id = os.environ.get("BENCH_USER", "team")
+    if not copy_admin_settings(user_id):
+        sys.exit("Save model settings for the admin account first.")
     names = args.only.split(",") if args.only else list(SCENARIOS)
     results: list[Result] = []
     async with AsyncExitStack() as stack:

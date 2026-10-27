@@ -33,7 +33,7 @@ The app runs as a container on **Cloud Run** (free tier, scales to zero). All da
    gcloud projects add-iam-policy-binding <project-id> --role="roles/run.builder" --condition=None `
      --member="serviceAccount:$num-compute@developer.gserviceaccount.com"
    ```
-4. Create `cloudrun.env.yaml` (gitignored). It's your `.env` as YAML, with the Neon URLs and `SESSION_HTTPS_ONLY: "true"`. All values must be quoted strings. Add `TAVILY_API_KEY` for the orchestrator's web search. `MCP_SERVERS` and `EXTERNAL_DATABASE_URL` belong only in `cloudrun.agent.research-secrets.yaml` (section 3, step 3); `MCP_SERVERS` is JSON, so wrap it in single quotes in YAML.
+4. Create `cloudrun.env.yaml` (gitignored). It's your `.env` as YAML, with the Neon URLs and `SESSION_HTTPS_ONLY: "true"`. All values must be quoted strings. Add `TAVILY_API_KEY` for the orchestrator's web search. Rename the old OpenRouter key variable to `EMBED_API_KEY` (embeddings only; for a hard cap on that spend, give it a dedicated OpenRouter key with a credit limit) and add `MODEL_KEY_SECRET` (the same value on all five services; generate it as in `.env.example`; keep it unchanged, because changing it makes every saved model key unreadable). Drop any old chat, fallback, orchestrator, judge, quantization and provider-sort model settings if you set them: they were removed. `MCP_SERVERS` and `EXTERNAL_DATABASE_URL` belong only in `cloudrun.agent.research-secrets.yaml` (section 3, step 3); `MCP_SERVERS` is JSON, so wrap it in single quotes in YAML.
 5. Deploy from the project folder (Cloud Build builds the `Dockerfile`; `.gcloudignore` keeps `.env` and `.venv` out):
    ```powershell
    gcloud run deploy smallie --source . --region asia-southeast1 --allow-unauthenticated `
@@ -68,7 +68,9 @@ Each specialist runs as its own private Cloud Run service, all from one image (`
 2. **Upstash: a free Redis.** Create a database at https://upstash.com (region `ap-southeast-1`) and copy its `rediss://default:...@....upstash.io:6379` URL. The four servers share it; each uses its own key prefix.
 3. **`cloudrun.agent.env.yaml`** (gitignored). It holds only what an agent server needs, never `APP_PASSWORD` or `SESSION_SECRET`. All values are quoted strings:
    ```yaml
-   OPENROUTER_API_KEY: "..."          # and the OPENROUTER_* / EMBED_DIM / MAX_MODEL_CALLS / RESEARCH_MAX_MODEL_CALLS / SQL_MAX_ROWS values you use in cloudrun.env.yaml
+   EMBED_API_KEY: "..."               # OpenRouter key for embeddings only; the same value as in cloudrun.env.yaml
+   MODEL_KEY_SECRET: "..."            # Fernet key, the same value as in cloudrun.env.yaml (generate: .env.example)
+   OPENROUTER_EMBED_MODEL / EMBED_DIM / MAX_MODEL_CALLS / RESEARCH_MAX_MODEL_CALLS / SQL_MAX_ROWS: the values you use in cloudrun.env.yaml, if any
    LANGSMITH_API_KEY: "..."           # required: the free Agent Server licence checks it
    SERVICE_TOKEN: "..."               # the same value as in cloudrun.env.yaml
    # LANGSMITH_TRACING: "true"        # optional, with LANGSMITH_PROJECT: records the servers' part of a traced chat
@@ -126,4 +128,6 @@ gcloud logging read "resource.type=cloud_run_revision AND resource.labels.servic
 
 ## 5. Limits
 
-The first request after ~15 min idle cold-starts the container (10–20 s), and the first call to an idle agent server cold-starts that one too. The OpenRouter free quota is shared by everyone using the deployment. The images are stored in Artifact Registry as `asia-southeast1-docker.pkg.dev/smallie-review/cloud-run-source-deploy/smallie` and `.../smallie-agent` (0.5 GB free for both; delete old images if you redeploy often). An agent server that is awake polls Redis about once a second, so watch the Upstash command count in the first week (its free tier has a monthly cap). Neon only hosts the database; a deploy never touches it unless the schema changes.
+**Cut-over to user model keys:** after the deploy that adds `MODEL_KEY_SECRET` and `EMBED_API_KEY`, no account can chat until it saves its model settings in the app's Settings dialog. That includes the admin's account. Tell every user before deploying.
+
+The first request after ~15 min idle cold-starts the container (10–20 s), and the first call to an idle agent server cold-starts that one too. Chat quota is each account's own, on the endpoint it set in Settings; the operator's OpenRouter key is used only for embeddings. The images are stored in Artifact Registry as `asia-southeast1-docker.pkg.dev/smallie-review/cloud-run-source-deploy/smallie` and `.../smallie-agent` (0.5 GB free for both; delete old images if you redeploy often). An agent server that is awake polls Redis about once a second, so watch the Upstash command count in the first week (its free tier has a monthly cap). Neon only hosts the database; a deploy never touches it unless the schema changes.

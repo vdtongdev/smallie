@@ -263,7 +263,6 @@ def build_orchestrator(specs: Sequence[AgentSpec], agents: Mapping[str, Runnable
             language_rule=LANGUAGE_RULE, memory_rule=MEMORY_RULE,
         ),
         tools=tools,
-        model=settings.openrouter_orchestrator_model or None,
         max_model_calls=settings.orchestrator_max_model_calls,
         prompt_extra=compose_section,
         middleware=[make_prefer_handoff(targets, frozenset(

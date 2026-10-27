@@ -77,8 +77,8 @@ async def reembed_memories() -> int:
 
 def main() -> None:
     settings = get_settings()
-    if not settings.openrouter_api_key:
-        sys.exit("OPENROUTER_API_KEY is not set.")
+    if not settings.embed_api_key:
+        sys.exit("EMBED_API_KEY is not set.")
     print(f"Embedding model: {settings.openrouter_embed_model} ({settings.embed_dim} dims)")
     init_db()
     print("Documents:")

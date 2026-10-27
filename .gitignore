@@ -14,3 +14,6 @@ CLAUDE.local.md
 .langgraph_api/
 cloudrun.agent*.yaml
 .claude/settings.json
+
+# Agent task plans: kept local, the commits and CHANGELOG.md record the work
+docs/plans/

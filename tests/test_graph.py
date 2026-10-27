@@ -32,6 +32,7 @@ class AliasEmbedding(DeterministicFakeEmbedding):
 def embeddings(monkeypatch):
     fake = AliasEmbedding(size=get_settings().embed_dim)
     monkeypatch.setattr(graph, "get_embeddings", lambda: fake)
+    monkeypatch.setattr("app.agents.docs.tools.get_embeddings", lambda: fake)
     return fake
 
 
@@ -200,8 +201,8 @@ def chunks(monkeypatch):
 
     from app.agents.docs import tools as docs_tools
 
-    store = PGVector(embeddings=DeterministicFakeEmbedding(size=32), connection=get_settings().sqlalchemy_url,
-                     collection_name="test_graph", pre_delete_collection=True, use_jsonb=True)
+    store = PGVector(embeddings=DeterministicFakeEmbedding(size=get_settings().embed_dim),
+                     connection=get_settings().sqlalchemy_url, collection_name="test_graph", pre_delete_collection=True, use_jsonb=True)
     monkeypatch.setattr(docs_tools, "get_vector_store", lambda: store)
     yield store
     store.delete_collection()
@@ -327,6 +328,77 @@ def test_a_file_name_shorter_than_the_minimum_does_not_scope_the_search(make_use
     add_document(user, "cv.pdf")
 
     assert graph.documents_for(user, "what is on my cv?") == []
+
+
+class RankedStore:
+    """Fake vector store: `passages` are (document_id, text) in order of closeness; it records the
+    filters of by-vector searches and returns what matches them."""
+
+    def __init__(self, passages):
+        self.passages, self.filters = passages, []
+
+    def similarity_search_by_vector(self, embedding, k, filter):
+        self.filters.append(filter)
+        wanted = None
+        for part in filter.get("$and", []):
+            if "document_id" in part:
+                wanted = part["document_id"]["$in"]
+        return [Document(text, metadata={"document_id": d, "filename": d})
+                for d, text in self.passages if wanted is None or d in wanted][:k]
+
+
+class CountingQueries(CountingEmbedding):
+    queries: list = []
+
+    def embed_query(self, text):
+        self.queries.append(text)
+        return super().embed_query(text)
+
+
+@pytest.fixture
+def card_search(monkeypatch):
+    from app.agents.docs import tools as docs_tools
+
+    fake = CountingQueries(size=get_settings().embed_dim)
+    fake.requests, fake.queries = [], []
+    monkeypatch.setattr(graph, "get_embeddings", lambda: fake)
+    monkeypatch.setattr(docs_tools, "get_embeddings", lambda: fake)
+    return fake
+
+
+@requires_db
+def test_a_small_file_whose_card_matches_is_not_crowded_out_by_a_large_one(make_user, card_search, monkeypatch):
+    from app.agents.docs import tools as docs_tools
+
+    user = make_user()
+    book, small = add_document(user, "book.pdf"), add_document(user, "q3.xlsx")
+    graph.save_card(user, book, "Book: investing", [])
+    graph.save_card(user, small, "Brokerage statement", [])
+    store = RankedStore([(book, f"book passage {i}") for i in range(10)] + [(small, "cash balance")])
+    monkeypatch.setattr(docs_tools, "get_vector_store", lambda: store)
+    monkeypatch.setattr(docs_tools, "CARD_FILES", 1)  # only the nearest card's file, as with many files
+
+    # The query is the small file's card text, so its card is the nearest (its stem is too short to scope).
+    result = docs_tools.search_with_graph(user, "q3.xlsx: Brokerage statement")
+
+    assert "cash balance" in result
+    assert result.count("book passage") == docs_tools.TOP_K - 1
+    assert card_search.queries == ["q3.xlsx: Brokerage statement"]  # embedded once
+
+
+@requires_db
+def test_without_card_vectors_the_search_is_the_plain_unscoped_one(make_user, card_search, monkeypatch):
+    from app.agents.docs import tools as docs_tools
+
+    user = make_user()
+    add_document(user, "book.pdf")  # no card written
+    store = RecordingStore()
+    monkeypatch.setattr(docs_tools, "get_vector_store", lambda: store)
+
+    docs_tools.search_with_graph(user, "something")
+
+    assert store.filters == [{"user_id": {"$eq": user}}]
+    assert card_search.queries == []
 
 
 async def chat_history(checkpointer, conversation_id: str, questions: list[str]) -> None:

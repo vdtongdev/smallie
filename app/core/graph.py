@@ -316,6 +316,20 @@ def _linked_files(conn: Connection, user_id: str, node_ids) -> list[str]:
         graph_edges.c.user_id == user_id, other.c.kind == "file")).scalars())
 
 
+def has_cards(user_id: str) -> bool:
+    with get_engine().connect() as conn:
+        return conn.execute(select(exists().where(
+            documents.c.user_id == user_id, documents.c.card_embedding.is_not(None)))).scalar()
+
+
+def card_files(user_id: str, vector: list[float], limit: int) -> list[str]:
+    """The user's files whose card is nearest to `vector`."""
+    with get_engine().connect() as conn:
+        return list(conn.execute(select(documents.c.id).where(
+            documents.c.user_id == user_id, documents.c.status != "failed", documents.c.card_embedding.is_not(None),
+        ).order_by(documents.c.card_embedding.cosine_distance(vector)).limit(limit)).scalars())
+
+
 def documents_for(user_id: str, query: str, entity: str = "") -> list[str]:
     """The files a passage search should be limited to: those named by `entity` or in `query`
     (extension optional), else linked to `entity`, else to known entity names that appear in

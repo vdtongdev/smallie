@@ -270,19 +270,21 @@ def test_embed_cards_fills_missing_vectors_and_can_redo_all(make_user, monkeypat
     fake = CountingEmbedding(size=get_settings().embed_dim)
     fake.requests = []
     monkeypatch.setattr(graph, "get_embeddings", lambda: fake)
-    user = make_user()
-    done, missing = add_document(user, "a.pdf"), add_document(user, "b.pdf")
+    user, other = make_user(), make_user()
+    done, missing, others = add_document(user, "a.pdf"), add_document(user, "b.pdf"), add_document(other, "c.pdf")
     graph.save_card(user, done, "Report", [])
     with get_engine().begin() as conn:
         conn.execute(update(documents).where(documents.c.id == missing).values(summary="Notes"))
         fake.requests.clear()
-        graph.embed_cards(conn, only_missing=True)
+        graph.embed_cards(conn, only_missing=True, user_ids=[user])
         assert [r for r in fake.requests if "b.pdf: Notes" in r] and not [r for r in fake.requests if "a.pdf: Report" in r]
     assert card_embedding(missing) is not None
+    assert card_embedding(others) is None  # another user's document is untouched
     with get_engine().begin() as conn:
         fake.requests.clear()
-        assert graph.embed_cards(conn, only_missing=False) >= 2
+        assert graph.embed_cards(conn, only_missing=False, user_ids=[user]) == 2
     assert any("a.pdf: Report" in r for r in fake.requests)
+    assert card_embedding(others) is None
 
 
 class RecordingStore:

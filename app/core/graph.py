@@ -227,11 +227,14 @@ def card_text(filename: str, summary: str | None) -> str:
     return f"{filename}: {summary}" if summary else filename
 
 
-def embed_cards(conn: Connection, only_missing: bool, batch: int = 64) -> int:
-    """Write card_embedding for ready documents (only those without one, or all); returns how many."""
+def embed_cards(conn: Connection, only_missing: bool, batch: int = 64, user_ids: list[str] | None = None) -> int:
+    """Write card_embedding for ready documents (only those without one, or all; of `user_ids`, default
+    every user, which is what the scripts want); returns how many."""
     query = select(documents.c.id, documents.c.filename, documents.c.summary).where(documents.c.status == "ready")
     if only_missing:
         query = query.where(documents.c.card_embedding.is_(None))
+    if user_ids is not None:
+        query = query.where(documents.c.user_id.in_(user_ids))
     rows = conn.execute(query).all()
     for start in range(0, len(rows), batch):
         part = rows[start:start + batch]

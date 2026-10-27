@@ -170,7 +170,7 @@ Versions are `major.minor.patch`: the major version stays 0 for now, each minor 
 - **Chat uses each user's own model server**: every account sets an OpenAI-compatible endpoint, API key and model in the Settings dialog. The key is stored encrypted, and chat calls go to that server, not to the operator's OpenRouter account
   - An account without saved settings can't chat: the chat asks it to open Settings, and no model call is made
   - Auth and rate-limit errors name the user's server host
-  - An endpoint must be `https://`, must not contain a user name or password, and must not point to a private or internal address (`app/core/endpoint.py`). `ALLOW_PRIVATE_MODEL_URLS=false` is for local development only, e.g. a local Ollama
+  - An endpoint must be `https://`, must not contain a user name or password, and must not point to a private or internal address (`app/core/endpoint.py`). Setting `ALLOW_PRIVATE_MODEL_URLS=true` allows private addresses, for local development only, e.g. a local Ollama
   - Chat models come only from `get_chat_model(user_id)` (`app/core/llm.py`); the agents, orchestrator and judge all use the calling user's model
 - **Embeddings stay on OpenRouter**: the operator's OpenRouter key is renamed `EMBED_API_KEY` and is used only for document and memory search
 - **New setting `MODEL_KEY_SECRET`**: a Fernet key that encrypts the saved keys. Set the same value on the app and all four agent servers, and never change it: a changed value makes every saved key unreadable, and users must enter them again

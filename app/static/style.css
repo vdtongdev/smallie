@@ -267,6 +267,22 @@ dialog {
   color: var(--text);
   width: min(560px, calc(100vw - 32px));
 }
+#settingsDialog label { display: block; margin-top: 12px; margin-bottom: 4px; }
+#settingsDialog input {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  font: inherit;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+}
+#settingsDialog .provider-table { margin-top: 16px; overflow-x: auto; font-size: 12px; }
+#settingsDialog .provider-table table { border-collapse: collapse; }
+#settingsDialog .provider-table th, #settingsDialog .provider-table td { text-align: left; padding: 3px 8px 3px 0; white-space: nowrap; vertical-align: top; }
+#settingsDialog .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 dialog::backdrop { background: rgb(0 0 0 / .4); }
 .dialog-list li { display: flex; justify-content: space-between; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); }
 .account-list li { align-items: center; }

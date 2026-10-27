@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     sql_max_rows: int = 200
     # Model calls one agent may make per user message (each tool round trip is one call).
     max_model_calls: int = 6
+    # Output tokens one model reply may produce; ends a reply that repeats itself, e.g. the same tool calls over and over.
+    max_output_tokens: int = 8192
     # Let agents see the user's other chats (recent turns in the prompt + search_chat_history).
     cross_chat_history: bool = True
     # Daily stock update, weekdays at this New York time (HH:MM). Empty = no background update.

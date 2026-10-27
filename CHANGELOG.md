@@ -194,3 +194,24 @@ Versions are `major.minor.patch`: the major version stays 0 for now, each minor 
 - **Fix: the Settings dialog was cramped, and changes were saved without a Save button**
   - Fields were narrow and spaced badly, and settings saved when a field lost focus, with no visible action
   - The dialog now has full-width fields, a table of common providers with their endpoints and example models, and a **Save** button that checks the connection before saving (`app/static/index.html`, `app/static/style.css`, `app/static/app.js`)
+
+## 0.5.3 - Tool call improvements
+- **Fix: an agent ran out of model calls and gave no answer (team "forced stop")**
+  - sql and research used every allowed call on tool calls and ended on "Model call limits exceeded"
+  - The last allowed model call of each specialist must write its answer: it gets `tool_choice="none"` and a hidden note (`LAST_CALL_NOTE`, `app/core/prompts.py`), and any tool calls in that reply are dropped (`make_last_call`, `app/agents/factory.py`)
+  - A team request's "first call must use a source" rule no longer forces a tool on that last call. The orchestrator is excluded, so its hand-off still works
+  - Limit: each specialist gets one fewer tool round, e.g. sql 5 instead of 6
+- **Fix: research re-read the same memory and chat-history results**
+  - In one measured run, research called `search_chat_history` 7 times: 4 of those results were the same text, and the others held the same chats in a different order
+  - A memory-tool result whose lines equal an earlier result of the same tool for the same message, in any order, comes back as a short note (`SAME_RESULT`; `same_memory_results`, `app/agents/factory.py`). A search that finds anything new still comes back in full
+  - Limit: two identical searches in the same model reply run in parallel and both come back in full
+- **Team tasks wait for the user's files** (`after_user_files`, `app/orchestration/team_plan.py`)
+  - A planned task with no inputs now waits for the tasks that read the user's uploaded files (docs) and gets their result. Before, research started alongside docs, never saw the holdings in an uploaded file, and searched chat history instead
+  - If docs finds nothing, the waiting tasks still run and are told the input is missing (`files_first`, `dead_inputs`)
+  - If docs revises its answer after the review, the tasks that used it run again
+  - The fallback plan (when planning fails) still runs every agent at once
+  - Cost: these tasks start one wave later, about the time docs takes (around 10–25 s in testing)
+- **New setting `CHAT_TEMPERATURE` (default 0.3)**
+  - Chat models used temperature 0. At 0, a reply that starts repeating keeps repeating; that is how the 1,392-call reply happened
+  - 0.3 lowers that chance. The trade-off: weaker models slip words of another script into Vietnamese answers a little more often
+  - Set in `app/core/config.py` and documented in `.env.example`

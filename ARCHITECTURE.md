@@ -890,7 +890,7 @@ Every account, the admin's included, chats on its own model server: an OpenAI-co
 
 ### Storage
 
-- Table `model_settings`: `user_id` (PK, FK to accounts, deleted with the account), `base_url`, `model`, `api_key` (Fernet token), `updated_at`. Created by `init_db`; `READER_TABLES` lists it, so `agent_reader` can SELECT it.
+- Table `model_settings`: `user_id` (PK, FK to `users`, deleted with the account), `base_url`, `model`, `api_key` (Fernet token), `updated_at`. Created by `init_db`; `READER_TABLES` lists it, so `agent_reader` can SELECT it.
 - `MODEL_KEY_SECRET` (Fernet key) encrypts the key. It is required at startup of the main app and of every agent server. Changing it makes saved keys unreadable, so users enter them again.
 - `GET /api/model-settings` returns `base_url`, `model` and `key_hint` (`sk-…` + last 4), never the key. `PUT` saves, `DELETE` clears. All three are scoped by `user_id` (`app/api/routes_model_settings.py`, `app/core/model_settings.py`).
 

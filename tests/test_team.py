@@ -1842,3 +1842,22 @@ async def test_evidence_resets_per_message(monkeypatch):
     await _stream(assistant, _ask("And again?"))
 
     assert (await _thread(assistant))[-1].additional_kwargs["team"]["evidence"] == []
+
+
+async def test_retry_follow_up_reruns_the_previous_team_turn(monkeypatch):
+    """"try again" after a team turn re-runs the same agents on the earlier question; "thanks" stays alone."""
+    _board(monkeypatch, Board())
+    log = []
+    model = per_agent(orchestrator=[AIMessage("Final."), AIMessage("Final again."), AIMessage("You are welcome.")])
+    sql, research = Fake("sql", "Cap is 3T.", log=log), Fake("research", "Notes: 3T.", log=log)
+    assistant = _assistant(monkeypatch, model, sql=sql, research=research)
+    await _stream(assistant, _ask())
+    seen = len(log)
+
+    chunks = await _stream(assistant, _ask("try again"))
+    assert [(e["wave"], sorted(e["agents"])) for e in _events(chunks, "wave")] == [(1, ["research", "sql"])]
+    assert sql.calls == 2 and research.calls == 2
+    assert all(QUESTION in e["last"].text for e in log[seen:] if e["event"] == "start")
+
+    chunks = await _stream(assistant, _ask("thanks"))
+    assert not _events(chunks, "wave") and sql.calls == 2

@@ -13,6 +13,7 @@ on its `additional_kwargs["team"]`. Progress goes out as `custom` stream events:
 import asyncio
 import dataclasses
 import logging
+import re
 import uuid
 from collections.abc import Mapping, Sequence
 from typing import Annotated, Literal
@@ -43,6 +44,7 @@ log = logging.getLogger(__name__)
 
 TEAM = TEAM_MODE
 SMALL_TALK_WORDS = 5
+RETRY = re.compile(r"\b(again|retry|redo|rerun)\b|thử lại|làm lại|chạy lại", re.IGNORECASE)  # a short message asking to run the last turn again
 NO_SOURCES = ("none",)  # empty sources means unscoped, so the chart task gets a source no tool carries
 ANSWER = "answer"  # the id a chart task depends on: the final answer, which exists only after `synthesize`
 DRAW_GOAL = "Draw the chart the user asked for from the final answer."
@@ -128,6 +130,19 @@ def participants(available: list[tuple[AgentSpec, RouteInfo]], message: str) -> 
     chosen = [spec for spec, _ in available if spec in speakers or spec in drawers or spec.route in fed]
     return [spec for spec, _ in available if spec in chosen
             or (chosen and spec.joins == "with_others" and any(c.route != spec.route for c in chosen))]
+
+
+def retry_tasks(messages: Sequence[AnyMessage], available: Sequence[tuple[AgentSpec, RouteInfo]]) -> list[dict] | None:
+    """A short retry message ("try again") in a chat whose last team turn left a transcript: that turn's tasks, pending
+    again, on its goal. Else None."""
+    if not RETRY.search(messages[-1].text) or len(messages[-1].text.split()) > SMALL_TALK_WORDS:
+        return None
+    team = next((m.additional_kwargs["team"] for m in reversed(messages[:-1])
+                 if isinstance(m, AIMessage) and m.additional_kwargs.get("team")), None)
+    routes = {spec.route for spec, _ in available}
+    tasks = [{**t, "goal": t["goal"] or team["goal"], "status": "pending", "origin": "plan"}
+             for t in (team or {}).get("tasks", []) if t["agent"] in routes and t["origin"] in ("plan", "fallback")]
+    return tasks or None
 
 
 def clean(board: Board, speakers: Sequence[str], tasks: Sequence[str] | None = None) -> Board:
@@ -335,10 +350,13 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         available = await available_agents(runtime.context.user_id, specs)
         everyone = participants(available, messages[-1].text)
         chosen = [spec.route for spec in everyone if not spec.draws]
-        if not chosen:
+        retry = None if chosen else retry_tasks(messages, available)
+        if not chosen and not retry:
             return await alone(state, runtime, config)
         fallback = False
-        if len(everyone) == 1:  # exactly one speaker named: one task, no plan call
+        if retry:
+            tasks = retry
+        elif len(everyone) == 1:  # exactly one speaker named: one task, no plan call
             tasks = [{**t, "origin": "plan"} for t in fallback_tasks(chosen)]
         else:
             try:

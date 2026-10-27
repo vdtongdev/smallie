@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     session_secret: str = ""
     session_https_only: bool = False  # set true when served over HTTPS
     max_accounts: int = 20  # accounts people can create, not counting admin
+    # Dev only: lets http and private addresses through as a user's model server (e.g. a local Ollama).
+    allow_private_model_urls: bool = False
 
     upload_dir: Path = Path("uploads")
     max_upload_mb: int = 25

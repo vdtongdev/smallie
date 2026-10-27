@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     max_model_calls: int = 6
     # Output tokens one model reply may produce, reasoning tokens included; ends a reply that repeats itself, e.g. the same tool calls over and over.
     max_output_tokens: int = 32768
+    # Sampling temperature of chat models. At 0 a reply that starts repeating keeps repeating; higher values let weaker models slip words of another script into Vietnamese answers.
+    chat_temperature: float = 0.3
     # Let agents see the user's other chats (recent turns in the prompt + search_chat_history).
     cross_chat_history: bool = True
     # Daily stock update, weekdays at this New York time (HH:MM). Empty = no background update.

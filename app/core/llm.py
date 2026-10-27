@@ -36,9 +36,9 @@ def _build_chat_model(base_url: str, model: str, api_key: str, streaming: bool) 
         api_key=api_key,
         base_url=base_url,
         default_headers=_HEADERS if urlparse(base_url).hostname == "openrouter.ai" else None,
-        # Any sampling randomness lets weaker models slip single words of another script
-        # (Chinese, Korean, Thai) into Vietnamese answers.
-        temperature=0,
+        # At 0 a reply that starts repeating keeps repeating; higher values let weaker models
+        # slip single words of another script (Chinese, Korean, Thai) into Vietnamese answers.
+        temperature=get_settings().chat_temperature,
         streaming=streaming,
         stream_usage=True,  # the last streamed chunk carries tokens and cost
         # Retries also count against the user's quota and can't help once a cap is hit.

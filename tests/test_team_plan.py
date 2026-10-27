@@ -1,8 +1,10 @@
 from app.core.config import Settings
+from app.orchestration.team import ANSWER
 from app.orchestration.team_plan import (
     Plan,
     Task,
     add_follow_ups,
+    after_user_files,
     dead_inputs,
     fallback_tasks,
     ready,
@@ -124,3 +126,35 @@ def test_settings_defaults():
     s = Settings(_env_file=None)
     assert s.team_max_rounds == 2
     assert s.team_max_tasks == 6
+
+
+def _t(id, agent, deps=(), status="pending"):
+    return {"id": id, "agent": agent, "goal": "g", "depends_on": list(deps), "status": status, "origin": "plan"}
+
+
+def test_tasks_without_inputs_wait_for_the_file_task():
+    tasks = [_t("t1", "docs"), _t("t2", "research"), _t("t3", "sql")]
+    assert [t["depends_on"] for t in after_user_files(tasks, {"docs"})] == [[], ["t1"], ["t1"]]
+    assert [t.get("files_first") for t in after_user_files(tasks, {"docs"})] == [None, ["t1"], ["t1"]]
+
+
+def test_tasks_with_inputs_keep_them():
+    tasks = [_t("t1", "docs"), _t("t2", "sql"), _t("t3", "research", ["t2"]), _t("t4", "chart", [ANSWER])]
+    assert [t["depends_on"] for t in after_user_files(tasks, {"docs"})] == [[], ["t1"], ["t2"], [ANSWER]]
+    assert [t.get("files_first") for t in after_user_files(tasks, {"docs"})] == [None, ["t1"], None, None]
+
+
+def test_a_plan_without_a_file_task_is_unchanged():
+    tasks = [_t("t1", "research"), _t("t2", "sql")]
+    assert after_user_files(tasks, {"docs"}) == tasks
+
+
+def test_a_dead_file_task_never_skips_its_waiters():
+    tasks = after_user_files([_t("t1", "docs"), _t("t2", "research")], {"docs"})
+    tasks[0]["status"] = "withdrew"
+    assert dead_inputs(tasks[1], tasks) == (["t1"], False)
+
+
+def test_a_dead_planned_input_still_skips():
+    tasks = [_t("t1", "docs", status="withdrew"), _t("t2", "research", ["t1"])]
+    assert dead_inputs(tasks[1], tasks) == (["t1"], True)

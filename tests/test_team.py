@@ -1295,6 +1295,31 @@ async def test_dependent_task_waits_for_its_input(monkeypatch):
     assert "DOCS TEXT" in note and "t1" in note
 
 
+async def test_planned_tasks_without_inputs_wait_for_the_docs_task(monkeypatch):
+    log = []
+    plan = Plan(tasks=[Task(id="t1", agent="docs", goal="read the file"), Task(id="t2", agent="research", goal="look up")])
+    _, assistant, _ = _docs_sql(monkeypatch, plan, log)
+    chunks = await _stream(assistant, _ask(THREE))
+
+    (event,) = _events(chunks, "plan")
+    assert {t["id"]: t["depends_on"] for t in event["tasks"]} == {"t1": [], "t2": ["t1"]}
+
+
+async def test_the_fallback_runs_every_agent_in_wave_one(monkeypatch):
+    log = []
+    _, assistant, _ = _docs_sql(monkeypatch, Plan(tasks=[]), log)
+
+    async def broken(messages, available, config, user_id=None):
+        raise ValueError("no plan")
+
+    monkeypatch.setattr(team, "ask_plan", broken)
+    chunks = await _stream(assistant, _ask(THREE))
+
+    (event,) = _events(chunks, "plan")
+    assert event["fallback"] is True
+    assert [sorted(e["agents"]) for e in _events(chunks, "wave")][0] == ["docs", "research", "sql"]
+
+
 async def test_independent_tasks_share_a_wave(monkeypatch):
     log = []
     plan = Plan(tasks=[Task(id="t1", agent="docs", goal="a"), Task(id="t2", agent="sql", goal="b", depends_on=["t1"]),
@@ -1568,7 +1593,7 @@ async def test_revised_output_reruns_only_its_users(monkeypatch):
     _board(monkeypatch, _challenge(), Review(outcomes=[Outcome(task="t1", revised=True)]), then=Board())
     await _stream(assistant, _ask(THREE))
 
-    assert [agents[n].calls for n in ("docs", "sql", "research")] == [2, 2, 1]
+    assert [agents[n].calls for n in ("docs", "sql", "research")] == [2, 2, 2]
 
 
 async def test_output_that_stands_becomes_an_open_point(monkeypatch):

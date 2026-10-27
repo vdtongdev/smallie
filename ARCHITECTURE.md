@@ -261,7 +261,7 @@ The "front door" agent. Answers general questions itself, asks specialists as to
 - 4 per message by default (`ORCHESTRATOR_MAX_MODEL_CALLS`)
 - `no_repeats` middleware skips identical repeated tool calls and caps `ask_<agent>` per message
 - `trim_tool_calls` middleware (`app/agents/factory.py`, every agent) drops repeated tool calls of one model reply and keeps at most 8 (`MAX_TOOL_CALLS_PER_STEP`)
-- `MAX_OUTPUT_TOKENS` (default 8192) ends a reply that repeats itself, instead of letting it run to 131k tokens
+- `MAX_OUTPUT_TOKENS` (default 32768, reasoning tokens count too) ends a reply that repeats itself, instead of letting it run to 131k tokens
 - `tool_errors` middleware (`app/agents/factory.py`, every agent) returns a tool's exception to the model as an error result instead of ending the run; interrupts and handoffs (`GraphBubbleUp`) pass through
 
 ### Handoff

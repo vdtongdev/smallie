@@ -22,7 +22,7 @@ from langgraph.store.base import BaseStore
 from app.core.config import get_settings
 from app.core.llm import get_chat_model, placeholder_model
 from app.core.memory import MEMORY_TOOLS, TEAM_MODE, TOOL_SOURCE, AgentContext
-from app.core.prompts import MEMORIES_SECTION, RECENT_CHATS_SECTION, USER_SECTION
+from app.core.prompts import LAST_CALL_NOTE, MEMORIES_SECTION, RECENT_CHATS_SECTION, USER_SECTION, reply_language
 
 log = logging.getLogger(__name__)
 
@@ -67,6 +67,24 @@ def trim_tool_calls(state, runtime):
         return None
     log.warning("Kept %d of %d tool calls of one model reply", len(kept), len(message.tool_calls))
     return {"messages": [message.model_copy(update={"tool_calls": kept})]}
+
+
+def make_last_call(limit: int):
+    """The last model call the limit allows writes the answer: no tool choice, a note naming the
+    reply language (in the request only, not saved), and any tool call the model makes anyway is dropped."""
+
+    @wrap_model_call
+    async def last_call(request: ModelRequest, handler):
+        if request.state.get("run_model_call_count", 0) != limit - 1:
+            return await handler(request)
+        note = HumanMessage(LAST_CALL_NOTE.format(language=reply_language(request.messages)))
+        response = await handler(request.override(tool_choice="none", messages=[*request.messages, note]))
+        message = response.result[-1] if response.result else None
+        if isinstance(message, AIMessage) and message.tool_calls:
+            response.result[-1] = message.model_copy(update={"tool_calls": [], "invalid_tool_calls": []})
+        return response
+
+    return last_call
 
 
 @wrap_model_call
@@ -127,6 +145,7 @@ def build_agent(
     max_model_calls: int | None = None,
     prompt_extra: Callable[[ModelRequest], str] | None = None,
     middleware: Sequence[AgentMiddleware] = (),
+    last_call_writes: bool = True,
 ):
     """An agent with the given tools plus long-term memory tools and a memory-aware prompt.
 
@@ -149,13 +168,12 @@ def build_agent(
         return prompt
 
     # Stops runaway tool loops from burning the user's quota.
-    call_limit = ModelCallLimitMiddleware(
-        run_limit=max_model_calls or get_settings().max_model_calls, exit_behavior="end"
-    )
+    limit = max_model_calls or get_settings().max_model_calls
+    call_limit = ModelCallLimitMiddleware(run_limit=limit, exit_behavior="end")
     return create_agent(
         placeholder_model(),
         tools=[*tools, *MEMORY_TOOLS],
-        middleware=[user_model, prompt_with_memories, call_limit, trim_tool_calls, scope_tools, source_first, tool_errors, refuse_hidden_tools,
+        middleware=[user_model, prompt_with_memories, *([make_last_call(limit)] if last_call_writes else []), call_limit, trim_tool_calls, scope_tools, source_first, tool_errors, refuse_hidden_tools,
                     *middleware],
         context_schema=AgentContext,
         checkpointer=checkpointer,

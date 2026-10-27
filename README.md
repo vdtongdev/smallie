@@ -115,7 +115,7 @@ It only runs while this PC is on. For access from anywhere, see [Deploying](#dep
 
 ## Models and cost
 
-Each user sets their own model server in **Settings** (the button in the sidebar): an OpenAI-compatible endpoint, an API key and one model name, used for every chat role. Keys are stored encrypted on the server (`MODEL_KEY_SECRET`) and sent only to the endpoint you chose. The Readme dialog lists example providers. An account without settings cannot chat until it saves them. Embeddings (document and memory search) use the operator's OpenRouter key, `EMBED_API_KEY`.
+Each user sets their own model server in **Settings** (the button in the sidebar): an OpenAI-compatible endpoint, an API key and one model name, used for every chat role. Keys are stored encrypted on the server (`MODEL_KEY_SECRET`) and sent only to the endpoint you chose. The Readme dialog lists example providers. An account without settings cannot chat until it saves them. Messages, answer excerpts and uploaded documents are embedded through OpenRouter on the operator's `EMBED_API_KEY`.
 
 - The orchestrator is skipped when a message clearly points to one agent. `ORCHESTRATOR_MAX_MODEL_CALLS` (4) caps its calls per message.
 - `TEAM_MAX_TASKS` (6), `TEAM_MAX_ROUNDS` (2, per check point) and `TEAM_MAX_MESSAGE_MODEL_CALLS` (30): team mode takes 1 plan call + each task's calls + 1 judge call per reviewed step + 1 write-up. Measured on the task graph with the old fixed models: 4 calls for a stock question, 7 with a planted wrong figure, 15 with all agents.

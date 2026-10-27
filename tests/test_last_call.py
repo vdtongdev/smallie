@@ -4,9 +4,9 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import StructuredTool
 
 from app.agents import factory
-from app.core.memory import AgentContext
+from app.core.memory import TEAM_MODE, TOOL_SOURCE, AgentContext
 from app.core.prompts import LAST_CALL_NOTE
-from tests.scripted import scripted
+from tests.scripted import ScriptedModel, scripted
 
 
 def _call(query, i):
@@ -48,3 +48,27 @@ async def test_tool_calls_on_the_last_call_are_dropped(monkeypatch):
 async def test_orchestrator_keeps_its_last_call_tools(monkeypatch):
     ran, _, _ = await _run(monkeypatch, [_call("a", 0), AIMessage("done")], max_model_calls=1, last_call_writes=False)
     assert ran == ["a"]
+
+
+class _RecordingModel(ScriptedModel):
+    choices: list = []  # the tool_choice each call was bound with (None: not set)
+
+    def bind_tools(self, tools, **kwargs):
+        self.choices.append(kwargs.get("tool_choice"))
+        return super().bind_tools(tools, **kwargs)
+
+
+async def test_last_call_of_a_team_request_is_not_forced_to_use_a_tool(monkeypatch):
+    async def lookup(query: str) -> str:
+        return "ok"
+
+    tool = StructuredTool.from_function(coroutine=lookup, name="lookup", description="look something up")
+    tool.metadata = {TOOL_SOURCE: "web"}
+    model = _RecordingModel(replies=iter([_call("a", 0), _call("b", 1), AIMessage("answer")]),
+                            prompts=[], tools=[], choices=[])
+    monkeypatch.setattr(factory, "get_chat_model", lambda *a, **k: model)
+    agent = factory.build_agent(name="t", system_prompt="x", tools=[tool], max_model_calls=3)
+    await agent.ainvoke({"messages": [HumanMessage("go")]},
+                        context=AgentContext(user_id="u", agent=TEAM_MODE, sources=("web",)))
+    # The last allowed call may not use tools: a forced choice ("required" or a tool's name) is wrong.
+    assert model.choices[-1] in (None, "none")

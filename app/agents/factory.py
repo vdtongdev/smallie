@@ -1,4 +1,6 @@
 import asyncio
+import json
+import logging
 from collections.abc import Callable, Sequence
 
 from langchain.agents import create_agent
@@ -6,11 +8,12 @@ from langchain.agents.middleware import (
     AgentMiddleware,
     ModelCallLimitMiddleware,
     ModelRequest,
+    after_model,
     dynamic_prompt,
     wrap_model_call,
     wrap_tool_call,
 )
-from langchain_core.messages import HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.errors import GraphBubbleUp
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -20,6 +23,17 @@ from app.core.config import get_settings
 from app.core.llm import get_chat_model, placeholder_model
 from app.core.memory import MEMORY_TOOLS, TEAM_MODE, TOOL_SOURCE, AgentContext
 from app.core.prompts import MEMORIES_SECTION, RECENT_CHATS_SECTION, USER_SECTION
+
+log = logging.getLogger(__name__)
+
+# Tool calls of one model reply that may run; the rest are dropped.
+MAX_TOOL_CALLS_PER_STEP = 8
+
+
+def call_key(call: dict) -> tuple[str, str]:
+    """A tool call ignoring case, spacing and argument order."""
+    args = json.dumps(call["args"], sort_keys=True, ensure_ascii=False)
+    return call["name"], " ".join(args.lower().split())
 
 
 def _in_scope(tool, sources) -> bool:
@@ -32,6 +46,27 @@ async def user_model(request: ModelRequest, handler):
     """Agents are built once at startup; the model is the calling user's, chosen per model call."""
     model = await asyncio.to_thread(get_chat_model, request.runtime.context.user_id)
     return await handler(request.override(model=model))
+
+
+@after_model
+def trim_tool_calls(state, runtime):
+    """Keeps one reply from running a flood of tool calls: drops calls identical to an earlier call
+    of the same reply, then keeps the first MAX_TOOL_CALLS_PER_STEP. A reply that repeated itself once
+    held 1,392 calls of 6 distinct queries, and all of them ran at once."""
+    message = state["messages"][-1]
+    if not isinstance(message, AIMessage) or not message.tool_calls:
+        return None
+    seen, kept = set(), []
+    for call in message.tool_calls:
+        key = call_key(call)
+        if key not in seen:
+            seen.add(key)
+            kept.append(call)
+    kept = kept[:MAX_TOOL_CALLS_PER_STEP]
+    if len(kept) == len(message.tool_calls):
+        return None
+    log.warning("Kept %d of %d tool calls of one model reply", len(kept), len(message.tool_calls))
+    return {"messages": [message.model_copy(update={"tool_calls": kept})]}
 
 
 @wrap_model_call
@@ -120,7 +155,7 @@ def build_agent(
     return create_agent(
         placeholder_model(),
         tools=[*tools, *MEMORY_TOOLS],
-        middleware=[user_model, prompt_with_memories, call_limit, scope_tools, source_first, tool_errors, refuse_hidden_tools,
+        middleware=[user_model, prompt_with_memories, call_limit, trim_tool_calls, scope_tools, source_first, tool_errors, refuse_hidden_tools,
                     *middleware],
         context_schema=AgentContext,
         checkpointer=checkpointer,

@@ -43,6 +43,8 @@ def _build_chat_model(base_url: str, model: str, api_key: str, streaming: bool) 
         stream_usage=True,  # the last streamed chunk carries tokens and cost
         # Retries also count against the user's quota and can't help once a cap is hit.
         max_retries=1,
+        # A reply that loops (the same tool calls again and again) ends here instead of after 131k tokens.
+        max_tokens=get_settings().max_output_tokens,
     )
 
 

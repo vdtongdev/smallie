@@ -13,7 +13,11 @@ class UnsafeEndpoint(ValueError):
 # shortcut: checks resolution at build time only; DNS rebinding between check and request is not caught, pin the resolved IP in the transport if that matters
 def check_endpoint(url: str) -> None:
     dev = get_settings().allow_private_model_urls
-    parts = urlparse(url)
+    try:
+        parts = urlparse(url)
+        port = parts.port
+    except ValueError:
+        raise UnsafeEndpoint("The address is not a valid URL") from None
     if parts.scheme != "https" and not (dev and parts.scheme == "http"):
         raise UnsafeEndpoint("The address must start with https://")
     if not parts.hostname:
@@ -23,7 +27,7 @@ def check_endpoint(url: str) -> None:
     if dev:
         return
     try:
-        infos = socket.getaddrinfo(parts.hostname, parts.port or 443)
+        infos = socket.getaddrinfo(parts.hostname, port or 443)
     except socket.gaierror:
         raise UnsafeEndpoint("The host name could not be resolved") from None
     for info in infos:

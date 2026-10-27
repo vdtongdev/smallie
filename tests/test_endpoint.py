@@ -57,3 +57,10 @@ def test_private_allowed_in_dev(monkeypatch):
     monkeypatch.setattr(get_settings(), "allow_private_model_urls", True)
     resolve_to(monkeypatch, "127.0.0.1")
     check_endpoint("http://localhost:11434/v1")
+
+
+@pytest.mark.parametrize("url", ["https://a.com:99999", "https://a.com:abc/", "https://[bad/"])
+def test_malformed_url_is_refused(monkeypatch, url):
+    resolve_to(monkeypatch, "104.18.0.1")
+    with pytest.raises(UnsafeEndpoint):
+        check_endpoint(url)

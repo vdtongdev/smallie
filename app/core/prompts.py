@@ -66,3 +66,9 @@ def reply_language(messages: list[AnyMessage]) -> str:
     Vietnamese sources or chats around the question made them answer English questions in Vietnamese."""
     question = next((m.text for m in reversed(messages) if isinstance(m, HumanMessage)), "")
     return "Vietnamese" if _VIETNAMESE.search(question) else "English"
+
+
+LAST_CALL_NOTE = """LAST STEP FOR THIS MESSAGE. You have no tool calls left, so call no tool.
+Write the answer now, from what you found so far.
+Say briefly what you could not check.
+Write the answer in {language}."""

@@ -46,6 +46,15 @@ async def lifespan(app: FastAPI):
         yield
 
 
+class NoCacheStaticFiles(StaticFiles):
+    """Browsers revalidate (ETag gives 304) instead of reusing a stale app.js."""
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 def _session_secret() -> str:
     s = get_settings()
     if s.session_secret:
@@ -75,4 +84,4 @@ app.include_router(routes_usage.router, prefix="/api")
 for feature in FEATURES:
     for feature_router in feature.routers:
         app.include_router(feature_router, prefix="/api")
-app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
+app.mount("/", NoCacheStaticFiles(directory=STATIC_DIR, html=True), name="static")

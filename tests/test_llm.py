@@ -35,7 +35,7 @@ def test_client_uses_the_users_endpoint_key_and_model(user_settings):
     assert model.openai_api_base == "https://api.deepseek.com/v1"
     assert model.model_name == "deepseek-chat"
     assert model.openai_api_key.get_secret_value() == "sk-user"
-    assert model.temperature == 0
+    assert model.temperature == get_settings().chat_temperature
     assert model.extra_body is None
 
 

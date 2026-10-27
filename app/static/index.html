@@ -52,6 +52,7 @@
   <div id="appView" class="layout" hidden>
     <aside class="sidebar">
       <button id="newChatBtn" class="primary" data-i18n="newChat"></button>
+      <label class="team-switch"><input id="teamMode" type="checkbox"> <span data-i18n="teamMode"></span></label>
       <ul id="conversationList" class="conversation-list"></ul>
       <div id="usageBox" class="usage-box" hidden>
         <strong data-i18n="usage"></strong>
@@ -245,6 +246,14 @@
           <li>Mỗi câu hỏi cần vài lượt gọi AI. Nếu gặp thông báo giới hạn tần suất, hãy chờ một phút rồi thử lại.</li>
         </ul>
       </div>
+    </article>
+  </dialog>
+
+  <dialog id="activityDialog" class="readme-dialog" aria-labelledby="activityTitle">
+    <form method="dialog" class="dialog-close"><button class="icon-btn" data-i18n-title="close">×</button></form>
+    <article class="activity">
+      <h2 id="activityTitle" data-i18n="activity"></h2>
+      <div id="activityBody"></div>
     </article>
   </dialog>
 

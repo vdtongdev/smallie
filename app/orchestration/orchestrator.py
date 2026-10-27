@@ -44,7 +44,7 @@ from app.agents.factory import build_agent
 from app.agents.research.agent import mcp_tools
 from app.agents.skills import load_skills, skills_inline
 from app.core.config import get_settings
-from app.core.memory import AgentContext
+from app.core.memory import TEAM_MODE, AgentContext
 from app.core.prompts import LANGUAGE_RULE, MEMORY_RULE, reply_language
 from app.orchestration.prompts import (
     ALREADY_ASKED,
@@ -54,6 +54,7 @@ from app.orchestration.prompts import (
     MENTIONS_NOTE,
     ORCHESTRATOR_SYSTEM,
     PREVIOUS_NOTE,
+    REPLY_LANGUAGE,
     REPEATED_CALL,
     UNAVAILABLE_NOTE,
 )
@@ -64,7 +65,7 @@ FORMATS = skills_inline(load_skills(Path(__file__).resolve().parent / "formats")
 HANDOFF = "handoff"
 FINDINGS = "research_findings"  # HumanMessage.name of the hidden findings message
 ATTEMPT = "failed_attempt"  # HumanMessage.name of the hidden note on a specialist that gave up
-HIDDEN = frozenset({FINDINGS, ATTEMPT})
+HIDDEN = frozenset({FINDINGS, ATTEMPT, TEAM_MODE})
 MAX_ASKS = 2  # `ask_<route>` calls per specialist and message, a fallen-back direct attempt included
 WEB_SEARCH_TOOLS = ("tavily_tavily_search", "knowledge_wikipedia_search")
 SORRY = "Sorry, I couldn't finish this answer. Please try again or rephrase the question."
@@ -162,6 +163,9 @@ def calls_before(messages: Sequence[AnyMessage], call_id: str) -> list[dict]:
     return calls[:ids.index(call_id)] if call_id in ids else calls
 
 
+CHART_TOOLS = ("chart_table", "chart_data")
+
+
 @wrap_tool_call
 async def no_repeats(request, handler):
     """Stops loops of failing calls: the same tool call twice in one message, or a specialist
@@ -185,17 +189,18 @@ def is_composing(messages: Sequence[AnyMessage]) -> bool:
         if isinstance(message, ToolMessage) and message.name not in MEMORY_TOOL_NAMES:
             return True
         if isinstance(message, HumanMessage):
-            return message.name == FINDINGS
+            return message.name in (FINDINGS, TEAM_MODE)
     return False
 
 
 def compose_section(request: ModelRequest) -> str:
     """This request's notes, plus the format and citation rules once there is something to write
     up: the first (deciding) call stays short, and plain chat doesn't get research formatting."""
+    question = [m for m in request.messages if not (isinstance(m, HumanMessage) and m.name in HIDDEN)]
     notes = f"\n\n{request.runtime.context.notes}" if request.runtime.context.notes else ""
+    notes += REPLY_LANGUAGE.format(language=reply_language(question))
     if not is_composing(request.messages):
         return notes
-    question = [m for m in request.messages if not (isinstance(m, HumanMessage) and m.name in HIDDEN)]
     tables = artifacts_from(request.messages, "tables")  # e.g. from ask_sql, for chart_table
     charts = artifacts_from(request.messages, "charts")
     tables = TABLES_SECTION.format(tables=table_note(tables, charts)) if tables else ""
@@ -273,8 +278,11 @@ def build_orchestrator(specs: Sequence[AgentSpec], agents: Mapping[str, Runnable
         if failed := state.get("failed", ""):
             hidden.append(HumanMessage(ATTEMPT_MESSAGE.format(route=failed, attempt=state.get("attempt", "")),
                                        name=ATTEMPT))
+        if note := state.get("team_note"):
+            hidden.append(HumanMessage(note, name=TEAM_MODE))
         notes, mentioned = await request_notes(runtime.context.user_id, specs, messages)
-        context = dataclasses.replace(runtime.context, notes=notes, mentioned=mentioned, failed=failed)
+        context = dataclasses.replace(runtime.context, notes=notes, mentioned=mentioned, failed=failed,
+                                      deny_tools=CHART_TOOLS if state.get("team_drawn") else ())
         result = await agent.ainvoke({"messages": [*messages, *hidden]}, context=context)
         new = result["messages"][len(messages) + len(hidden):]
         if target := handoff_target(new, targets):
@@ -284,8 +292,12 @@ def build_orchestrator(specs: Sequence[AgentSpec], agents: Mapping[str, Runnable
             answer = AIMessage(SORRY, name=ORCHESTRATOR)
         # Only this message enters the thread: keep the turn's charts (shown again on reload) and
         # query results (for "plot that" later) on it.
-        if artifacts := collect(new):
-            answer = answer.model_copy(update={"additional_kwargs": {**answer.additional_kwargs, **artifacts}})
+        extra = collect(new)
+        if asked := list(dict.fromkeys(r for m in new if isinstance(m, AIMessage) for c in m.tool_calls
+                                       if (r := next((s.route for s in specs if c["name"] == ask_tool_name(s)), None)))):
+            extra["asked"] = asked  # team mode picks critics that read other sources
+        if extra:
+            answer = answer.model_copy(update={"additional_kwargs": {**answer.additional_kwargs, **extra}})
         return Command(goto=END, update={"messages": [answer], "findings": "", "failed": "", "attempt": ""})
 
     return orchestrator, targets

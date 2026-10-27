@@ -1,8 +1,8 @@
 # Smallie Architecture
 
-A FastAPI multi-agent AI app. A rule-based router sends each message to one specialist agent, or to an orchestrator that answers itself, hands off to a specialist, or asks several specialists and writes the answer.
+A FastAPI multi-agent AI app. A rule-based router sends each message to one specialist agent, or to an orchestrator that answers itself, hands off to a specialist, or asks several specialists and writes the answer. In team mode (section 11) a plan splits the work into tasks for the agents and a judge checks the results.
 
-This file describes `main` plus the 0.4.0 work in progress (remote agents, section 10). Code-level detail lives in `CLAUDE.md`; the 0.4.0 design is in `docs/superpowers/specs/2026-10-20-remote-agents-design.md`.
+This file describes `main` plus the 0.4.0 remote agents (section 10) and the 0.5.0 agent team (section 11). Code-level detail lives in `CLAUDE.md` and `.claude/rules/`; the 0.4.0 design is in `docs/superpowers/specs/2026-10-20-remote-agents-design.md`.
 
 ---
 
@@ -27,7 +27,7 @@ This file describes `main` plus the 0.4.0 work in progress (remote agents, secti
 - LangChain agents (specialists + orchestrator)
 - OpenRouter API for LLM and embedding calls (free tier + server-side fallback models)
 - MCP (Model Context Protocol) servers for web search, Wikipedia, arXiv
-- Optional LangSmith tracing for debugging (section 11)
+- Optional LangSmith tracing for debugging (section 12)
 
 **Database**
 
@@ -63,14 +63,15 @@ This file describes `main` plus the 0.4.0 work in progress (remote agents, secti
 │    6. Start market price scheduler (daily update)               │
 │                                                                 │
 │  Routes:                                                        │
-│    POST /api/chat/{kind}   ─ Main message endpoint              │
+│    POST /api/chat/{kind}   ─ Main message endpoint (auto, team, │
+│                              or one agent)                      │
 │    GET  /api/agents        ─ Agent info + labels                │
 │    POST /api/signup        ─ Create account (max 20)            │
 │    GET  /api/conversations ─ Conversation list                  │
 │    POST /api/documents     ─ Upload files (PDF/DOCX)            │
 │                                                                 │
 │  Assistant Graph (built once at startup):                       │
-│    START → router → {docs|sql|chart|research|orchestrator}      │
+│    START → router → {docs|sql|chart|research|orchestrator|team} │
 │           ↓ (rule-based, no model)                              │
 │           └─ fallback (if the specialist gives up)              │
 └────────────────────┬────────────────────────────────────────────┘
@@ -80,7 +81,7 @@ This file describes `main` plus the 0.4.0 work in progress (remote agents, secti
 │                    Neon Postgres 18                             │
 │                                                                 │
 │  Tables:                                                        │
-│    users, conversations, documents (+ summary)                  │
+│    users, conversations, documents (+ summary, card_embedding)  │
 │    LangGraph checkpointer: checkpoints, checkpoint_blobs,       │
 │                            checkpoint_writes                    │
 │    LangGraph store: store, store_vectors                        │
@@ -99,14 +100,14 @@ This file describes `main` plus the 0.4.0 work in progress (remote agents, secti
 ### Request Phase
 
 1. **User sends a message**
-   - POST `/api/chat/{kind}`, where kind is "auto" or a specific agent route
+   - POST `/api/chat/{kind}`, where kind is "auto", "team" (section 11) or a specific agent route
    - Message ≤ 8,000 characters
 2. **Authentication and context**
    - Verify the session cookie → `user_id`
    - Load or create the conversation
    - Recall the newest 20 facts from the knowledge graph
    - Load the last turns of the 3 most recent other chats (cross-chat memory)
-   - Build `AgentContext(user_id, user, memories, recent_chats, agent=kind)`
+   - Build `AgentContext(user_id, user, memories, recent_chats, agent=kind, ...)` (also `notes`, `mentioned`, `sources`, `failed`)
 3. **Stream start**
    - Begin the SSE stream and emit a `conversation` event with id + title
    - Start the LangGraph assistant on the conversation's thread (loads prior messages from the checkpointer)
@@ -114,7 +115,8 @@ This file describes `main` plus the 0.4.0 work in progress (remote agents, secti
 ### Routing Phase
 
 4. **Router decides (rule-based, no model)**
-   - If `kind != "auto"`: use the forced route (e.g. `/api/chat/docs` → docs agent)
+   - If `kind == "team"`: go to the team task graph (section 11)
+   - If `kind` is an agent route: use the forced route (e.g. `/api/chat/docs` → docs agent)
    - Otherwise check whether the message obviously points to one agent:
      - Hints: keyword regex ("documents", "stock", "research", ...)
      - Matches: ticker symbols, file names
@@ -139,8 +141,9 @@ This file describes `main` plus the 0.4.0 work in progress (remote agents, secti
 
 8. **Events streamed to the browser**
    - `token`: text as it is generated
-   - `tool_call`: which tool is called with which arguments
+   - `tool_call`: which tool is called with which arguments (with `agent` when a specialist the orchestrator asked made it)
    - `tool_result`: tool output, plus charts
+   - Team mode adds `plan`, `plan_updated`, `wave`, `spoke`, `review`, `synthesize`, `needs_human` and `charts` events
    - The UI renders as events arrive
 
 ### Completion Phase
@@ -257,6 +260,7 @@ The "front door" agent. Answers general questions itself, asks specialists as to
 
 - 4 per message by default (`ORCHESTRATOR_MAX_MODEL_CALLS`)
 - `no_repeats` middleware skips identical repeated tool calls and caps `ask_<agent>` per message
+- `tool_errors` middleware (`app/agents/factory.py`, every agent) returns a tool's exception to the model as an error result instead of ending the run; interrupts and handoffs (`GraphBubbleUp`) pass through
 
 ### Handoff
 
@@ -271,7 +275,6 @@ When the orchestrator calls `handoff(agent)`:
 - **General question**: 1 model call (+1 for fact extraction after the reply)
 - **Obvious specialist question**: 2–5 calls
 - **Composed answer**: 1 + each specialist's calls + 1
-- **Free tier cost**: ~$0.000005–$0.00003 per message
 
 ---
 
@@ -293,11 +296,14 @@ Answers from the user's uploaded PDF/DOCX files using RAG (Retrieval-Augmented G
    - one model call on the start of the file: type, summary, up to 10 entities
    - stored in the knowledge graph as File -mentions-> Entity edges
    - `documents.summary` is shown in the file list
+   - `documents.card_embedding`: a vector of `"<filename>: <summary>"` (filename alone without a card), embedded in the same request as the entities; `scripts.build_graph` backfills it, `scripts.reindex` resizes it
 
 ### Search
 
 - `search_documents(query, entity)` searches the user's chunks by similarity
-- Scoped search: when the question names an entity the graph links to some files, only those files are searched
+- Name scope: `entity` or the question names a file without its extension (every file with that name); only those files are searched
+- Graph scope: `entity` or a known entity in the question that the graph links to some files; only those files are searched
+- No scope: the query is embedded once; the `CARD_FILES` = 3 files nearest by `card_embedding` each get one reserved slot with their best passage, nearest card first; the unscoped top `TOP_K` fills the rest, skipping duplicates, so a large file cannot crowd out a small one. With no card vectors, the plain unscoped search
 - Falls back to all files if the scoped search finds nothing
 
 ### Citations
@@ -410,7 +416,7 @@ One-node StateGraph:
 ### Performance
 
 - Researcher: up to 8 model calls per message (default)
-- Total: roughly 5–20 s depending on sources
+- Total: 126–156 s per question when research took part (relay measurement, 2026-10-24; see section 11)
 
 ### Special Features
 
@@ -538,7 +544,7 @@ Every agent prompt ends with `LANGUAGE_RULE` + `MEMORY_RULE`:
 
 ---
 
-## 10. Remote Agents (0.4.0, in progress)
+## 10. Remote Agents (0.4.0)
 
 ### Goal
 
@@ -668,22 +674,22 @@ The servers never write app data. Every login below has only what its job needs:
 
 Why: a bug or a prompt injection in a specialist can then read at most what it already searches, and cannot change or delete user data. Code on a server must not write: no DDL, no TTL refresh, PGVector with `create_extension=False` (the documents feature's `start` creates its tables).
 
-### Messages and context: before and after
+### Messages and context
 
-Before 0.4.0 every specialist was a compiled graph inside the main app's process. Now each is a `RemoteAgent` (`app/agents/remote.py`) that calls a server. The graph in `orchestration/graph.py` is the same; what a node does and what travels differ.
+Each specialist is a `RemoteAgent` (`app/agents/remote.py`) that calls a server. The graph in `orchestration/graph.py` builds one node per agent from it.
 
-| Topic | Before (in-process, 0.3.x) | After (remote) |
-|---|---|---|
-| The agent node | `add_node(route, compiled_graph)`: the specialist is a subgraph | `add_node(route, RemoteAgent.node)` (`build_assistant`). `node` sends `state["messages"]` and `runtime.context` through `RemoteAgent.ainvoke` |
-| How the specialist sees the conversation | Shares the `messages` state of the parent graph | Gets the thread's messages in the request body on each call (a direct route) or only a self-contained question (`ask_<route>`). The main app's thread stays the only copy |
-| Per-request context (`AgentContext`) | Passed as the runtime context; tools read it with `ToolRuntime` | Sent as `asdict(context)` in the body; the server rebuilds the dataclass and tools read it the same way. The user id also goes in the header `x-smallie-user-id` |
-| Thread and state | The parent's `thread_id` and checkpointer | `thread_id` is removed from the config, so the run is stateless and leaves no thread behind. `checkpoint_ns` is kept: `RemoteGraph` uses it to prefix streamed chunks with the parent's namespace, which `_to_events` relies on |
-| What comes back | Message objects in the parent state | JSON. `as_message` turns each dict back into a message object (LangGraph's own conversion would move `usage_metadata` into `additional_kwargs`). The server returns only new messages, and `ainvoke` also slices the result by the input length. Only the keys `messages` and `findings` reach the parent state, so a remote answer cannot steer routing (`route`, `direct`, `failed`) |
-| Artifacts (tables, charts) | `ToolMessage.artifact` and `additional_kwargs` in the shared state | They survive the JSON round trip (`artifact`, `additional_kwargs`), so a later "plot that" still finds the table in the thread (spike 2) |
-| Streaming | Subgraph events arrive directly in the parent stream | Remote chunks arrive as dicts with the parent namespace in front and the server's `run:` segment inside. `_to_events` converts them with `_message` and skips the `run` node's update; `_step` ignores the `run` segment when it finds a workflow step |
-| Model calls and limits | One `UsageCounter` in the request's callbacks sees every call | The main app can't see server-side calls, so each server reports `usage` and `RemoteAgent` adds it to the `UsageCounter`s in the config (`UsageCounter.add`). Before each call, `CallBudgetExceeded` is raised once a counter reaches `MAX_MESSAGE_MODEL_CALLS` (30): a soft backstop, since parallel asks in one step can overshoot. Per-agent caps are unchanged |
-| Errors | The exception itself | The server reports an error by name only (`RemoteException`). `_openai_error` raises `RateLimitError` and `AuthenticationError` again as `openai` exceptions, so the chat route's messages still work. `asyncio.timeout(AGENT_TIMEOUT_S)` limits a call (the client's own timeout is per read). `RuntimeError` when a run ends without a final state. Other errors reach the caller as they are; `ask_<route>` turns them into "the agent failed" text |
-| `ask_<route>` vs. a direct route | `ask` called `agent.ainvoke(...)` on the compiled graph | Both go through `RemoteAgent.ainvoke`: `ask` (`delegation.py:make_ask_tool`) passes `runtime.config` so the stream hook and the usage counter reach the call. Only a direct route sends the whole thread |
+| Topic | How it works |
+|---|---|
+| The agent node | `add_node(route, RemoteAgent.node)` (`build_assistant`). `node` sends `state["messages"]` and `runtime.context` through `RemoteAgent.ainvoke` |
+| How the specialist sees the conversation | Gets the thread's messages in the request body on each call (a direct route) or only a self-contained question (`ask_<route>`). The main app's thread stays the only copy |
+| Per-request context (`AgentContext`) | Sent as `asdict(context)` in the body; the server rebuilds the dataclass and tools read it the same way. The user id also goes in the header `x-smallie-user-id` |
+| Thread and state | `thread_id` is removed from the config, so the run is stateless and leaves no thread behind. `checkpoint_ns` is kept: `RemoteGraph` uses it to prefix streamed chunks with the parent's namespace, which `_to_events` relies on |
+| What comes back | JSON. `as_message` turns each dict back into a message object (LangGraph's own conversion would move `usage_metadata` into `additional_kwargs`). The server returns only new messages, and `ainvoke` also slices the result by the input length. Only the keys `messages`, `findings` and `tools` reach the parent state, so a remote answer cannot steer routing (`route`, `direct`, `failed`) |
+| Artifacts (tables, charts) | They survive the JSON round trip (`artifact`, `additional_kwargs`), so a later "plot that" still finds the table in the thread (spike 2) |
+| Streaming | Remote chunks arrive as dicts with the parent namespace in front and the server's `run:` segment inside. `_to_events` converts them with `_message` and skips the `run` node's update; `_step` ignores the `run` segment when it finds a workflow step |
+| Model calls and limits | The main app can't see server-side calls, so each server reports `usage` and `RemoteAgent` adds it to the `UsageCounter`s in the config (`UsageCounter.add`). Before each call, `CallBudgetExceeded` is raised once a counter reaches `MAX_MESSAGE_MODEL_CALLS` (30): a soft backstop, since parallel asks in one step can overshoot. The per-agent caps still apply |
+| Errors | The server reports an error by name only (`RemoteException`). `_openai_error` raises `RateLimitError` and `AuthenticationError` again as `openai` exceptions, so the chat route's messages still work. `asyncio.timeout(AGENT_TIMEOUT_S)` limits a call (the client's own timeout is per read). `RuntimeError` when a run ends without a final state. Other errors reach the caller as they are; `ask_<route>` turns them into "the agent failed" text |
+| `ask_<route>` vs. a direct route | Both go through `RemoteAgent.ainvoke`: `ask` (`delegation.py:make_ask_tool`) passes `runtime.config` so the stream hook and the usage counter reach the call. Only a direct route sends the whole thread |
 
 A routed sql message (router picks sql, no model call) end to end:
 
@@ -710,22 +716,137 @@ sequenceDiagram
     App-->>UI: SSE done
 ```
 
-### Status
+---
 
-| Phase | State |
+## 11. Agent Team (0.5.0)
+
+### What it is
+
+Normal mode sends a message to one specialist or lets the orchestrator ask several. **Team mode** is a second way to answer: the orchestrator **plans the work as tasks**, the agents do them from their own sources (at the same time when the tasks are independent, one after another when one needs another's result), a judge checks the results as they come in, and the plan can grow when a result calls for more work. The user sees one answer in which differences between sources and open doubts are shown, not hidden.
+
+It is a switch next to the message box. It applies to a new chat (an opened chat keeps the mode it started with), and a team chat is marked in the sidebar. The API call is `POST /api/chat/team`. Design: `docs/superpowers/specs/2026-10-26-team-task-graph-design.md`. The first version of team mode was a "round table" (every agent answered the same question and a board compared the answers); the task graph replaced it, and chats saved by the round table still open with their rounds.
+
+### Three layers
+
+1. **Planning.** The orchestrator reads the request, splits it into tasks and picks only the agents it needs, possibly none. After each step the judge may add follow-up tasks.
+2. **Agents.** The sql, research, docs and chart agents run their tasks, from their own sources only, and question the input they receive.
+3. **Shared workspace.** One state object holds the tasks, their results and evidence, and what the checks found. The plan, the reviews and the write-up all read it. It starts empty for every message.
+
+### How a message flows
+
+```
+message ──► plan ─── nobody's data is needed ──► orchestrator answers as usual
+              │
+              ▼
+        wave 1: tasks with no input run in parallel
+              │
+              ▼
+           review ─── user's input needed ──► pause ──► user answers ──► review
+              │
+              ├─ challenge or conflict an agent can fix, rounds left ──► that agent checks again ──► review
+              ├─ follow-up tasks added ──► next wave
+              └─ clean ──► next wave (tasks whose inputs are ready) ... until nothing is pending
+                                  │
+                                  ▼
+                              write-up ──► chart task draws from the final answer (if there is one)
+```
+
+- **The plan:** one model call returns the tasks, each with an agent, a goal and the tasks it depends on. Tasks for agents that are not available are dropped, and there are at most `TEAM_MAX_TASKS` (default 6). If the call fails or the plan is unusable (a cycle, or every task dropped), the team falls back to the simple plan: every agent the message points to answers on its own. An empty plan means no specialist is needed and the orchestrator answers as in normal mode. Small talk (at most 5 words, no question mark, no data words) and a message that names exactly one agent skip the plan call.
+- **Waves:** a wave is the set of tasks that are ready (their inputs are done). They run at the same time, and the next wave starts when the whole wave is back, so a fast task waits for the slowest one in its wave. A task receives the user's message, its goal and the results of the tasks it depends on (the text and the tables, so no model copies data). If every input of a task failed or found nothing, the task is skipped; if only some did, it runs and is told which are missing.
+- **Withdrawal:** an agent whose sources hold nothing on its task withdraws, and the others go on. When every agent withdraws, the orchestrator answers as in normal mode and says plainly that those agents found nothing.
+- **Write-up:** the orchestrator writes one answer from the results. When a single agent took part and nothing is in doubt, its own answer is shown as is, with no extra model call. The write-up names the cause of a difference (definition, date, source, error or unknown), keeps what was observed in the data apart from a possible explanation, and lists open doubts and any task that never ran.
+- **Chart task:** the chart agent works last, on the final answer, because it should chart only data that survived the checks. It draws from the answer's table, or from figures written in the answer when there is no table, and never adds or changes a figure. If it fails, the answer is shown without a chart. Nothing waits for a chart task.
+- **Pause:** if the answers cannot go on without something only the user knows (for example which of two files they mean), the judge asks one short question and the chat waits. The user's next message resumes the same turn. If it names an agent that is not taking part yet, that agent gets a task and runs one wave before the judge looks again; a free-text answer brings nobody in.
+
+### Checks
+
+After a wave the judge reads the results next to the inputs they came from (one model call; no call when a wave took no input and meets nothing yet, or when only one answer is left because the other agents found nothing). It looks for two kinds of problems:
+
+- **Hand-off challenge:** an agent that received another's output compared it with its own source and found a mismatch (for example a price that is not adjusted for a split). The agent that produced the output gets one round to re-check its source. If it revises, only the tasks that used the old output run again on the new one. If it stands by its output, the disagreement goes into the write-up as an open point.
+- **Meeting conflict:** parallel results that meet (at the next task or at the write-up) are compared. A difference is **explained** only when every side gives a source and an as-of date and the explanation fits the size of the gap (a date gap explains a small move, not a multiple). Otherwise it is a **conflict**. The judge never trusts a source because of its kind: a database, a file, a web page and a model can each be wrong, and it uses no outside knowledge. A conflict that an involved agent can fix with its own tools (a wrong query, a wrong name) goes to another round for those agents only.
+
+Each place where a check happens (a hand-off, or a point where results meet) gets at most `TEAM_MAX_ROUNDS` extra rounds (default 2). Past that, the open points go into the write-up, which shows every value and says plainly that the team could not settle it.
+
+### Follow-ups
+
+The same review call can add tasks the results call for: a document reveals a revenue claim and sql checks it, research mentions an internal memo and docs searches for it, sql finds a pattern and the chart agent draws it. A follow-up passes the same checks as the plan, counts toward `TEAM_MAX_TASKS`, and costs no extra call. Follow-ups that do not fit under the cap are dropped and the write-up names them as not done. A repeated task (same agent, same goal) is dropped, and so is a chart follow-up when the plan already has a chart task.
+
+### Independent sources
+
+- Each agent only gets the tools of its own data source (stock database, uploaded files, web). A tool it is not offered is also refused if the model asks for it anyway. So two agents cannot quietly repeat one source's mistake.
+- When the plan makes one agent's result the input of another, the second still checks it against its own source.
+
+### The judge model
+
+The judge is one structured model call per reviewed wave. It is set with `OPENROUTER_JUDGE_MODEL` and is used exactly (no provider quantization filter, no fallback model). The plan call uses the orchestrator's model. Three judges were measured on the round table's board, on the same scenarios:
+
+| Judge | Result |
 |---|---|
-| 0. Spikes (feasibility) | done |
-| 1. Local Postgres in Docker | done |
-| 2. LangSmith tracing | done |
-| 3. Agent server image + compose stack | done (plan Tasks 4–5: one image, 4 servers in compose, end-to-end checked) |
-| 4. `RemoteAgent` wrapper in the main app | done (plan Tasks 1–3: `RemoteAgent`, the main app calls every specialist through it) |
-| 5. Security (service token, IAM, read-only roles) | done (plan Tasks 6–7: Cloud Run ID tokens; `agent_reader` for the app's data, `agent_server` for the servers' own databases; calls the main app gave up on are cancelled) |
-| 6. Cloud Run deployment | config and steps written (plan Task 8: `cloudbuild.agent.yaml`, `DEPLOYING.md`); first deploy pending |
-| Loop audit (plan Task 9) | done: on a subset of 6 `bench_chat` scenarios, `main` and this branch used the same number of model calls (17 vs 17), and the worst case was 6 calls for one message against `MAX_MESSAGE_MODEL_CALLS` = 30 |
+| Gemma (default free model) | Did not flag a planted wrong figure; 29 model calls, 189 s |
+| Haiku 5.5 | Faster per call, but looped 4 rounds over a small date gap |
+| **DeepSeek V4.1 Flash (chosen)** | Flagged the planted figure in 1 round; plain scenarios settled in 1 round |
+
+### In the UI
+
+- **Status line** under each reply (all chats): a spinner while it runs, the wave (for example "Wave 2 of 3") with the agents' badges, a note when one agent questions another or a follow-up is added, "using <tool>" or "writing"; afterwards the number of waves and resolved challenges.
+- **Activity popup** (button on the status line): the plan as a list of tasks, then each wave with every task's answer and the tools it called with their results, each review (challenges, differences, conflicts and the outcome) and a pending question. It is rebuilt from the saved conversation, so it is still there after a reload.
+- Tool calls no longer appear as lines inside the chat; they live in the popup.
+
+### Guardrails
+
+- **Task cap:** `TEAM_MAX_TASKS` tasks per message, follow-ups included (default 6).
+- **Round cap:** `TEAM_MAX_ROUNDS` extra rounds per check point (default 2).
+- **Call budget:** `TEAM_MAX_MESSAGE_MODEL_CALLS` model calls per message across the app and all agent servers (default 30). Past it, no further agent is called; the write-up uses what finished and names the tasks that never ran.
+- **Failures:** an agent that fails does not stop the others; the write-up says which part is missing. If the judge call fails, the review is skipped for that wave: no checks and no follow-ups, and the write-up is marked as forced. Later waves still run.
+- **Pause for the user:** the team never guesses information only the user has.
+
+### Measured cost and latency
+
+First measurement of the task graph (2026-10-26, `scripts/bench_chat.py` on the real models: judge and orchestrator `deepseek/deepseek-v4.1-flash`, chat model `google/gemma-4-31b-it`). 15 team scenarios, 100 model calls in all, no errors, and the plan never fell back.
+
+| Scenario | Calls | Seconds |
+|---|---|---|
+| No specialist needed | 2 | 3.8 |
+| Documents only | 4 | 9.6 |
+| Stock question (AAPL vs MSFT) | 4 | 26.1 |
+| Vietnamese question | 4 | 17.2 |
+| Ambiguous question | 2 | 19.0 |
+| File and database conflict | 7 | 18.7 |
+| Research | 5 | 60.4 |
+| Chart | 8 | 63.8 |
+| Compound question | 7 | 97.0 |
+| Scenario A (topic) | 7 | 79.1 |
+| Scenario B (report) | 10 | 122.0 |
+| Scenario C (all agents) | 15 | 118.9 |
+| Scenario D (files) | 8 | 67.6 |
+| Scenario E (follow-up) | 10 | 86.5 |
+| Planted wrong figure | 7 | 222.4 |
+
+- **Choice of agents:** precision 1.00 and recall 1.00 in all 15 scenarios.
+- **Planted error:** the wrong MSFT market cap in an uploaded file was flagged.
+- **Plan ids:** before the fix in commit 0333ee0 the planner left out task ids in 2 of 4 scenarios, the whole plan was rejected and the turn fell back to every agent (the stock question: 11 calls, 72.1 s instead of 4 calls, 26.1 s).
+- **Slow outlier:** in the planted-error scenario one call took 200.1 s; which agent made it was not recorded.
+- The earlier round table needed 6 calls for the stock question and 9 for a planted conflict (judge under $0.01 per message). Those numbers are history.
+
+Latency varies with the free-tier models' load. A task graph adds one plan call and about one review call per reviewed wave to the agents' own calls; a challenge adds one call for the producer plus one per task that must run again.
+
+### Limits
+
+- The chat models are free ones, so answers vary; the judge's quality depends on the judge model.
+- A challenge exists only if the receiving agent wrote the mismatch down. Weak models may skip it.
+- One review call returns the checks and the follow-ups together, which is a large structured output. The planted error was flagged on the judge model, but a follow-up has not been seen live: in the follow-up scenario the planner already put sql in the plan, so none was needed. If it drops follow-ups, they would move to their own call (one more call per wave).
+- The file-versus-database conflict scenario did not exercise a conflict: docs withdrew because it found nothing in the test file (cause not investigated).
+- `contribution.used` reads "unused" for most sql and docs answers, because evidence is recorded only from differences and challenges and agreeing answers leave none. The ablation run (`--ablate`) has not been done.
+- A wave waits for its slowest task, so a fast task can sit idle. This costs time, not model calls.
+- With 2 rounds per check point, a large plan can reach the 30-call limit before it finishes; the write-up then says what is missing.
+- Checks run only through the judge call; there are no checks in code (for example that a ticker exists in the database).
+- `needs_human` (the pause) rarely fires in practice; it is covered by tests, not by many real runs.
+- Team mode costs more calls and time than a normal answer. Use it when the work needs several sources or they may disagree.
+- **Shared rooms (phase A of the design) are not built**: team mode is for one user's chat.
 
 ---
 
-## 11. Debugging with LangSmith
+## 12. Debugging with LangSmith
 
 Optional, off by default. With `LANGSMITH_TRACING=true` and `LANGSMITH_API_KEY` set, every chat message becomes one trace in the LangSmith project `smallie`: the router's choice, each agent, each model call with its full prompt, each tool call with its result, tokens and time per step. Chat traces carry the user's id as metadata, so they can be filtered per user. After 0.4.0's remote agents, one trace covers the main app and the specialist servers it called.
 
@@ -733,7 +854,7 @@ Traces contain full prompts (users' messages, file passages, memories), so traci
 
 ---
 
-## 12. Deployment
+## 13. Deployment
 
 **Local development**
 
@@ -746,6 +867,7 @@ Traces contain full prompts (users' messages, file passages, memories), so traci
 - Always from `main`
 - Update `CHANGELOG.md` + the version in `pyproject.toml` first
 - Main app: `gcloud run deploy smallie --source . --region asia-southeast1 ...` (public URL, login required)
+- Static UI (`app/static/`, mounted at `/` by `NoCacheStaticFiles` in `app/api/main.py`) sends `Cache-Control: no-cache`, so browsers revalidate `app.js` after a deploy (unchanged files get 304); `/api` is not affected
 - Agent servers: one image built by `gcloud builds submit --config cloudbuild.agent.yaml`, then one private service per agent (`smallie-<route>`, `--no-allow-unauthenticated`, its own env file); the main app's service account has `roles/run.invoker` on each
 - Neon Postgres (direct URL, no pooler): the app's database plus one small database per agent server
 

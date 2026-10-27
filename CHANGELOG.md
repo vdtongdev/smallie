@@ -116,13 +116,52 @@ Versions are `major.minor.patch`: the major version stays 0 for now, each minor 
 
 ## 0.4.0 - Remote agents
 - **Remote agents**: the docs, sql, chart and research agents each run as their own private LangGraph Agent Server; the main app keeps the router, orchestrator, chats and memory and calls them over HTTP
-  - One image (`Dockerfile.agent`) serves every agent; `AGENT_ROUTE` picks which. Locally `docker compose up -d` runs all four on ports 2101–2104 next to Postgres and Redis; on Cloud Run each is its own private service (`smallie-<route>`, built with `cloudbuild.agent.yaml`), steps in README "Deploying"
+  - One image (`Dockerfile.agent`) serves every agent; `AGENT_ROUTE` picks which. Locally `docker compose up -d` runs all four on ports 2101–2104 next to Postgres and Redis; on Cloud Run each is its own private service (`smallie-<route>`, built with `cloudbuild.agent.yaml`), steps in `DEPLOYING.md`
   - New settings: `AGENT_URLS` (route → server URL; the app doesn't start without one for every agent), `SERVICE_TOKEN` (shared secret the servers check; a server with none refuses every call), `AGENT_TIMEOUT_S` (default 300), `MAX_MESSAGE_MODEL_CALLS` (default 30, a per-message backstop on top of the existing per-agent limits; parallel questions in one step can go one step over it)
   - Calls carry no conversation id: the main app's chat stays the only copy, and a call the app stops waiting for (timeout, chat closed) is cancelled on the server instead of spending calls nobody sees
   - On Cloud Run the services also require Google's ID token (`roles/run.invoker` for the main app's service account), so an agent URL can't be called from outside
   - The servers read your files, the knowledge graph and chat history as `agent_reader` (read-only, no accounts or chats) and keep their run queues in their own databases as `agent_server`; stock questions keep using `agent_readonly`. Web search keys (`TAVILY_API_KEY`, `MCP_SERVERS`, `EXTERNAL_DATABASE_URL`) reach only the research server
   - Same number of model calls per message as before: 17 vs 17 over 6 benchmark scenarios, worst case 6 for one message. No slowdown measurable locally; cold-start and warm latency on Cloud Run: measured after the first deploy
-  - Limits: in LangSmith a server's run is its own trace, not nested under the main app's; the usage box counts the servers' calls, as before
+  - Limits: in LangSmith a server's run shows under the main app's trace and also as its own trace; the usage box counts the servers' calls, as before
 - **LangSmith tracing** (`LANGSMITH_TRACING`, `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT`), off by default: traces chats, with the user id in their metadata. Traces hold full prompts (your messages, file passages, memories)
 - Local Postgres now runs in Docker inside WSL (`docker-compose.yml`, port 5433); `scripts\dev_db.ps1` starts it and keeps WSL running, so DB tests and the app no longer freeze when WSL stops
 - `scripts.bench_chat` counts the agent servers' model calls too
+
+## 0.5.0 - Agent team
+- **Team mode** (`POST /api/chat/team`): a per-chat switch next to the message box. The orchestrator plans the question as tasks; each agent does its task from its own sources only (the database, your files, the web), in parallel when tasks are independent and one after another when one needs another's result. A judge reviews the results after each step, and the answer shows agreements, explained differences and open conflicts instead of hiding them
+  - **Plan**: one model call writes the tasks (agent, goal, the tasks it depends on), at most `TEAM_MAX_TASKS` (default 6). If the call fails or the plan is unusable, every agent the message points to answers on its own. Small talk and a message naming one agent skip the plan call; a message that names no source brings in every available agent
+  - **Hand-off challenges**: an agent that receives another's output and finds a mismatch with its own source sends it back once. If the producer revises, the tasks that used the old output run again
+  - **Conflicts**: a difference counts as explained only when each side gives a source and an as-of date and the explanation fits the size of the gap; otherwise it is a conflict. A conflict an agent can fix with its own tools (a wrong query, a wrong name) gets another round for those agents only. The judge never trusts a source because of its kind: a database figure does not beat a file or a web page for being a database
+  - **Follow-ups**: the same review call can add tasks the results call for (a file's revenue claim checked by sql), within the same task cap
+  - **Chart task**: a chart asked for in team mode runs after the answer, draws from its final table and joins the answer; charts never change what the answer says
+  - **Write-up**: the orchestrator writes one answer that names causes, open points, follow-ups dropped by the cap and tasks that never ran
+  - **Pause**: the team can stop to ask you a question; your reply resumes it
+  - **Source scoping**: each participant is limited to its own sources, and the agent servers refuse a call outside them, not only hide the tool
+  - **Judge model**: new `OPENROUTER_JUDGE_MODEL` (this deployment uses `deepseek/deepseek-v4.1-flash`; empty uses the orchestrator's model). It answers itself, with no fallback model
+  - **Settings**: new `TEAM_MAX_TASKS` (6), `TEAM_MAX_ROUNDS` (2 extra rounds per meeting point), `TEAM_MAX_MESSAGE_MODEL_CALLS` (30) and `OPENROUTER_JUDGE_MODEL`
+  - **Replaced design**: the first version, a round table where every agent answered the same question and a board compared the answers, was replaced by the task graph. Its numbers are history: a stock question 6 calls, about 49 s; a planted wrong figure 9 calls, about 99 s, flagged; with the default judge model 29 calls, 189 s, not flagged. The relay built before it was removed
+  - **Measured** (task graph, `scripts/bench_chat.py`, 2026-10-26; one run per scenario, free models for the agents): 15 scenarios, 100 model calls, no errors, no fallback to every agent. 2 calls when no specialist is needed, 4 for the stock question (26 s), 7 for the planted wrong figure (flagged), 15 with all agents. Choice precision and recall 1.00
+  - **Limits**: team mode costs more calls and time than a normal answer; a large plan can reach the call limit before it finishes, and the write-up then says what is missing; a follow-up and a file-versus-database conflict are not yet seen in a live run; the pause rarely fires in testing; shared rooms are not built
+- **File search by file name and card** (`search_documents`): naming one of your files in a question limits the search to that file. Each upload gets a card (type, summary, names), and its vector finds the files a question is about; each of the 3 nearest files keeps one passage slot, so a large file cannot crowd out a small one
+  - Files uploaded before this release have no card vector until `uv run python -m scripts.build_graph` runs once after deploying (it skips the graph work for users already built, and spends one card call per file that has no card). Until then those files use the plain search
+  - Limit: a name must be written in full in the question ("Graham" doesn't match "Benjamin Graham")
+- **Status line and Activity popup** (every chat, not only team): one status line shows what the answer is doing now, and an Activity popup holds the full tool log (in team mode also the plan, each wave and each review). The inline tool lines are gone. A reloaded chat shows the same steps as the live view, and team answers keep their tables and charts
+- **Fix: a failing tool ended the whole reply**
+  - A tool that raised an exception stopped the agent's run, so the answer was lost
+  - The agents' middleware (`tool_errors` in `app/agents/factory.py`) now returns the error as the tool's result. Interrupts and handoffs still pass through
+- **Fix: the Activity popup did not say which agent ran a tool step**
+  - When the orchestrator asked several specialists in parallel, their tool steps looked alike
+  - Each tool step now names the agent behind it (`app/agents/delegation.py`, `app/api/routes_chat.py`, `app/static/app.js`)
+- **Fix: browsers kept an old `app.js`**
+  - Static files had no `Cache-Control`, so a browser could keep a days-old script after a deploy
+  - Static files now send `no-cache` (`NoCacheStaticFiles` in `app/api/main.py`): the browser checks each time, and an unchanged file still comes back as a 304. `/api` is unchanged
+- **Fix: English questions answered in Vietnamese after a language preference was stored**
+  - A remembered preference ("prefers Vietnamese") in the orchestrator's memories outweighed the language of the message
+  - The orchestrator now names the reply language, taken from the latest message, on every call, even over a remembered preference
+- **Fix: one unexpected stream event ended the whole reply**
+  - In the browser, a single malformed or unexpected stream event stopped the rest of the reply from showing. It is now skipped and the reply goes on
+- Refactors and tooling
+  - `AgentSpec.review`, `sources` and `joins` describe what each agent may do in team mode
+  - `scripts.bench_chat` has team scenarios (stock, conflict, chart); its answer text matches what the chat bubble shows
+  - The test suite ignores the developer's `.env` for the judge model
+  - Testing rule (`.claude/rules/testing.md`): a failing test is fixed in the code, never weakened or changed to pass

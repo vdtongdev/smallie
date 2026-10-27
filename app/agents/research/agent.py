@@ -35,7 +35,10 @@ from app.agents.research.prompts import (
     MARKET_LINE,
     RESEARCHER_SYSTEM,
     ROUTE_DESCRIPTION,
+    SCHEMA_HEADING,
     SOURCE_LINES,
+    SOURCES_HEADING,
+    REVIEW,
     TOOL_DESCRIPTION,
     WEB_ALONGSIDE_WIKI,
 )
@@ -43,7 +46,7 @@ from app.agents.skills import load_skills, make_load_skill_tool, skills_section
 from app.agents.sql.tools import describe_schema, run_sql
 from app.core.config import get_settings
 from app.core.mcp import open_mcp_tools
-from app.core.memory import AgentContext
+from app.core.memory import TOOL_SOURCE, AgentContext
 from app.core.prompts import MEMORY_RULE
 from app.features.research.mcp_servers.knowledge import wikipedia_article
 from app.features.research.sources import local_servers, remote_servers
@@ -64,6 +67,12 @@ HINTS = re.compile(
     re.IGNORECASE,
 )
 
+NAMES = re.compile(
+    r"\bresearch(?:er)? agent\b|\b(?:search|look (?:it )?up|browse) (?:the )?(?:web|internet|online)\b|\b(?:web|internet) search\b"
+    r"|\bwikipedia\b|\barxiv\b|\btrợ lý nghiên cứu\b|tìm (?:trên )?(?:web|mạng|internet)",
+    re.IGNORECASE,
+)
+
 # MCP tools loaded by `prepare` at startup, and the servers they came from; `build` runs after it.
 _mcp_tools: list[BaseTool] = []
 _mcp_servers: list[str] = []
@@ -74,10 +83,21 @@ def mcp_tools() -> list[BaseTool]:
     return list(_mcp_tools)
 
 
+def tag_mcp(tools: list[BaseTool]) -> list[BaseTool]:
+    """Copies of the Tavily and knowledge (Wikipedia, arXiv) tools tagged as web, and of the
+    external database tools tagged external_db, so `scope_tools` can hide them; the loaded objects
+    stay untouched."""
+    def source(name: str) -> str | None:
+        return "web" if name.startswith(("tavily_", "knowledge_")) else "external_db" if name.startswith("external_db_") else None
+
+    return [t.model_copy(update={"metadata": {**(t.metadata or {}), TOOL_SOURCE: source(t.name)}}) if source(t.name) else t
+            for t in tools]
+
+
 async def prepare(stack: AsyncExitStack) -> None:
     remote, local = remote_servers(), local_servers()
     tools = await open_mcp_tools(stack, remote, local)
-    _mcp_tools[:] = [tool for tool in tools if tool.name not in SKIPPED_TOOLS]
+    _mcp_tools[:] = tag_mcp([tool for tool in tools if tool.name not in SKIPPED_TOOLS])
     # Tool names are "<server>_<tool>", so a server that failed to load has no tools here.
     _mcp_servers[:] = [name for name in [*remote, *local] if any(t.name.startswith(f"{name}_") for t in _mcp_tools)]
 
@@ -87,10 +107,32 @@ class ResearchState(TypedDict):
     findings: str
 
 
-def sources(servers: list[str]) -> str:
-    """The researcher's source list: loaded MCP servers, then the user's files and the stock data."""
-    lines = [SOURCE_LINES.get(name, f"- Tools of the {name!r} MCP server ({name}_* tools).") for name in servers]
-    return "\n".join([*lines, DOCUMENTS_LINE, MARKET_LINE])
+# The `TOOL_SOURCE` tag of each MCP server's tools and of the market-data skill.
+SERVER_SOURCE = {"tavily": "web", "knowledge": "web", "external_db": "external_db"}
+SKILL_SOURCE = {"market-data": "market_db"}
+
+
+def sources(servers: list[str], allowed: tuple[str, ...] = ()) -> str:
+    """The researcher's source list: loaded MCP servers, then the user's files and the stock data.
+    `allowed` (a team request's sources) leaves out the others; empty lists all."""
+    def ok(tag: str | None) -> bool:
+        return not allowed or tag is None or tag in allowed
+
+    lines = [SOURCE_LINES.get(name, f"- Tools of the {name!r} MCP server ({name}_* tools).")
+             for name in servers if ok(SERVER_SOURCE.get(name))]
+    return "\n".join([*lines, *([DOCUMENTS_LINE] if ok("user_files") else []), *([MARKET_LINE] if ok("market_db") else [])])
+
+
+def research_prompt_extra(schema: str):
+    """The per-request prompt part: the sources, skills and market schema the request may use.
+    Appended, not formatted into a template, because the schema contains braces."""
+    def extra(request) -> str:
+        allowed = request.runtime.context.sources
+        skills = {n: s for n, s in RESEARCHER_SKILLS.items()
+                  if not allowed or SKILL_SOURCE.get(n) is None or SKILL_SOURCE[n] in allowed}
+        text = SOURCES_HEADING + sources(_mcp_servers, allowed) + "\n\n" + skills_section(skills)
+        return text + (SCHEMA_HEADING + schema if not allowed or "market_db" in allowed else "")
+    return extra
 
 
 
@@ -163,6 +205,8 @@ _SOURCE_ID = re.compile(r"\bS[0-9a-f]{4}\b", re.IGNORECASE)
 # Any bracket around an id, however the model wrote it: [S3fa2], (S3fa2 | "quote"), [source S3fa2].
 _BRACKETED_ID = re.compile(r"[\[(]([^\[\]()]*\bS[0-9a-f]{4}\b[^\[\]()]*)[\])]", re.IGNORECASE)
 _URL_IN_TEXT = re.compile(r"https?://\S+")
+# An id-like token of any shape (letters and digits, optional hyphens, no spaces), e.g. "cf61ec-00".
+_ID_LIKE = re.compile(r"(?=[A-Za-z0-9-]*[A-Za-z])(?=[A-Za-z0-9-]*\d)[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*")
 
 
 def source_id(url: str) -> str:
@@ -246,6 +290,13 @@ def expand_source_ids(findings: str, index: dict[str, tuple[str, str]]) -> str:
         parts = ([f"{_as_label(known[0][1])} | {known[0][0]}"] if known else []) + [url for url, _ in known[1:]]
         return "[source: " + " | ".join(p for p in [*parts, rest] if p.strip(" |")) + "]"
 
+    def without_unknown_ids(m: re.Match) -> str:
+        """A whole `|` part of a [source: ...] that looks like an id but is not a known one."""
+        parts = m[1].split("|")
+        kept = [p for p in parts if not _ID_LIKE.fullmatch(p.strip()) or _normal_id(p.strip()) in index]
+        return m[0] if len(kept) == len(parts) else "[source: " + " | ".join(p.strip() for p in kept) + "]"
+
+    findings = _SOURCE.sub(without_unknown_ids, findings)
     findings = _SOURCE.sub(lambda m: as_source(m[1]) if _SOURCE_ID.search(m[1]) else m[0], findings)
     # Ids outside a [source: ...]: in another bracket, or bare.
     findings = _BRACKETED_ID.sub(lambda m: as_source(m[1]) if not m[0].startswith("[source:") else m[0], findings)
@@ -391,12 +442,10 @@ def build_research_workflow():
         name="research_agent",
         system_prompt=RESEARCHER_SYSTEM.format(
             today=date.today().isoformat(),
-            sources=sources(_mcp_servers),
             web_rule=WEB_ALONGSIDE_WIKI if "tavily" in _mcp_servers else "",
-            skills=skills_section(RESEARCHER_SKILLS),
             memory_rule=MEMORY_RULE,
-            schema=describe_schema(),
         ),
+        prompt_extra=research_prompt_extra(describe_schema()),
         tools=[*mcp_tools, search_documents, run_sql, make_load_skill_tool(RESEARCHER_SKILLS)],
         middleware=[cite_by_id],
         max_model_calls=get_settings().research_max_model_calls,
@@ -423,9 +472,13 @@ SPEC = AgentSpec(
     build=build_research_workflow,
     message_names=("research_agent",),
     hints=HINTS,
+    names=NAMES,
     prepare=prepare,
     silent_steps=("gather",),
     tool_description=TOOL_DESCRIPTION,
+    review=REVIEW,
+    sources=frozenset({"web", "external_db"}),
+    joins="with_others",
     answers_directly=False,
     result=findings_result,
 )

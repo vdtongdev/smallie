@@ -1,15 +1,77 @@
 from collections.abc import Callable, Sequence
 
 from langchain.agents import create_agent
-from langchain.agents.middleware import AgentMiddleware, ModelCallLimitMiddleware, ModelRequest, dynamic_prompt
+from langchain.agents.middleware import (
+    AgentMiddleware,
+    ModelCallLimitMiddleware,
+    ModelRequest,
+    dynamic_prompt,
+    wrap_model_call,
+    wrap_tool_call,
+)
+from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_core.tools import BaseTool
+from langgraph.errors import GraphBubbleUp
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.store.base import BaseStore
 
 from app.core.config import get_settings
 from app.core.llm import get_chat_model
-from app.core.memory import MEMORY_TOOLS, AgentContext
+from app.core.memory import MEMORY_TOOLS, TEAM_MODE, TOOL_SOURCE, AgentContext
 from app.core.prompts import MEMORIES_SECTION, RECENT_CHATS_SECTION, USER_SECTION
+
+
+def _in_scope(tool, sources) -> bool:
+    tag = (getattr(tool, "metadata", None) or {}).get(TOOL_SOURCE)
+    return not sources or tag is None or tag in sources
+
+
+@wrap_model_call
+async def scope_tools(request: ModelRequest, handler):
+    """Team requests limit an agent to the tools of its sources; untagged tools stay."""
+    context = request.runtime.context
+    return await handler(request.override(
+        tools=[t for t in request.tools if _in_scope(t, context.sources) and t.name not in context.deny_tools]))
+
+
+@wrap_model_call
+async def source_first(request: ModelRequest, handler):
+    """In a team request an agent with source tools in scope must call one on its first model call
+    of the turn, so it cannot answer without looking in its sources. A request without scope (the
+    orchestrator) or without a source tool (the drawer) is left free. The tool is named when there
+    is only one, else any tool is required."""
+    context = request.runtime.context
+    last_human = max((i for i, m in enumerate(request.messages) if isinstance(m, HumanMessage)), default=-1)
+    first_call = not any(isinstance(m, ToolMessage) for m in request.messages[last_human + 1:])
+    names = [t.name for t in request.tools if (getattr(t, "metadata", None) or {}).get(TOOL_SOURCE)
+             and _in_scope(t, context.sources)]
+    if context.agent != TEAM_MODE or not context.sources or not first_call or not names:
+        return await handler(request)
+    return await handler(request.override(tool_choice=names[0] if len(names) == 1 else "required"))
+
+
+@wrap_tool_call
+async def refuse_hidden_tools(request, handler):
+    """The model may call a tool it was not offered (the prompt names it); the tool node would
+    still run it, so refuse here."""
+    context = request.runtime.context
+    if not _in_scope(request.tool, context.sources) or request.tool_call["name"] in context.deny_tools:
+        return ToolMessage(f"Tool {request.tool_call['name']} is not available for this request.",
+                           tool_call_id=request.tool_call["id"], name=request.tool_call["name"], status="error")
+    return await handler(request)
+
+
+@wrap_tool_call
+async def tool_errors(request, handler):
+    """A tool that raises comes back to the model as an error message it can correct, instead of
+    ending the run. Interrupts and handoffs (GraphBubbleUp) and cancellation pass through."""
+    try:
+        return await handler(request)
+    except GraphBubbleUp:
+        raise
+    except Exception as e:
+        return ToolMessage(f"Tool {request.tool_call['name']} failed: {e}"[:500],
+                           tool_call_id=request.tool_call["id"], name=request.tool_call["name"], status="error")
 
 
 def build_agent(
@@ -53,7 +115,8 @@ def build_agent(
     return create_agent(
         get_chat_model(model),
         tools=[*tools, *MEMORY_TOOLS],
-        middleware=[prompt_with_memories, call_limit, *middleware],
+        middleware=[prompt_with_memories, call_limit, scope_tools, source_first, tool_errors, refuse_hidden_tools,
+                    *middleware],
         context_schema=AgentContext,
         checkpointer=checkpointer,
         store=store,

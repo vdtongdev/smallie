@@ -26,7 +26,7 @@ from langgraph.runtime import Runtime
 from langgraph_sdk.client import LangGraphClient
 
 from app.core.config import get_settings
-from app.core.memory import AgentContext
+from app.core.memory import TEAM_MODE, AgentContext
 from app.core.usage import UsageCounter
 
 log = logging.getLogger(__name__)
@@ -131,9 +131,11 @@ class RemoteAgent:
     async def ainvoke(self, input: dict, config: RunnableConfig | None = None, *, context: AgentContext) -> dict:
         config = dict(config or {})
         counters = _usage_counters(config)
-        budget = get_settings().max_message_model_calls
+        settings = get_settings()
+        name, budget = (("TEAM_MAX_MESSAGE_MODEL_CALLS", settings.team_max_message_model_calls)
+                        if context.agent == TEAM_MODE else ("MAX_MESSAGE_MODEL_CALLS", settings.max_message_model_calls))
         if any(counter.model_calls >= budget for counter in counters):
-            raise CallBudgetExceeded(f"This message used its {budget} model calls (MAX_MESSAGE_MODEL_CALLS); "
+            raise CallBudgetExceeded(f"This message used its {budget} model calls ({name}); "
                                      f"the {self.spec.route} agent was not called.")
         # checkpoint_ns stays: RemoteGraph drops it from the request and prefixes streamed chunks with it.
         config["configurable"] = {k: v for k, v in config.get("configurable", {}).items() if k != "thread_id"}
@@ -161,8 +163,9 @@ class RemoteAgent:
         new = [as_message(m) for m in output.get("messages", [])][len(input.get("messages", [])):]
         # Only these keys: anything else (route, direct, failed) could steer the parent graph.
         result = {"messages": new}
-        if "findings" in output:
-            result["findings"] = output["findings"]
+        for key in ("findings", "tools"):
+            if key in output:
+                result[key] = output[key]
         return result
 
 

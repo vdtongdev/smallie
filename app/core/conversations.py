@@ -26,7 +26,7 @@ def get_conversation(user_id: str, conversation_id: str) -> dict | None:
 
 
 def list_conversations(user_id: str, kind: str | None = None) -> list[dict]:
-    query = select(conversations.c.id, conversations.c.title, conversations.c.updated_at).where(
+    query = select(conversations.c.id, conversations.c.title, conversations.c.kind, conversations.c.updated_at).where(
         conversations.c.user_id == user_id
     )
     if kind:

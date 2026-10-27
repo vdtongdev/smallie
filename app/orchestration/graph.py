@@ -21,6 +21,7 @@ from app.core.memory import AgentContext
 from app.orchestration.fallback import FALLBACK, after, fallback
 from app.orchestration.orchestrator import build_orchestrator
 from app.orchestration.router import ORCHESTRATOR, AssistantState, build_router
+from app.orchestration.team import TEAM, build_team
 
 
 def build_assistant(checkpointer, store, agents: Mapping | None = None):
@@ -31,6 +32,8 @@ def build_assistant(checkpointer, store, agents: Mapping | None = None):
     graph = StateGraph(AssistantState, context_schema=AgentContext)
     graph.add_node("router", build_router(AGENTS))
     graph.add_node(ORCHESTRATOR, orchestrator, destinations=(*targets, END))
+    graph.add_node(TEAM, build_team(AGENTS, agents, orchestrator))
+    graph.add_edge(TEAM, END)
     graph.add_node(FALLBACK, fallback)
     graph.add_edge(FALLBACK, ORCHESTRATOR)
     for spec in AGENTS:
@@ -42,5 +45,5 @@ def build_assistant(checkpointer, store, agents: Mapping | None = None):
             # Entries that only gather material (research) hand it to the orchestrator to write up.
             graph.add_edge(spec.route, ORCHESTRATOR)
     graph.add_edge(START, "router")
-    graph.add_conditional_edges("router", lambda state: state["route"], [*agents, ORCHESTRATOR])
+    graph.add_conditional_edges("router", lambda state: state["route"], [*agents, ORCHESTRATOR, TEAM])
     return graph.compile(checkpointer=checkpointer, store=store, name="assistant")

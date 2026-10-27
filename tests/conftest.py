@@ -4,6 +4,30 @@ import pytest
 from app.core.config import get_settings
 
 
+@pytest.fixture(autouse=True)
+def _no_judge_model_from_env(monkeypatch):
+    # Tests run on the default config, independent of a developer's .env (env vars beat .env).
+    monkeypatch.setenv("OPENROUTER_JUDGE_MODEL", "")
+    get_settings.cache_clear()
+    yield
+    monkeypatch.undo()
+    get_settings.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def _plan_call_fails(monkeypatch):
+    """No test reaches a real model through `ask_plan`: the plan call fails unless a test scripts it, so the team runs the fallback plan (every participant, independent)."""
+    async def boom(*args, **kwargs):
+        raise RuntimeError("no plan model in tests")
+
+    from types import SimpleNamespace
+
+    from app.orchestration import team
+
+    monkeypatch.setattr(team, "get_chat_model", lambda *a, **k: SimpleNamespace(
+        with_structured_output=lambda schema, method: SimpleNamespace(ainvoke=boom)))
+
+
 def _db_reachable() -> bool:
     try:
         with psycopg.connect(get_settings().database_url, connect_timeout=2):

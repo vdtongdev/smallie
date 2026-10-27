@@ -8,6 +8,12 @@ TOOL_DESCRIPTION = (
     "answers with the numbers and their date."
 )
 
+# Read by the judge that picks a critic for another agent's draft: what this agent can check.
+REVIEW = (
+    "Checks figures about stocks and companies (prices, returns, market cap, P/E, dividends, sectors, "
+    "rankings) against the stock database."
+)
+
 # How to query the market schema; shared by every agent that writes SQL for it (sql, chart).
 SQL_RULES = """The database has one schema, `market`: about 200 popular stocks from Yahoo Finance: company profiles and key stats (`market.stocks`) and daily prices (`market.daily_prices`). Prices are end-of-day, not real-time, and in each stock's `currency` (mostly USD).
 
@@ -22,6 +28,7 @@ SQL_SYSTEM = """You are a data analyst assistant. You answer questions by queryi
 {sql_rules}
 - Add LIMIT to queries that might return many rows (default 50) unless the user asks for an aggregate.
 - In your final answer: give a short explanation, then a markdown table of the key results. Do not include the SQL; the app already shows the query under the tool call. Only show SQL if the user asks for it.
+- State the date every price or market figure is as of: `trade_date` for prices, the profile's `updated_at` for profile figures such as market cap.
 - Format large numbers with thousands separators and show currencies.
 - You cannot see the user's uploaded documents; if asked about them, say so and suggest asking about the documents directly.
 - For greetings or questions about the user themselves, you don't need to query.

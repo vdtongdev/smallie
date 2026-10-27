@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     openrouter_quantizations: str = ""  # comma-separated provider precisions, e.g. "bf16,fp8"; empty = any
     openrouter_provider_sort: str = ""  # provider order: "throughput", "latency" or "price"; empty = OpenRouter's default (price-weighted)
     openrouter_orchestrator_model: str = ""  # the front-door agent; empty = chat model
+    openrouter_judge_model: str = ""  # the team board; empty = orchestrator model, then chat model
     openrouter_embed_model: str = "baai/bge-m3"
     embed_dim: int = 1024
 
@@ -67,6 +68,10 @@ class Settings(BaseSettings):
     # Loop guard: model calls one chat message may use across the orchestrator and every agent
     # server (they report theirs); past it, no further specialist is called.
     max_message_model_calls: int = 30
+    # Team mode: conflict rounds per meeting point, tasks per message (follow-ups included), and its own model-call cap (same guard as above).
+    team_max_rounds: int = 2
+    team_max_tasks: int = 6
+    team_max_message_model_calls: int = 30
 
     @property
     def agent_url_map(self) -> dict[str, str]:

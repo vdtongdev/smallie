@@ -4,7 +4,7 @@ import re
 from sqlalchemy import select
 
 from app.agents.base import AgentSpec, RouteInfo
-from app.agents.docs.prompts import DOCS_SYSTEM, ROUTE_DESCRIPTION, TOOL_DESCRIPTION
+from app.agents.docs.prompts import DOCS_SYSTEM, REVIEW, ROUTE_DESCRIPTION, TOOL_DESCRIPTION
 from app.agents.docs.tools import NO_PASSAGES, search_documents
 from app.agents.factory import build_agent
 from app.core.db import documents, get_engine
@@ -17,6 +17,11 @@ MIN_WORD_CHARS = 5  # words of a file name that count as mentioning it
 GENERIC_NAME_WORDS = frozenset({"final", "draft", "copy", "version", "update", "updated", "scan", "scanned", "edited"})
 
 HINTS = re.compile(r"\b(documents?|files?|pdfs?|docx|uploads?|uploaded|tài liệu|tệp)\b", re.IGNORECASE)
+NAMES = re.compile(
+    r"\b(?:docs?|documents?|files?|pdfs?) agent\b|\bmy (?:docs?|documents?|files?|pdfs?|uploads?)\b|\buploaded (?:docs?|documents?|files?)\b"
+    r"|\b(?:tài liệu|tệp) (?:của (?:tôi|mình)|đã tải)",
+    re.IGNORECASE,
+)
 # Words for a personal file the user may have uploaded, without naming it.
 PERSONAL_FILES = re.compile(r"\b(resumes?|résumés?|cv|curriculum vitae|hồ sơ xin việc)\b", re.IGNORECASE)
 
@@ -68,7 +73,12 @@ SPEC = AgentSpec(
     build=build_docs_agent,
     message_names=("docs_agent",),
     hints=HINTS,
+    names=NAMES,
+    names_via_info=True,
+    source_tools=frozenset({"search_documents"}),
     route_info=route_info,
     tool_description=TOOL_DESCRIPTION,
+    review=REVIEW,
+    sources=frozenset({"user_files"}),
     no_result=lambda text: text == NO_PASSAGES,
 )

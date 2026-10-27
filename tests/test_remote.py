@@ -102,6 +102,22 @@ def agent(remote, timeout_s: float = 5) -> RemoteAgent:
     return RemoteAgent(SPEC, "http://sql:8000", service_token="t", timeout_s=timeout_s, remote=remote)
 
 
+async def test_team_mode_uses_the_team_budget(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "max_message_model_calls", 5)
+    monkeypatch.setattr(settings, "team_max_message_model_calls", 9)
+    team = AgentContext(user_id="u-7", agent="team")
+    counter = UsageCounter()
+    counter.add({"model_calls": 5})
+    remote = FakeRemote(output={"messages": []})
+    await agent(remote).ainvoke({"messages": []}, {"callbacks": [counter]}, context=team)
+    assert len(remote.calls) == 1  # 5 calls is under the team budget
+    counter.add({"model_calls": 4})
+    with pytest.raises(remote_module.CallBudgetExceeded, match="TEAM_MAX_MESSAGE_MODEL_CALLS"):
+        await agent(remote).ainvoke({"messages": []}, {"callbacks": [counter]}, context=team)
+    assert len(remote.calls) == 1
+
+
 async def test_sends_context_and_user_header_without_thread_id():
     remote = FakeRemote(output={"messages": [HUMAN]})
     config = {"configurable": {"thread_id": "c-42", "checkpoint_ns": "sql:abc", "__pregel_stream": "hook"}}
@@ -329,3 +345,25 @@ def test_engines_use_the_pool_size(monkeypatch):
     monkeypatch.setattr(get_settings(), "db_pool_size", 2)
     engine = db.readonly_engine("postgresql+psycopg://u:p@localhost:5433/smallie")
     assert engine.pool.size() == 2
+
+
+async def test_tool_calls_reported_by_the_server_pass_through():
+    tools = [{"name": "run_sql", "args": {}, "result": "1 row"}]
+    remote = FakeRemote(output={"messages": [HUMAN], "tools": tools})
+    result = await agent(remote).ainvoke({"messages": []}, {}, context=CTX)
+    assert result["tools"] == tools
+
+
+def test_tables_on_a_message_survive_the_wire_to_the_servers_state():
+    """The team's final answer carries its tables in additional_kwargs; the chart server's chart_table
+    reads them from the thread, after the SDK's JSON encoding and the server's add_messages."""
+    import orjson
+    from langgraph.graph.message import add_messages
+    from langgraph_sdk._shared.utilities import _orjson_default
+
+    from app.agents.artifacts import artifacts_from
+
+    answer = AIMessage("Cap.", id="a1", additional_kwargs={"tables": [{"id": "t1", "rows": [[1]]}]})
+    wire = orjson.loads(orjson.dumps({"messages": [answer]}, default=_orjson_default))
+    state = add_messages([], wire["messages"])
+    assert artifacts_from(state, "tables") == [{"id": "t1", "rows": [[1]]}]

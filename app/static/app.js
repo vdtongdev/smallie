@@ -7,6 +7,8 @@ const state = {
   conversationId: null,
   busy: false,
   docsPoll: null,
+  awaiting: false, // the open chat is paused on a question to the user
+  kinds: {}, // conversation id -> kind ("auto" | "team"), from /api/conversations
   agents: {}, // route -> {labels: {en, vi}, steps: {step: {en, vi}}}, from /api/agents
 };
 
@@ -145,7 +147,8 @@ function applyLanguage() {
   document.querySelectorAll("[data-i18n]").forEach((el) => (el.textContent = t(el.dataset.i18n)));
   document.querySelectorAll("[data-i18n-title]").forEach((el) => (el.title = t(el.dataset.i18nTitle)));
   $("langBtn").textContent = state.lang === "en" ? "Tiếng Việt" : "English";
-  $("input").placeholder = t("placeholder");
+  $("input").placeholder = t(state.awaiting ? "answerPlaceholder" : "placeholder");
+  document.querySelectorAll(".status-line").forEach((node) => renderStatus(node.turn));
   document.querySelectorAll("[data-lang]").forEach((el) => (el.hidden = el.dataset.lang !== state.lang));
   labelAgentBadges();
 }
@@ -172,8 +175,311 @@ $("langBtn").onclick = () => {
   loadUsage();
   if ($("readmeDialog").open) loadMarketStatus();
   if ($("adminDialog").open) loadAccounts();
+  if ($("activityDialog").open) renderActivity();
   if (!state.conversationId) showWelcome();
 };
+
+// ---------- team mode ----------
+// A new conversation starts as a team chat when the switch is on; an opened one stays team or else uses auto.
+const chatKind = () => state.conversationId
+  ? (state.kinds[state.conversationId] === "team" ? "team" : "auto")
+  : ($("teamMode").checked ? "team" : "auto");
+
+function syncTeamSwitch() {
+  const id = state.conversationId;
+  $("teamMode").checked = id ? state.kinds[id] === "team" : localGet("team_mode") === "1";
+  $("teamMode").disabled = !!id;
+}
+$("teamMode").onchange = () => localSet("team_mode", $("teamMode").checked ? "1" : "0");
+
+function setAwaiting(awaiting) {
+  state.awaiting = awaiting;
+  $("input").placeholder = t(awaiting ? "answerPlaceholder" : "placeholder");
+}
+
+function markPending(el) {
+  el.classList.add("pending");
+  const note = document.createElement("div");
+  note.className = "pending-note";
+  note.dataset.i18n = "waitingForYou";
+  note.textContent = t("waitingForYou");
+  el.append(note);
+  setAwaiting(true);
+}
+
+function agentBadge(route, step = null) {
+  const badge = document.createElement("span");
+  badge.className = "agent-badge";
+  badge.dataset.agent = route;
+  if (step) badge.dataset.step = step;
+  badge.textContent = badgeLabel(badge);
+  return badge;
+}
+
+function i18nSpan(tag, key) {
+  const node = document.createElement(tag);
+  node.dataset.i18n = key;
+  node.textContent = t(key);
+  return node;
+}
+
+const el = (tag, cls, text) => Object.assign(document.createElement(tag), { className: cls, textContent: text ?? "" });
+
+// ---------- status line and activity popup ----------
+// Each reply has a status line (spinner and badges while it runs, a summary after) and an Activity button.
+// `act` is what the popup shows, kept in memory per reply: {team, plan: [{id, agent, goal, depends_on, origin}],
+// waves: [{wave, kind, tasks, agents, answers: [{task, agent, text, tools: [{name, args, result}]}], review}],
+// drawn: [same answers, tasks outside every wave], asked: [same answers without a task: specialists the orchestrator asked], synthesis, tools: [], question}. A reload builds it
+// from `message.team` (the task graph's workspace or the older rounds/boards) or the tool messages.
+function newTurn(team = false) {
+  const turn = {
+    el: el("div", "status-line"), badges: [], running: true, step: {}, opener: null,
+    act: { team, plan: [], waves: [], tools: [], drawn: [], asked: [], synthesis: null, question: null },
+  };
+  turn.el.turn = turn;
+  turn.head = el("span");
+  turn.names = el("span", "status-names");
+  turn.tail = el("span");
+  turn.spin = el("span", "spinner");
+  turn.btn = el("button", "ghost activity-btn");
+  turn.btn.type = "button";
+  turn.btn.setAttribute("aria-haspopup", "dialog");
+  turn.btn.onclick = () => openActivity(turn);
+  turn.el.append(turn.spin, turn.head, turn.names, turn.tail, turn.btn);
+  $("messages").append(turn.el);
+  renderStatus(turn);
+  return turn;
+}
+
+const stepCount = (act) => act.waves.reduce((n, r) => n + r.answers.reduce((m, a) => m + 1 + a.tools.length, 0), 0)
+  + [...act.drawn, ...act.asked].reduce((n, d) => n + 1 + d.tools.length, 0) + act.tools.length + (act.question ? 1 : 0);
+
+const waveTitle = (w) => `${t("waveN").replace("{n}", w.wave)} · ${t({ conflict: "kindConflict", challenge: "kindChallenge" }[w.kind] || "kindAnswer")}`;
+
+// Waves the plan needs so far: its longest dependency chain, at least the waves already run.
+function waveTotal(act) {
+  const depth = {};
+  const of = (task, seen = []) => depth[task.id] ??= 1 + Math.max(0, ...task.depends_on.map((d) => {
+    const dep = act.plan.find((x) => x.id === d);
+    return dep && !seen.includes(d) ? of(dep, [...seen, task.id]) : 0;
+  }));
+  return Math.max(act.waves.length, ...act.plan.filter((x) => !x.depends_on.includes("answer")).map((x) => of(x)));
+}
+
+const planAgent = (act, id) => agentLabel(act.plan.find((x) => x.id === id)?.agent ?? id);
+
+// One line for a review: who questions whom, and the follow-up tasks it adds.
+function reviewNote(act, review) {
+  return [...(review.challenges || []).map((c) => t("questions").replace("{by}", planAgent(act, c.by_task)).replace("{to}", planAgent(act, c.to_task))),
+    ...(review.follow_ups || []).map((f) => `+ ${agentLabel(f.agent)}: ${f.goal}`)].join(" · ");
+}
+function renderStatus(turn) {
+  const { act, step } = turn;
+  let head = "";
+  let tail = "";
+  let names = turn.badges;
+  if (turn.running) {
+    if (step.wave) {
+      head = t("waveOf").replace("{n}", step.wave.wave).replace("{max}", waveTotal(act));
+      names = step.wave.agents.map((agent) => ({ agent }));
+    } else if (step.note) head = step.note;
+    if (step.writing) head = t("writing");
+    else if (step.tool) head = t("usingTool").replace("{name}", step.tool);
+  } else if (act.team && act.waves.length) {
+    const n = act.waves.length;
+    head = n === 1 ? t("teamSummaryOne") : t("teamSummary").replace("{n}", n);
+    const resolved = act.waves.reduce((m, w) => m + (w.review?.outcomes?.length || 0), 0);
+    const diffs = act.waves.reduce((m, w) => m + (w.review?.differences.length || 0), 0);
+    if (resolved) tail = t(resolved === 1 ? "resolvedOne" : "resolvedMany").replace("{n}", resolved);
+    else if (diffs) tail = t(diffs === 1 ? "differenceOne" : "differenceMany").replace("{n}", diffs);
+  }
+  turn.head.textContent = head;
+  turn.tail.textContent = tail;
+  turn.names.replaceChildren(...names.map((b) => agentBadge(b.agent, b.step)));
+  turn.spin.hidden = !turn.running;
+  turn.el.hidden = !turn.running && !head && !tail && !names.length;
+  const n = stepCount(act);
+  turn.btn.hidden = !n;
+  turn.btn.textContent = `${t("activity")} (${n})`;
+}
+
+let activityTurn = null; // the reply the popup shows
+let activityFrame = 0;
+
+// Call after every change to a reply's activity: the status line now, the popup (if it shows this reply) next frame.
+function touch(turn) {
+  renderStatus(turn);
+  if (activityTurn !== turn || !$("activityDialog").open || activityFrame) return;
+  activityFrame = requestAnimationFrame(() => { activityFrame = 0; renderActivity(); });
+}
+
+// The reply is over: the spinner goes and the Activity button moves below the answer.
+function finishTurn(turn) {
+  turn.running = false;
+  turn.step = {};
+  touch(turn);
+  if (!turn.btn.hidden) $("messages").append(turn.btn);
+}
+
+// A tool result closes the oldest call of that name still waiting for one.
+function closeTool(tools, name, content) {
+  const tool = tools.find((x) => x.name === name && x.result === null) || tools[tools.push({ name, args: {}, result: null }) - 1];
+  tool.result = content;
+  return tool;
+}
+
+function toolBlock(parent, { name, args, result }) {
+  const details = document.createElement("details");
+  details.className = "tool";
+  const summary = document.createElement("summary");
+  const shown = args.query ?? args.sql ?? args.title ?? args.urls ?? args.name ?? args.fact ?? JSON.stringify(args);
+  summary.textContent = `${t("usedTool")}: ${name} — ${String(shown).slice(0, 120)}`;
+  const pre = document.createElement("pre");
+  pre.textContent = typeof args.query === "string" ? args.query : JSON.stringify(args, null, 2);
+  details.append(summary, pre);
+  parent.append(details);
+  if (result === null) return;
+  const out = document.createElement("details");
+  out.className = "tool";
+  const body = document.createElement("pre");
+  body.textContent = result;
+  out.append(el("summary", "", `${t("result")}: ${name}`), body);
+  parent.append(out);
+}
+
+function boardBlock(b, act) {
+  const div = el("div", "act-board");
+  div.append(el("strong", "", t("boardTitle")));
+  if (b.forced) div.append(i18nSpan("em", "forcedStop"));
+  const routes = (list) => list.map(agentLabel).join(", ");
+  const section = (title, lines) => {
+    if (!lines.length) return;
+    const ul = document.createElement("ul");
+    for (const line of lines) ul.append(el("li", "", line));
+    div.append(el("div", "act-label", title), ul);
+  };
+  section(t("agreements"), b.agreements);
+  section(t("differences"), b.differences.map((d) => `${routes(d.routes)}: ${d.explanation}`
+    + (d.sides || []).map((x) => ` [${agentLabel(x.route)}: ${x.value}, ${x.source}, ${x.as_of}]`).join("")));
+  section(t("challenges"), (b.challenges || []).map((c) => `${planAgent(act, c.by_task)} -> ${planAgent(act, c.to_task)}: ${c.question}`));
+  section(t("outcomes"), (b.outcomes || []).map((o) => `${planAgent(act, o.task)}: ${t(o.revised ? "revised" : "stands")}`));
+  section(t("followUps"), (b.follow_ups || []).map((f) => `${agentLabel(f.agent)}: ${f.goal}`));
+  section(t("conflicts"), b.conflicts.map((c) => `${routes(c.routes)}: ${c.claim}${c.issue ? ` — ${c.issue}` : ""}`
+    + (c.fixable_by.length ? ` (${t("fixableBy")} ${routes(c.fixable_by)})` : "")));
+  return div;
+}
+
+function renderActivity() {
+  const act = activityTurn.act;
+  const body = $("activityBody");
+  body.replaceChildren();
+  if (act.plan.length) {
+    const sec = el("section", "act-round");
+    sec.append(el("h3", "", t("plan")));
+    const ul = document.createElement("ul");
+    for (const x of act.plan) {
+      const mark = { follow_up: t("followUpMark"), reply: t("replyMark") }[x.origin];
+      ul.append(el("li", "", `${x.id} ${agentLabel(x.agent)}: ${x.goal}${x.depends_on.length ? ` ← ${x.depends_on.join(", ")}` : ""}${mark ? ` (${mark})` : ""}`));
+    }
+    sec.append(ul);
+    body.append(sec);
+  }
+  for (const r of act.waves) {
+    const sec = el("section", "act-round");
+    sec.append(el("h3", "", waveTitle(r)));
+    for (const a of r.answers) {
+      const div = el("div", "act-agent");
+      div.append(agentBadge(a.agent));
+      if (a.text) {
+        const text = el("div", "act-text");
+        text.innerHTML = renderMarkdown(a.text);
+        div.append(text);
+      }
+      for (const tool of a.tools) toolBlock(div, tool);
+      sec.append(div);
+    }
+    if (r.review) sec.append(boardBlock(r.review, act));
+    body.append(sec);
+  }
+  if (act.drawn.length) {
+    const sec = el("section", "act-round");
+    sec.append(el("h3", "", t("drawing")));
+    for (const d of act.drawn) {
+      const div = el("div", "act-agent");
+      div.append(agentBadge(d.agent));
+      if (d.text) {
+        const text = el("div", "act-text");
+        text.innerHTML = renderMarkdown(d.text);
+        div.append(text);
+      }
+      for (const tool of d.tools) toolBlock(div, tool);
+      sec.append(div);
+    }
+    body.append(sec);
+  }
+  if (act.asked.length) {
+    const sec = el("section", "act-round");
+    for (const a of act.asked) {
+      const div = el("div", "act-agent");
+      div.append(agentBadge(a.agent));
+      for (const tool of a.tools) toolBlock(div, tool);
+      sec.append(div);
+    }
+    body.append(sec);
+  }
+  if (act.tools.length) {
+    const sec = el("section", "act-round");
+    if (act.waves.length) sec.append(el("h3", "", t("otherSteps")));
+    for (const tool of act.tools) toolBlock(sec, tool);
+    body.append(sec);
+  }
+  const open = act.synthesis ? [...act.synthesis.open_points, ...act.synthesis.not_done] : [];
+  if (open.length) {
+    const sec = el("section", "act-round");
+    const ul = document.createElement("ul");
+    for (const line of open) ul.append(el("li", "", typeof line === "string" ? line : JSON.stringify(line)));
+    sec.append(el("h3", "", t("openPoints")), ul);
+    body.append(sec);
+  }
+  if (act.question) {
+    const sec = el("section", "act-round");
+    sec.append(el("h3", "", t("yourQuestion")), el("p", "", act.question));
+    body.append(sec);
+  }
+}
+
+function openActivity(turn) {
+  activityTurn = turn;
+  turn.opener = turn.btn;
+  renderActivity();
+  $("activityDialog").showModal();
+}
+$("activityDialog").addEventListener("close", () => activityTurn?.opener?.focus());
+
+// A finished team reply's transcript (message.team) as popup data. The task graph's workspace keeps
+// `history` (waves, task results, reviews in order); the older round table kept `rounds` and `boards`.
+function teamActivity(team) {
+  const act = { team: true, plan: [], waves: [], tools: [], drawn: [], asked: [], synthesis: team.synthesis || null, question: null };
+  if (!team.history) {
+    act.drawn = team.drawn || [];
+    act.waves = (team.rounds || []).map((r) => ({
+      wave: r.round, kind: r.kind, tasks: [], agents: r.answers.map((a) => a.agent), answers: r.answers,
+      review: (team.boards || []).find((b) => b.round === r.round) || null,
+    }));
+    return act;
+  }
+  act.plan = (team.tasks || []).map(({ id, agent, goal, depends_on, origin }) => ({ id, agent, goal, depends_on, origin }));
+  for (const e of team.history) {
+    const last = act.waves.at(-1);
+    if (e.type === "wave") act.waves.push({ ...e, answers: [], review: null });
+    else if (e.type === "review" && last) last.review = e;
+    else if (e.type === "result") {
+      const answer = { task: e.task, agent: e.agent, text: e.text, tools: e.tools || [] };
+      (last?.tasks.includes(e.task) ? last.answers : act.drawn).push(answer);
+    }
+  }
+  return act;
+}
 
 // ---------- readme ----------
 $("readmeBtn").onclick = () => {
@@ -224,6 +530,7 @@ const conversationKey = () => `conversation_${KIND}_${state.me?.user_id}`;
 function setConversation(id) {
   state.conversationId = id;
   if (state.me) localSet(conversationKey(), id || "");
+  syncTeamSwitch();
 }
 
 function setBusy(busy) {
@@ -236,6 +543,8 @@ function setBusy(busy) {
 async function loadConversations() {
   const list = $("conversationList");
   const items = await api("/conversations").catch(() => []);
+  state.kinds = Object.fromEntries(items.map((c) => [c.id, c.kind]));
+  syncTeamSwitch();
   list.innerHTML = "";
   if (!items.length) {
     list.innerHTML = `<li class="muted">${t("noConversations")}</li>`;
@@ -259,6 +568,12 @@ async function loadConversations() {
       if (c.id === state.conversationId) newChat();
       loadConversations();
     };
+    if (c.kind === "team") {
+      const icon = document.createElement("span");
+      icon.textContent = "\u{1F465}";
+      icon.title = t("teamMode");
+      li.append(icon);
+    }
     li.append(title, del);
     li.onclick = () => openConversation(c.id);
     list.append(li);
@@ -268,6 +583,7 @@ async function loadConversations() {
 async function openConversation(id) {
   if (state.busy) return;
   setConversation(id);
+  setAwaiting(false);
   $("messages").innerHTML = "";
   let messages;
   try {
@@ -281,20 +597,36 @@ async function openConversation(id) {
   }
   if (state.conversationId !== id) return; // user switched away while loading
   let agent = null; // agent badge already shown for the current turn
+  let turn = null; // the current turn's status line, created with its first reply
+  const end = () => { if (turn) finishTurn(turn); turn = null; };
   for (const m of messages) {
-    if (m.role === "user") { addUserMessage(m.content); agent = null; }
-    else if (m.role === "assistant") {
-      if (m.agent && m.agent !== agent) addAgentBadge((agent = m.agent));
-      for (const call of m.tool_calls || []) addToolCall(call.name, call.args);
+    if (m.role === "user") { end(); addUserMessage(m.content); agent = null; continue; }
+    turn ??= newTurn(!!m.team);
+    if (m.role === "assistant") {
+      if (m.team) {
+        turn.act = teamActivity(m.team);
+        const agents = m.team.participants || (m.team.tasks || []).map((x) => x.agent);
+        turn.badges = [...new Set(agents)].map((a) => ({ agent: a }));
+      } else if (m.agent && m.agent !== agent) turn.badges.push({ agent: (agent = m.agent) });
+      for (const call of m.tool_calls || []) turn.act.tools.push({ name: call.name, args: call.args, result: null });
       addCharts(m.charts); // an orchestrator answer's charts, shown above it as when it streamed
-      if (m.content) addAssistantMessage().update(m.content);
-    } else if (m.role === "tool") addToolResult(m.name, m.content, m.charts);
+      if (m.content) {
+        const msg = addAssistantMessage();
+        msg.update(m.content);
+        if (m.pending) { markPending(msg.el); turn.act.question = m.content; }
+      }
+    } else if (m.role === "tool") {
+      closeTool(turn.act.tools, m.name, m.content);
+      addCharts(m.charts);
+    }
   }
+  end();
   loadConversations();
 }
 
 function newChat() {
   setConversation(null);
+  setAwaiting(false);
   showWelcome();
   loadConversations();
 }
@@ -334,53 +666,13 @@ function addAssistantMessage() {
   };
 }
 
-// `step`: a workflow handed over to another of its agents. Returns the badge (if one was added).
-function addAgentBadge(name, before = null, step = null) {
-  const div = document.createElement("div");
-  div.className = "agent-badge";
-  div.dataset.agent = name;
-  if (step) div.dataset.step = step;
-  div.textContent = badgeLabel(div);
-  // A workflow's first agent usually has the same label as the turn's badge; don't repeat it.
-  const last = [...$("messages").querySelectorAll(".agent-badge")].pop();
-  if (step && last?.textContent === div.textContent) return null;
-  if (before) before.before(div);
-  else $("messages").append(div);
-  return div;
-}
-
-function addToolCall(name, args) {
-  const details = document.createElement("details");
-  details.className = "tool";
-  const summary = document.createElement("summary");
-  const shown = args.query ?? args.sql ?? args.title ?? args.urls ?? args.name ?? args.fact ?? JSON.stringify(args);
-  summary.textContent = `${t("usedTool")}: ${name} — ${String(shown).slice(0, 120)}`;
-  const pre = document.createElement("pre");
-  pre.textContent = typeof args.query === "string" ? args.query : JSON.stringify(args, null, 2);
-  details.append(summary, pre);
-  $("messages").append(details);
-  scrollToBottom();
-}
-
 // Charts a tool drew (live, or replayed from history), as cards in the message flow.
-function addCharts(charts) {
+function addCharts(charts, before = null) {
   for (const spec of charts || []) {
     const card = chartCard(spec);
-    if (card) $("messages").append(card);
+    if (card && before) before.before(card);
+    else if (card) $("messages").append(card);
   }
-  scrollToBottom();
-}
-
-function addToolResult(name, content, charts = []) {
-  if (charts.length) return addCharts(charts); // the chart is the result; its summary is for the model
-  const details = document.createElement("details");
-  details.className = "tool";
-  const summary = document.createElement("summary");
-  summary.textContent = `${t("result")}: ${name}`;
-  const pre = document.createElement("pre");
-  pre.textContent = content;
-  details.append(summary, pre);
-  $("messages").append(details);
   scrollToBottom();
 }
 
@@ -405,16 +697,29 @@ function dropReplies() {
 // ---------- chat ----------
 async function sendMessage(text) {
   setBusy(true);
+  setAwaiting(false);
+  const kind = chatKind();
   addUserMessage(text);
+  const turn = newTurn(kind === "team");
+  const { act } = turn;
   let current = addAssistantMessage();
   current.update(`_${t("thinking")}_`);
   let started = false;
   let finished = false;
-  let badge = null; // this turn's agent badge
   let waiting = false; // showing "thinking" after a fallback
+  let synthesized = false; // the team's write-up started
+  // A task's answer: in the latest wave that ran it, else (a chart task after the write-up) in `drawn`.
+  const answerOf = (agent, task) => {
+    const wave = task && act.waves.findLast((w) => w.tasks.includes(task));
+    const answers = wave ? wave.answers : task ? act.drawn : act.asked; // no task: a specialist the orchestrator asked
+    return answers.find((a) => a.task === task && a.agent === agent) || answers[answers.push({ task, agent, text: "", tools: [] }) - 1];
+  };
+  const addBadges = (agents) => {
+    for (const agent of agents) if (!turn.badges.some((b) => b.agent === agent)) turn.badges.push({ agent });
+  };
 
   try {
-    const res = await fetch(`/api/chat/${KIND}`, {
+    const res = await fetch(`/api/chat/${kind}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message: text, conversation_id: state.conversationId }),
@@ -433,19 +738,26 @@ async function sendMessage(text) {
       buffer = events.pop();
       for (const raw of events) {
         if (!raw.startsWith("data: ")) continue;
+        try { // one bad event is skipped; a network or reader error still ends the stream below
         const event = JSON.parse(raw.slice(6));
         switch (event.type) {
           case "conversation":
+            state.kinds[event.id] = kind;
             setConversation(event.id);
             break;
           case "agent":
+            if (act.team || event.name === "team") break; // the plan names its own agents
             // The orchestrator handed off before showing anything: relabel its badge, as a reload would show it.
-            if (badge && !started) { badge.dataset.agent = event.name; badge.textContent = badgeLabel(badge); }
-            else badge = addAgentBadge(event.name, current.el);
+            if (turn.badges.length && !started) turn.badges[turn.badges.length - 1] = { agent: event.name };
+            else turn.badges.push({ agent: event.name });
+            touch(turn);
             break;
-          case "step":
-            addAgentBadge(event.agent, current.el, event.name);
+          case "step": {
+            const next = { agent: event.agent, step: event.name };
+            if (stepLabel(next.agent, next.step) !== agentLabel(turn.badges.at(-1)?.agent)) turn.badges.push(next);
+            touch(turn);
             break;
+          }
           case "fallback":
             // The agent found no answer: drop its reply (its tool calls stay) while the assistant takes over.
             dropReplies();
@@ -453,27 +765,99 @@ async function sendMessage(text) {
             current.update(`_${t("thinking")}_`);
             started = waiting = true; // the next `agent` event adds the assistant's own badge
             break;
+          case "plan":
+            act.plan = event.tasks;
+            addBadges(event.tasks.map((x) => x.agent));
+            touch(turn);
+            break;
+          case "plan_updated":
+            act.plan.push(...event.tasks);
+            addBadges(event.tasks.map((x) => x.agent));
+            touch(turn);
+            break;
+          case "wave": {
+            const wave = { wave: event.wave, kind: event.kind, tasks: event.tasks, agents: event.agents, answers: [], review: null };
+            act.waves.push(wave);
+            turn.step = { wave };
+            addBadges(event.agents);
+            touch(turn);
+            break;
+          }
+          case "review": {
+            const wave = act.waves.at(-1);
+            if (wave) wave.review = event;
+            turn.step = { note: reviewNote(act, event) };
+            touch(turn);
+            break;
+          }
+          case "spoke": { // the task's final entry: what a reload shows
+            const mine = answerOf(event.agent, event.task);
+            mine.text = event.text;
+            mine.tools = event.tools.map((x, i) => ({ ...x, charts: mine.tools?.[i]?.name === x.name ? mine.tools[i].charts : undefined }));
+            touch(turn);
+            break;
+          }
+          case "synthesize":
+            synthesized = true;
+            turn.step = { writing: true };
+            touch(turn);
+            break;
+          case "charts": // the team's final answer charts, drawn after the write-up; deduped by chart id
+            addCharts(event.charts, current.el);
+            break;
+          case "needs_human":
+            if (!started || waiting) { current.update(""); started = true; waiting = false; }
+            current.update(event.question);
+            markPending(current.el);
+            act.question = event.question;
+            touch(turn);
+            break;
           case "done":
             finished = true;
+            if (act.team && !started && !synthesized) {
+              // One participant and no conflict: its round answer is the reply, so no write-up came.
+              const only = act.waves[0]?.answers[0];
+              if (only?.text) {
+                addCharts(only.tools.flatMap((x) => x.charts || []), current.el);
+                current.update(only.text);
+                started = true;
+              }
+            }
             break;
           case "token":
+            if (event.agent) { answerOf(event.agent, event.task).text += event.text; touch(turn); break; } // a task's draft: popup only
             if (!started || waiting) { current.update(""); started = true; waiting = false; }
             current.append(event.text);
             break;
           case "tool_call":
+            if (event.agent) { answerOf(event.agent, event.task).tools.push({ name: event.name, args: event.args, result: null }); touch(turn); break; }
             if (!started || waiting) current.remove();
             waiting = false;
-            addToolCall(event.name, event.args);
+            act.tools.push({ name: event.name, args: event.args, result: null });
+            turn.step = { tool: event.name };
+            touch(turn);
             current = addAssistantMessage();
             started = true;
             break;
           case "tool_result":
-            addToolResult(event.name, event.content, event.charts);
+            if (event.agent) { // its charts stay out of the answer
+              const { tools } = answerOf(event.agent, event.task);
+              closeTool(tools, event.name, event.content).charts = event.charts;
+              touch(turn);
+              break;
+            }
+            closeTool(act.tools, event.name, event.content);
+            turn.step = {};
+            touch(turn);
+            addCharts(event.charts);
             current = addAssistantMessage();
             break;
           case "error":
             addError(event.message);
             break;
+        }
+        } catch (err) {
+          console.warn("Skipped a bad stream event", raw, err);
         }
       }
     }
@@ -482,6 +866,7 @@ async function sendMessage(text) {
     addError(err.message);
   } finally {
     if (!started || waiting) current.remove();
+    finishTurn(turn);
     document.querySelectorAll(".msg.assistant:empty").forEach((el) => el.remove());
     setBusy(false);
     loadConversations();

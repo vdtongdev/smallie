@@ -1,6 +1,6 @@
 # [smallie](https://smallie-976519788978.asia-southeast1.run.app/)
 
-LangChain agents behind a FastAPI app with a small web UI. You type into one chat, and an **orchestrator** handles each message: it answers general questions itself (with a quick web search for fresh facts), hands a question to the right specialist, or asks several specialists and writes the combined answer. There are four specialists today:
+LangChain agents behind a FastAPI app with a small web UI. You type into one chat, and an **orchestrator** handles each message: it answers general questions itself (with a quick web search for fresh facts), hands a question to the right specialist, or asks several specialists and writes the combined answer. A **Team mode** switch next to the message box makes the orchestrator plan the work as tasks that the agents do from their own sources (in parallel or one after another), and a judge reviews the results after each step. There are four specialists today:
 
 - **Documents**: upload PDF/DOCX files and ask questions about them. Answers cite the file and page.
 - **Database**: ask in plain language about a stock database (200 popular stocks from Yahoo Finance via `yfinance`). The agent writes and runs read-only SQL.
@@ -119,6 +119,7 @@ Set in `.env`; all calls go through OpenRouter.
 
 - `OPENROUTER_CHAT_MODEL`: defaults to a free model with tool calling (list: https://openrouter.ai/models?supported_parameters=tools&max_price=0). `OPENROUTER_FALLBACK_MODEL` (comma-separated, tried in order) kicks in when the main one fails or is rate-limited; pick models that write good Vietnamese. With a paid model, `OPENROUTER_QUANTIZATIONS=bf16,fp8` keeps OpenRouter off the cheapest fp4 providers, which slip more.
 - `OPENROUTER_ORCHESTRATOR_MODEL`: the orchestrator's model; empty means `OPENROUTER_CHAT_MODEL`. The orchestrator is skipped when a message clearly points to one agent. `ORCHESTRATOR_MAX_MODEL_CALLS` (4) caps its calls per message.
+- `TEAM_MAX_TASKS` (6), `TEAM_MAX_ROUNDS` (2, per check point), `TEAM_MAX_MESSAGE_MODEL_CALLS` (30) and `OPENROUTER_JUDGE_MODEL` (the model that reviews the results in team mode; empty means the orchestrator's model): team mode takes 1 plan call + each task's calls + 1 judge call per reviewed step + 1 write-up. Measured on the task graph: 4 calls for a stock question, 7 with a planted wrong figure, 15 with all agents.
 - `TAVILY_API_KEY`: web search (free 1,000 credits/month at https://app.tavily.com). Without it, research uses the other sources. `MCP_SERVERS` adds remote MCP servers and `EXTERNAL_DATABASE_URL` lets the researcher read another Postgres (see `.env.example`).
 - `LANGSMITH_TRACING` + `LANGSMITH_API_KEY`: records every model call, tool call and routing step as a trace. Off by default. Traces contain full prompts (users' messages, file passages), so enable it in production only if you accept that.
 - `OPENROUTER_EMBED_MODEL`: defaults to `baai/bge-m3` (multilingual, about $0.01 per 1M tokens). The free `liquid/lfm-2.5-embedding-350m:free` may keep and train on your data. After changing it or `EMBED_DIM`, stop the app and run `uv run python -m scripts.reindex`.
@@ -126,11 +127,11 @@ Set in `.env`; all calls go through OpenRouter.
 
 ## Architecture
 
-A router, an orchestrator and four specialists that each run as their own agent server. [ARCHITECTURE.md](ARCHITECTURE.md) has the details: [the router](ARCHITECTURE.md#3-router), [the orchestrator](ARCHITECTURE.md#4-orchestrator), [memory](ARCHITECTURE.md#8-memory), [remote agents](ARCHITECTURE.md#10-remote-agents-040-in-progress) and [deployment](ARCHITECTURE.md#12-deployment). Developer notes for coding agents are in [CLAUDE.md](CLAUDE.md).
+A router, an orchestrator and four specialists that each run as their own agent server. [ARCHITECTURE.md](ARCHITECTURE.md) has the details: [the router](ARCHITECTURE.md#3-router), [the orchestrator](ARCHITECTURE.md#4-orchestrator), [memory](ARCHITECTURE.md#8-memory), [remote agents](ARCHITECTURE.md#10-remote-agents-040), [team mode](ARCHITECTURE.md#11-agent-team-050) and [deployment](ARCHITECTURE.md#13-deployment). Developer notes for coding agents are in [CLAUDE.md](CLAUDE.md) and `.claude/rules/`.
 
 ## Adding an agent
 
-An agent is a package under `app/agents/<name>/` (`tools.py`, `prompts.py`, `agent.py` with its `SPEC`). Add the `SPEC` to `AGENTS` in `app/agents/registry.py`, give it a service block in `docker-compose.yml`, and the router, orchestrator, API and UI pick it up. If it needs its own data, add a feature under `app/features/<name>/`. The full checklist is in `CLAUDE.md` ("Adding an agent or workflow").
+An agent is a package under `app/agents/<name>/` (`tools.py`, `prompts.py`, `agent.py` with its `SPEC`). Add the `SPEC` to `AGENTS` in `app/agents/registry.py`, give it a service block in `docker-compose.yml`, and the router, orchestrator, API and UI pick it up. If it needs its own data, add a feature under `app/features/<name>/`. The full checklist is in `.claude/rules/agents.md` ("Adding an agent or workflow").
 
 ## Deploying
 

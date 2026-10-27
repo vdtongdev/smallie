@@ -13,6 +13,7 @@ from sqlalchemy import select, text, update
 
 from app.core.config import get_settings
 from app.core.db import documents, get_engine, graph_nodes, init_db
+from app.core.graph import embed_cards
 from app.core.llm import get_embeddings
 from app.features.documents.ingest import delete_document_chunks, ingest_document
 from app.core.memory import MAX_INDEXED_DIMS, open_persistence
@@ -58,6 +59,13 @@ def reembed_graph(dims: int) -> int:
     return len(rows)
 
 
+def reembed_cards(dims: int) -> int:
+    """Resize documents.card_embedding and re-embed every card."""
+    with get_engine().begin() as conn:
+        conn.execute(text(f"ALTER TABLE documents ALTER COLUMN card_embedding TYPE vector({int(dims)}) USING NULL"))
+        return embed_cards(conn, only_missing=False)
+
+
 async def reembed_memories() -> int:
     async with AsyncExitStack() as stack:
         _, store = await open_persistence(stack)
@@ -83,6 +91,7 @@ def main() -> None:
         count = asyncio.run(reembed_memories())
     print(f"  re-embedded {count} memories")
     print(f"Knowledge graph: re-embedded {reembed_graph(settings.embed_dim)} entities")
+    print(f"Document cards: re-embedded {reembed_cards(settings.embed_dim)}")
 
 
 if __name__ == "__main__":

@@ -9,6 +9,8 @@ Per user, once (`users.graph_built_at` marks them done, later runs skip them):
 Then, for every ready document without a card: one card call, read from its stored chunks (the
 uploaded files may be gone, e.g. on Cloud Run's ephemeral disk).
 
+Last, a vector for the card of every ready document that has none (embedding calls only).
+
 Spends free-quota model calls (printed before it starts). Back up the database first.
 
 Usage:  uv run python -m scripts.build_graph
@@ -23,7 +25,7 @@ import openai
 from sqlalchemy import func, select, update
 
 from app.core.db import conversations, documents, get_engine, init_db, users
-from app.core.graph import extract_from_turns, format_turn
+from app.core.graph import embed_cards, extract_from_turns, format_turn
 from app.core.memory import memory_namespace, open_persistence, turns
 from app.core.usage import UsageCounter, add_usage
 from app.features.documents.card import write_card
@@ -123,6 +125,11 @@ async def card_documents(store) -> int:
     return written
 
 
+def card_vectors() -> int:
+    with get_engine().begin() as conn:
+        return embed_cards(conn, only_missing=True)
+
+
 async def main() -> None:
     init_db()
     async with AsyncExitStack() as stack:
@@ -131,6 +138,7 @@ async def main() -> None:
         await build_users(store, checkpointer)
         print("Document cards:")
         print(f"  {await card_documents(store)} written")
+        print(f"Card vectors: {await asyncio.to_thread(card_vectors)} embedded")
 
 
 if __name__ == "__main__":

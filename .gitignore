@@ -13,3 +13,4 @@ cloudrun.env.yaml
 CLAUDE.local.md
 .langgraph_api/
 cloudrun.agent*.yaml
+.claude/settings.json

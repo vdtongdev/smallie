@@ -48,7 +48,9 @@ YOU ARE TALKING TO: {user}"""
 MEMORIES_SECTION = """
 
 WHAT YOU KNOW ABOUT THIS USER (from earlier chats and their files, newest first; may be empty):
-{memories}"""
+{memories}
+
+A stored language preference never changes the reply language: reply in the language of the latest message you answer."""
 
 RECENT_CHATS_SECTION = """
 

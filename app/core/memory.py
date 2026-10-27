@@ -30,6 +30,13 @@ from app.core.llm import get_embeddings
 from app.core.usage import usage_namespace
 
 
+# AgentContext.agent value for team mode (agents critique each other's drafts).
+TEAM_MODE = "team"
+
+
+TOOL_SOURCE = "source"  # tool.metadata key: the data source a tool reads ("market_db", "user_files", "web")
+
+
 @dataclass
 class AgentContext:
     """Per-request data passed to every agent run."""
@@ -41,7 +48,9 @@ class AgentContext:
     agent: str = "auto"  # "auto" lets the router pick; a registered route (app/agents/registry.py) forces that agent
     notes: str = ""  # per-request notes for the orchestrator's prompt (specialists available to this user)
     mentioned: tuple[str, ...] = ()  # routes the latest message points to (hints, matches, mentions)
+    sources: tuple[str, ...] = ()  # sources the agent may use (team mode); empty = no limit
     failed: str = ""  # route that already gave up on the latest message (the orchestrator's fallback)
+    deny_tools: tuple[str, ...] = ()  # tools hidden from the agent and refused if called (team mode: charts have one drawer)
 
 
 def memory_namespace(user_id: str) -> tuple[str, ...]:

@@ -134,11 +134,18 @@ def _entity(conn: Connection, user_id: str, name: str, embedding, create: bool =
     return _get_or_create(conn, user_id, "entity", name, embedding) if create else None
 
 
-def _user_files(conn: Connection, user_id: str) -> dict[str, str]:
-    """normalized filename -> document id, for the user's searchable files."""
-    rows = conn.execute(select(documents.c.filename, documents.c.id).where(
-        documents.c.user_id == user_id, documents.c.status != "failed"))
-    return {normalize(filename): document_id for filename, document_id in rows}
+def _stem(filename: str) -> str:
+    """The normalized file name without its extension."""
+    return normalize(filename.rsplit(".", 1)[0] if "." in filename else filename)
+
+
+def _user_files(conn: Connection, user_id: str) -> dict[str, list[str]]:
+    """normalized filename -> every document id with that name, for the user's searchable files."""
+    files: dict[str, list[str]] = {}
+    for filename, document_id in conn.execute(select(documents.c.filename, documents.c.id).where(
+            documents.c.user_id == user_id, documents.c.status != "failed")):
+        files.setdefault(normalize(filename), []).append(document_id)
+    return files
 
 
 def _drop_orphans(conn: Connection, user_id: str) -> None:
@@ -194,7 +201,7 @@ def save_facts(user_id: str, facts: list[Fact], source: str, conversation_id: st
             if norm in USER_WORDS:
                 return user_node
             if norm in files:
-                node = _file_node(conn, user_id, files[norm])
+                node = _file_node(conn, user_id, files[norm][0])
                 anchors.add(node)
                 return node
             return _entity(conn, user_id, name.strip(), vectors.get(name.strip()))
@@ -216,15 +223,42 @@ def save_facts(user_id: str, facts: list[Fact], source: str, conversation_id: st
     return kept
 
 
+def card_text(filename: str, summary: str | None) -> str:
+    return f"{filename}: {summary}" if summary else filename
+
+
+def embed_cards(conn: Connection, only_missing: bool, batch: int = 64, user_ids: list[str] | None = None) -> int:
+    """Write card_embedding for ready documents (only those without one, or all; of `user_ids`, default
+    every user, which is what the scripts want); returns how many."""
+    query = select(documents.c.id, documents.c.filename, documents.c.summary).where(documents.c.status == "ready")
+    if only_missing:
+        query = query.where(documents.c.card_embedding.is_(None))
+    if user_ids is not None:
+        query = query.where(documents.c.user_id.in_(user_ids))
+    rows = conn.execute(query).all()
+    for start in range(0, len(rows), batch):
+        part = rows[start:start + batch]
+        vectors = get_embeddings().embed_documents([card_text(r.filename, r.summary) for r in part])
+        for row, vector in zip(part, vectors):
+            conn.execute(update(documents).where(documents.c.id == row.id).values(card_embedding=vector))
+    return len(rows)
+
+
 def save_card(user_id: str, document_id: str, summary: str, entities: list[str]) -> None:
     """A document card: the file's summary plus File -mentions-> Entity edges. Re-running replaces it."""
     entities = [e.strip() for e in entities if e.strip()]
-    vectors = _embed(entities)
+    with get_engine().connect() as conn:
+        filename = conn.execute(select(documents.c.filename).where(
+            documents.c.id == document_id, documents.c.user_id == user_id)).scalar()
+    if filename is None:
+        return  # deleted while the card was being written
+    card = card_text(filename, summary)
+    vectors = _embed([*entities, card])  # one request for the entities and the card
     with get_engine().begin() as conn:
         file_node = _file_node(conn, user_id, document_id)
         if file_node is None:
             return  # deleted while the card was being written
-        conn.execute(update(documents).where(documents.c.id == document_id).values(summary=summary))
+        conn.execute(update(documents).where(documents.c.id == document_id).values(summary=summary, card_embedding=vectors[card]))
         conn.execute(delete(graph_edges).where(graph_edges.c.user_id == user_id, graph_edges.c.document_id == document_id))
         for name in entities:
             entity = _entity(conn, user_id, name, vectors.get(name))
@@ -299,22 +333,44 @@ def _linked_files(conn: Connection, user_id: str, node_ids) -> list[str]:
         graph_edges.c.user_id == user_id, other.c.kind == "file")).scalars())
 
 
-def documents_for(user_id: str, query: str, entity: str = "") -> list[str]:
-    """The files a passage search should be limited to: those linked to `entity`, else to known
-    entity names that appear in `query`; [] means search every file."""
+def has_cards(user_id: str) -> bool:
     with get_engine().connect() as conn:
+        return conn.execute(select(exists().where(
+            documents.c.user_id == user_id, documents.c.card_embedding.is_not(None)))).scalar()
+
+
+def card_files(user_id: str, vector: list[float], limit: int) -> list[str]:
+    """The user's files whose card is nearest to `vector`."""
+    with get_engine().connect() as conn:
+        return list(conn.execute(select(documents.c.id).where(
+            documents.c.user_id == user_id, documents.c.status != "failed", documents.c.card_embedding.is_not(None),
+        ).order_by(documents.c.card_embedding.cosine_distance(vector)).limit(limit)).scalars())
+
+
+def documents_for(user_id: str, query: str, entity: str = "") -> list[str]:
+    """The files a passage search should be limited to: those named by `entity` or in `query`
+    (extension optional), else linked to `entity`, else to known entity names that appear in
+    `query`; [] means search every file."""
+    with get_engine().connect() as conn:
+        files = _user_files(conn, user_id)
+        by_stem: dict[str, list[str]] = {}
+        for name, ids in files.items():
+            by_stem.setdefault(_stem(name), []).extend(ids)
+        if (named := normalize(entity)) and (found := files.get(named) or by_stem.get(named)):
+            return found
+        padded = f" {normalize(query)} "
+        if found := [i for stem, ids in by_stem.items() if len(stem) >= MIN_TEXT_MATCH
+                     and re.search(rf"(?<!\w){re.escape(stem)}(?!\w)", padded) for i in ids]:
+            return found
         if entity.strip():
-            if found := _user_files(conn, user_id).get(normalize(entity)):
-                return [found]
             node = _entity(conn, user_id, entity.strip(), get_embeddings().embed_query(entity), create=False)
             if node and (ids := _linked_files(conn, user_id, [node])):
                 return ids
         # Weak models often leave `entity` empty (AP-006): look for known names in the question too.
-        text = f" {normalize(query)} "
         names = conn.execute(select(graph_nodes.c.id, graph_nodes.c.norm).where(
             graph_nodes.c.user_id == user_id, graph_nodes.c.kind == "entity",
             func.length(graph_nodes.c.norm) >= MIN_TEXT_MATCH)).all()
-        hits = [node_id for node_id, norm in names if re.search(rf"(?<!\w){re.escape(norm)}(?!\w)", text)]
+        hits = [node_id for node_id, norm in names if re.search(rf"(?<!\w){re.escape(norm)}(?!\w)", padded)]
         return _linked_files(conn, user_id, hits) if hits else []
 
 

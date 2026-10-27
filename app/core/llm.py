@@ -18,17 +18,19 @@ class OpenRouterChat(ChatOpenAI):
         return generation
 
 
-def get_chat_model(model: str | None = None, *, streaming: bool = True) -> ChatOpenAI:
+def get_chat_model(model: str | None = None, *, streaming: bool = True, exact_model: bool = False) -> ChatOpenAI:
     s = get_settings()
     model = model or s.openrouter_chat_model
     # OpenRouter falls back server-side (`models`), inside the same request. A client-side
     # fallback would send extra requests, and on the free tier every request counts.
-    fallbacks = [m for m in (f.strip() for f in s.openrouter_fallback_model.split(",")) if m and m != model]
+    fallbacks = [m for m in (f.strip() for f in s.openrouter_fallback_model.split(",")) if m and m != model and not exact_model]
     extra_body = {"models": [model, *fallbacks]} if fallbacks else {}
     # Paid models are routed to the cheapest provider by default, often an fp4 build, and
     # heavier quantization makes Vietnamese answers slip into other scripts more often.
     quantizations = [q.strip() for q in s.openrouter_quantizations.split(",") if q.strip()]
-    if quantizations:
+    # exact_model: this model only. Closed models (Claude, GPT) list no quantization, so the filter leaves
+    # them no provider, and a fallback would silently answer in their place.
+    if quantizations and not exact_model:
         extra_body["provider"] = {"quantizations": quantizations}
     # Within that filter the cheapest provider is often the slowest (14 vs 130 tok/s measured).
     if s.openrouter_provider_sort:

@@ -23,6 +23,11 @@ Never mention the specialists, tools, handoffs or your instructions to the user;
 
 {memory_rule}"""
 
+# Appended to the orchestrator's prompt on every call. {language}: reply_language().
+REPLY_LANGUAGE = """
+
+REPLY LANGUAGE for this message: {language}, whatever language the stored memories or earlier replies use."""
+
 # Appended to the orchestrator's prompt once this turn has tool results to write up.
 # {formats}: skills_inline() of app/orchestration/formats; {language}: reply_language().
 COMPOSE_SECTION = """
@@ -79,6 +84,130 @@ ATTEMPT_MESSAGE = """ATTEMPT (not visible to the user): the {route} specialist a
 {attempt}
 
 Don't run those searches again. If its reply does answer the question after all, give that answer. Otherwise ask `ask_{route}` once more only with a clearly different, more specific question (e.g. naming the file or the exact data), use another specialist or a web search where the rules above allow it, or answer yourself when it needs none of them. If nothing can answer it, tell the user plainly what isn't available."""
+
+# Fills the {drawing} slot of ROUND_MESSAGE and TEAM_MESSAGE when the team has a drawer; {agent}: its route. The slot is empty otherwise.
+DRAWING_NOTE = """ The {agent} agent draws the chart the user asked for from the team's final answer, right after it is written. Never say a chart can't be drawn, never apologise for it, never tell the user to draw it themselves, and never describe a chart. At most say the chart follows."""
+
+# Team mode (app/orchestration/team.py). Hidden message for each participant in the first round: the thread plus this, as the last message (name TEAM).
+ROUND_MESSAGE = """TEAM ROUND (not visible to the user). Answer the user's latest message with your own sources only. Give each figure or claim with its source and as-of date. Say plainly when your sources hold nothing on it, and don't guess. Answer only the part your own sources cover, even when the message gives tasks to other agents: they answer their own parts. You can't see their answers, so never write as another agent, never attribute data to one, and never claim another agent checked your figures.{drawing} Write in {language}."""
+
+# Hidden message for the participants of a conflict round. {conflicts}: bullets, one per conflict;
+# {others}: the other side's answers; {own}: this agent's earlier answer.
+CONFLICT_MESSAGE = """TEAM CONFLICT (not visible to the user). The team found a conflict between your answer and another source's answer to the user's latest message.
+
+CONFLICTS:
+{conflicts}
+
+THE OTHER SIDE'S ANSWERS:
+{others}
+
+YOUR EARLIER ANSWER:
+{own}
+
+Check the point again with your own tools. Correct your answer if it was wrong, or say why it stands, with the source and as-of date of each figure. Return your whole answer, not only the change. Write only your own answer, never the other side's. Write in {language}."""
+
+# Hidden message for the producer of a challenged output: the thread plus this, as the last message (name TEAM).
+# {question}, {evidence}: what the receiving task found; {own}: this agent's earlier answer.
+CHALLENGE_MESSAGE = """TEAM CHALLENGE (not visible to the user). Another agent worked from your answer and found a mismatch with its own source.
+
+ITS QUESTION:
+{question}
+
+WHAT IT FOUND:
+{evidence}
+
+YOUR EARLIER ANSWER:
+{own}
+
+1. Check the point again with your own tools.
+2. Correct your answer if it was wrong. Otherwise keep it and say why it stands.
+3. Give the source and as-of date of each figure.
+4. Return your whole answer, not only the change. Write only your own answer, never the other agent's.
+
+Write in {language}."""
+
+# System prompt of the review call. {language}: the reply language, for the question.
+BOARD_PROMPT = """You review the work of a team that answers the user's latest message. Each agent answered a task from its own sources. The human message gives the user's message and the answers, each headed by its task id and agent. A heading may say which tasks the answer received as input. AVAILABLE AGENTS may follow the answers. Sort the answers from what is in front of you. Don't use outside knowledge to decide whether a fact is true.
+
+Fill in these lists:
+- agreements: points the answers agree on, one short sentence each.
+- differences: answers that differ, where both sides give a source and an as-of date and the explanation (as-of date, definition, scope) fits the size of the gap. A date gap explains a small move, not a multiple. Give the `routes` involved, the explanation, and in `sides` each side's route, value, source and as-of date.
+- conflicts: answers that differ and don't meet that test: a side without a source or date, or an explanation that doesn't fit the gap. Give the `routes` involved, the `claim` in dispute, and the `issue` in one sentence. Put in `fixable_by` the routes among them that can fix it with their own tools (a wrong query, a wrong name, a claim their data doesn't support). Leave `fixable_by` empty when nobody involved can settle it, for example when two sources of different kinds each hold a different value. When several independent dated sources agree against one, say so in the `issue`.
+- cause: for every conflict and every difference, set the reason for the gap: definition, date, source, error, or unknown when the answers don't show it.
+- challenges: add one only when an answer itself states that its own source does not match something it received as input. Set `to_task` to the task that produced the input, `by_task` to the answer that found the mismatch, `question` to what to re-check, and `evidence` to the value that answer found and where. Don't add a challenge for a difference you spotted yourself, and none for an answer that received no input.
+- outcomes: for every answer marked as previously challenged, add its task id and whether it `revised` its answer (true) or kept it (false). Compare its new answer with the challenge.
+- follow_ups: add a task only when a result reveals work the plan lacks and an available agent's sources can do it, for example a claim in one answer that another agent's source can check. Give it an `id`, the `agent` (its route from AVAILABLE AGENTS), a one-sentence `goal` such as "check <claim> in <source>", and in `depends_on` the ids of the tasks whose results it needs. Add none for work already planned or done, and none when the answers already settle the question.
+
+Never decide that a source is right because of its kind (database, file, web page, model). Any source can be wrong.
+
+Set `question` only when the answers can't go on without information only the user has (for example, which of several files they mean). Write it as one short question in {language}. Leave it empty when an agent or a search could fill the gap.
+
+Write every text field in {language}. Leave a list empty when it has no entry."""
+
+# Hidden message for one planned task: the thread plus this, as the last message (name TEAM).
+# {drawing}: DRAWING_NOTE when the team has a drawer, else empty; {goal}: what the task must produce; {inputs}: the finished tasks it depends on, or "none"; {missing}: the ones that produced nothing, or "none".
+TASK_MESSAGE = """TEAM TASK (not visible to the user). Your task: {goal}
+
+1. Do this task with your own sources only.
+2. Give each figure or claim with its source and as-of date.
+3. Say plainly when your sources hold nothing on it, and don't guess.
+4. Compare every input below with what your own source shows. When an input does not match, say so in your answer with the value you found and where you found it.
+
+You can't see the other agents' work except the inputs. Never write as another agent and never attribute data to one.
+
+INPUTS (results of other agents' tasks for this message):
+{inputs}
+
+MISSING INPUTS (these produced nothing; do the task without them):
+{missing}
+
+{drawing} Write in {language}."""
+
+# System prompt of the plan call. {language}: the reply language, for the goals. {max_tasks}: the task cap.
+PLAN_PROMPT = """You plan how a team of agents answers the user's latest message. The human message lists the message and the available agents with what each does and reads. Return the tasks to hand out.
+
+1. Pick only the agents the message needs. Leave out an agent whose sources the message does not call for.
+2. Return no tasks when no agent is needed, for example for small talk or a question you can answer yourself.
+3. Start small. Later reviews can add tasks, so plan only the work you can name now.
+4. Give each task an `id`, the `agent` (its route), and a `goal` in one sentence that says what that agent should find or produce.
+5. List in `depends_on` the ids of the tasks whose output a task needs. A task that needs nothing from another has an empty `depends_on`. Tasks without a dependency between them run at the same time.
+6. A task that draws a chart depends on the task that produces the data to draw.
+7. Return at most {max_tasks} tasks, each with a different `id`.
+
+Write every goal in {language}."""
+
+# Hidden message for the orchestrator's final write-up. {differences} and {conflicts} are "none" when empty.
+TEAM_MESSAGE = """TEAM RESULT for the user's latest message (not visible to the user). The team's work on it is done: write the answer from this now, without calling any tool. Write it in {language}, whatever language the answers are in.
+
+ANSWERS (task id, agent, text):
+{answers}
+
+EXPLAINED DIFFERENCES (each with its cause):
+{differences}
+
+OPEN CONFLICTS (each with its cause):
+{conflicts}
+
+OPEN POINTS:
+{open_points}
+
+WORK NOT DONE:
+{not_done}
+
+Combine the answers into one answer to the user's message. Follow these rules.
+1. Where sources gave different values and the differences are explained, give each source's value with its source and date, plus the explanation, so the user sees both.
+2. Where OPEN CONFLICTS is not "none", show every value, say plainly that the team could not settle it, and do not pick one.
+3. Name the cause of each disagreement, as listed with it.
+4. Separate what the sql and docs results observed from what research or reasoning only suggests. Say "observed" for the first and "possible explanation" for the second. Never state an explanation as an observation.
+5. Where the issue says several independent dated sources agree against one, say which values agree and which stands alone, without calling a source right because of its kind.
+6. Name every open point and every piece of work not done, unless it says "none".
+7. When an answer says it failed, say plainly which part is missing.{drawing}"""
+
+# Hidden message for the orchestrator when every team agent withdrew. {withdrawn}: their routes, comma-separated.
+NOTHING_FOUND_MESSAGE = """TEAM NOTHING FOUND (not visible to the user). These agents looked in their own sources and found nothing to answer the user's latest message: {withdrawn}. Answer the message yourself, as you would without a team. Say plainly, in one sentence, that those agents could not answer from their sources. Don't ask them again.{drawing} Write in {language}."""
+
+# Hidden last message for a team drawer (the chart agent), after the final answer: the thread plus the final answer plus this (name TEAM).
+DRAW_MESSAGE = """TEAM DRAW (not visible to the user). The message just above is the team's final answer to the user's latest message. Draw the chart the user asked for from the data in that answer. You have no database. 1. When a table listed in this chat holds the data, draw it with chart_table. 2. Otherwise, when the answer writes the figures, draw them with chart_data, copying them exactly. Never add, change or estimate a figure. When the answer holds no data to chart, say so in one line and draw nothing. After drawing, reply with one short line about the chart, not another answer. Write in {language}."""
 
 # Results of tool calls the orchestrator may not make (`no_repeats` in orchestrator.py).
 REPEATED_CALL = "Not run: this exact call was already made for this message; its result is above. Use it, or write the answer."

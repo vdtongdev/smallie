@@ -16,7 +16,7 @@ from langgraph.runtime import Runtime
 
 from app.agents import registry
 from app.agents.base import AgentSpec, RouteInfo
-from app.core.memory import AgentContext
+from app.core.memory import TEAM_MODE, AgentContext
 
 ORCHESTRATOR = "orchestrator"  # graph node, route, SSE `agent` name and AIMessage.name of the front door
 
@@ -29,6 +29,9 @@ class AssistantState(AgentState):
     direct: NotRequired[bool]
     failed: NotRequired[str]  # the route that gave up, for the orchestrator
     attempt: NotRequired[str]  # what it tried, for the orchestrator
+    workspace: NotRequired[dict]  # the team's shared state: tasks, results, history (app/orchestration/team.py); reset by each new message
+    team_drawn: NotRequired[bool]  # a drawer charts the write-up (set with `team_note`)
+    team_note: NotRequired[str]  # a hidden note for the orchestrator; only ever put in the state a team node passes it
 
 
 def previous_route(messages: list[BaseMessage], routes: dict[str, str]) -> str | None:
@@ -63,6 +66,8 @@ def obvious_route(message: str, available: list[tuple[AgentSpec, RouteInfo]]) ->
 def build_router(specs: Sequence[AgentSpec] = registry.AGENTS):
     async def router(state: AssistantState, runtime: Runtime[AgentContext]) -> dict:
         context = runtime.context
+        if context.agent == TEAM_MODE:
+            return {"route": TEAM_MODE, "direct": False}
         if any(spec.route == context.agent for spec in specs):
             return {"route": context.agent, "direct": False}  # the user picked it: no fallback
         available = await available_agents(context.user_id, specs)

@@ -260,6 +260,7 @@ The "front door" agent. Answers general questions itself, asks specialists as to
 
 - 4 per message by default (`ORCHESTRATOR_MAX_MODEL_CALLS`)
 - `no_repeats` middleware skips identical repeated tool calls and caps `ask_<agent>` per message
+- `tool_errors` middleware (`app/agents/factory.py`, every agent) returns a tool's exception to the model as an error result instead of ending the run; interrupts and handoffs (`GraphBubbleUp`) pass through
 
 ### Handoff
 
@@ -866,6 +867,7 @@ Traces contain full prompts (users' messages, file passages, memories), so traci
 - Always from `main`
 - Update `CHANGELOG.md` + the version in `pyproject.toml` first
 - Main app: `gcloud run deploy smallie --source . --region asia-southeast1 ...` (public URL, login required)
+- Static UI (`app/static/`, mounted at `/` by `NoCacheStaticFiles` in `app/api/main.py`) sends `Cache-Control: no-cache`, so browsers revalidate `app.js` after a deploy (unchanged files get 304); `/api` is not affected
 - Agent servers: one image built by `gcloud builds submit --config cloudbuild.agent.yaml`, then one private service per agent (`smallie-<route>`, `--no-allow-unauthenticated`, its own env file); the main app's service account has `roles/run.invoker` on each
 - Neon Postgres (direct URL, no pooler): the app's database plus one small database per agent server
 

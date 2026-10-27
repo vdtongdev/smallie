@@ -146,7 +146,6 @@ Versions are `major.minor.patch`: the major version stays 0 for now, each minor 
   - Files uploaded before this release have no card vector until `uv run python -m scripts.build_graph` runs once after deploying (it skips the graph work for users already built, and spends one card call per file that has no card). Until then those files use the plain search
   - Limit: a name must be written in full in the question ("Graham" doesn't match "Benjamin Graham")
 - **Status line and Activity popup** (every chat, not only team): one status line shows what the answer is doing now, and an Activity popup holds the full tool log (in team mode also the plan, each wave and each review). The inline tool lines are gone. A reloaded chat shows the same steps as the live view, and team answers keep their tables and charts
-- **Tool errors** return to the model as an error it can correct or answer around, instead of ending the run (see the fix below)
 - **Fix: a failing tool ended the whole reply**
   - A tool that raised an exception stopped the agent's run, so the answer was lost
   - The agents' middleware (`tool_errors` in `app/agents/factory.py`) now returns the error as the tool's result. Interrupts and handoffs still pass through

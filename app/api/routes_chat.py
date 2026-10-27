@@ -172,8 +172,11 @@ async def _events_from(stream) -> AsyncIterator[dict]:
     """SSE events for a `subgraphs=True` stream, plus a `step` event whenever a workflow
     moves to another of its steps listed in its spec's `steps`."""
     current = None
+    routed = None  # the router's choice; a specialist it did not choose was asked or handed to by the orchestrator
     speakers: dict[str, tuple[str, str | None]] = {}  # "speak:<task id>" -> (route, task id), from the team's internal speaker event
     async for namespace, mode, chunk in stream:
+        if mode == "updates" and not namespace and isinstance(chunk.get("router"), dict):
+            routed = chunk["router"].get("route") or routed
         if mode == "custom" and isinstance(chunk, dict) and chunk.get("type") == "speaker":
             speakers[chunk["ns"].rsplit("|", 1)[-1]] = (chunk["agent"], chunk.get("task"))  # ns is "team:<id>|speak:<task id>"
             continue
@@ -190,7 +193,14 @@ async def _events_from(stream) -> AsyncIterator[dict]:
         for event in _to_events(mode, chunk, namespace, in_round=bool(agent)):
             if agent and event["type"] in ("token", "tool_call", "tool_result"):
                 event = {**event, "agent": agent, **({"task": task} if task else {})}
+            elif not agent and event["type"] in ("tool_call", "tool_result") and (route := _asked_route(namespace)) not in (None, routed):
+                event = {**event, "agent": route}  # a specialist the orchestrator asked: its tool steps in the activity popup
             yield event
+
+
+def _asked_route(namespace: tuple[str, ...]) -> str | None:
+    """The specialist whose subgraph (local, or a remote agent's prefixed chunks) the chunk comes from."""
+    return next((n for n in (segment.split(":", 1)[0] for segment in namespace) if n in ROUTES), None)
 
 
 def _step(namespace: tuple[str, ...]) -> tuple[str, str] | None:

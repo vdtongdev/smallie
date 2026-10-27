@@ -347,3 +347,26 @@ async def test_speaker_task_splits_two_tasks_of_one_agent():
     ])
     assert events == [{"type": "token", "text": "one", "agent": "sql", "task": "t1"},
                       {"type": "token", "text": "two", "agent": "sql", "task": "t2"}]
+
+
+async def test_specialist_tool_events_inside_an_ask_name_their_agent(monkeypatch):
+    """The activity popup lists tool calls under the agent that made them: when the orchestrator
+    asks sql as a tool, sql's own tool events say which agent ran them."""
+    from langchain_core.messages import HumanMessage
+    from tests.scripted import per_agent
+    from tests.test_orchestrator import CONFIG, _assistant, _call, _fake_db
+    from app.core.memory import AgentContext
+
+    _fake_db(monkeypatch)
+    model = per_agent(
+        orchestrator=[_call("ask_sql", {"question": "AAPL close?"}), AIMessage("AAPL closed at 250.")],
+        sql=[_call("run_sql", {"query": "SELECT ticker, close FROM market.daily_prices"}), AIMessage("AAPL 250.")],
+    )
+    assistant = _assistant(monkeypatch, model)
+    stream = assistant.astream({"messages": [HumanMessage("which tech company is the most valuable?")]}, CONFIG,
+                               context=AgentContext(user_id="u1"), stream_mode=["messages", "updates"], subgraphs=True)
+    events = [e async for e in _events_from(stream)]
+
+    inner = [e for e in events if e["type"] in ("tool_call", "tool_result") and e["name"] == "run_sql"]
+    assert len(inner) == 2
+    assert all(e.get("agent") == "sql" for e in inner)

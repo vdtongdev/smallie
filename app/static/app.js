@@ -229,12 +229,12 @@ const el = (tag, cls, text) => Object.assign(document.createElement(tag), { clas
 // Each reply has a status line (spinner and badges while it runs, a summary after) and an Activity button.
 // `act` is what the popup shows, kept in memory per reply: {team, plan: [{id, agent, goal, depends_on, origin}],
 // waves: [{wave, kind, tasks, agents, answers: [{task, agent, text, tools: [{name, args, result}]}], review}],
-// drawn: [same answers, tasks outside every wave], synthesis, tools: [], question}. A reload builds it
+// drawn: [same answers, tasks outside every wave], asked: [same answers without a task: specialists the orchestrator asked], synthesis, tools: [], question}. A reload builds it
 // from `message.team` (the task graph's workspace or the older rounds/boards) or the tool messages.
 function newTurn(team = false) {
   const turn = {
     el: el("div", "status-line"), badges: [], running: true, step: {}, opener: null,
-    act: { team, plan: [], waves: [], tools: [], drawn: [], synthesis: null, question: null },
+    act: { team, plan: [], waves: [], tools: [], drawn: [], asked: [], synthesis: null, question: null },
   };
   turn.el.turn = turn;
   turn.head = el("span");
@@ -252,7 +252,7 @@ function newTurn(team = false) {
 }
 
 const stepCount = (act) => act.waves.reduce((n, r) => n + r.answers.reduce((m, a) => m + 1 + a.tools.length, 0), 0)
-  + act.drawn.reduce((n, d) => n + 1 + d.tools.length, 0) + act.tools.length + (act.question ? 1 : 0);
+  + [...act.drawn, ...act.asked].reduce((n, d) => n + 1 + d.tools.length, 0) + act.tools.length + (act.question ? 1 : 0);
 
 const waveTitle = (w) => `${t("waveN").replace("{n}", w.wave)} · ${t({ conflict: "kindConflict", challenge: "kindChallenge" }[w.kind] || "kindAnswer")}`;
 
@@ -417,6 +417,16 @@ function renderActivity() {
     }
     body.append(sec);
   }
+  if (act.asked.length) {
+    const sec = el("section", "act-round");
+    for (const a of act.asked) {
+      const div = el("div", "act-agent");
+      div.append(agentBadge(a.agent));
+      for (const tool of a.tools) toolBlock(div, tool);
+      sec.append(div);
+    }
+    body.append(sec);
+  }
   if (act.tools.length) {
     const sec = el("section", "act-round");
     if (act.waves.length) sec.append(el("h3", "", t("otherSteps")));
@@ -449,7 +459,7 @@ $("activityDialog").addEventListener("close", () => activityTurn?.opener?.focus(
 // A finished team reply's transcript (message.team) as popup data. The task graph's workspace keeps
 // `history` (waves, task results, reviews in order); the older round table kept `rounds` and `boards`.
 function teamActivity(team) {
-  const act = { team: true, plan: [], waves: [], tools: [], drawn: [], synthesis: team.synthesis || null, question: null };
+  const act = { team: true, plan: [], waves: [], tools: [], drawn: [], asked: [], synthesis: team.synthesis || null, question: null };
   if (!team.history) {
     act.drawn = team.drawn || [];
     act.waves = (team.rounds || []).map((r) => ({
@@ -700,9 +710,9 @@ async function sendMessage(text) {
   let synthesized = false; // the team's write-up started
   // A task's answer: in the latest wave that ran it, else (a chart task after the write-up) in `drawn`.
   const answerOf = (agent, task) => {
-    const wave = act.waves.findLast((w) => w.tasks.includes(task));
-    const answers = wave ? wave.answers : act.drawn;
-    return answers.find((a) => a.task === task) || answers[answers.push({ task, agent, text: "", tools: [] }) - 1];
+    const wave = task && act.waves.findLast((w) => w.tasks.includes(task));
+    const answers = wave ? wave.answers : task ? act.drawn : act.asked; // no task: a specialist the orchestrator asked
+    return answers.find((a) => a.task === task && a.agent === agent) || answers[answers.push({ task, agent, text: "", tools: [] }) - 1];
   };
   const addBadges = (agents) => {
     for (const agent of agents) if (!turn.badges.some((b) => b.agent === agent)) turn.badges.push({ agent });

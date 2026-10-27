@@ -141,7 +141,7 @@ This file describes `main` plus the 0.4.0 remote agents (section 10) and the 0.5
 
 8. **Events streamed to the browser**
    - `token`: text as it is generated
-   - `tool_call`: which tool is called with which arguments
+   - `tool_call`: which tool is called with which arguments (with `agent` when a specialist the orchestrator asked made it)
    - `tool_result`: tool output, plus charts
    - Team mode adds `plan`, `plan_updated`, `wave`, `spoke`, `review`, `synthesize`, `needs_human` and `charts` events
    - The UI renders as events arrive

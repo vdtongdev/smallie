@@ -904,7 +904,7 @@ Every account, the admin's included, chats on its own model server: an OpenAI-co
 
 ### Model calls
 
-- `get_chat_model(user_id)` (`app/core/llm.py`) loads the user's row, checks endpoint safety and returns a `ChatOpenAI` client for that endpoint, key and model (temperature 0, `stream_usage=True`, `max_retries=1`). Clients are cached per user and rebuilt when `updated_at` changes. No row raises `NoModelSettings`. It never reads `EMBED_API_KEY`.
+- `get_chat_model(user_id)` (`app/core/llm.py`) loads the user's row, checks endpoint safety and returns a `ChatOpenAI` client for that endpoint, key and model (temperature 0, `stream_usage=True`, `max_retries=1`). `_build_chat_model` is `lru_cache`d on (base_url, model, api_key, streaming), so saving new settings yields a new client; the endpoint check runs when a client is built. No row raises `NoModelSettings`. It never reads `EMBED_API_KEY`.
 - **Agents** (`app/agents/factory.py`): a `user_model` middleware, first in the list, replaces each call's model with the user's. `build_agent` gets a placeholder model with no usable key, so a call that skipped the middleware fails rather than spending anyone's key.
 - **Direct calls** pass the `user_id` they already have: the team planner and judge, fact extraction, document cards.
 - **Agent servers** call the same `get_chat_model`. They read the row themselves as `agent_reader` and decrypt it with the same `MODEL_KEY_SECRET`. The key never travels in request bodies, headers or `AgentContext`, so it stays out of traces and run records.

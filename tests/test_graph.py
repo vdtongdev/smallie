@@ -235,6 +235,35 @@ def test_search_follows_the_graph_to_the_linked_file(make_user, embeddings, chun
     assert search_with_graph(bob, "termination", entity="Acme") == NO_PASSAGES  # never alice's files
 
 
+class CountingEmbedding(DeterministicFakeEmbedding):
+    requests: list = []
+
+    def embed_documents(self, texts):
+        self.requests.append(list(texts))
+        return super().embed_documents(texts)
+
+
+def card_embedding(document_id: str):
+    with get_engine().connect() as conn:
+        return conn.execute(select(documents.c.card_embedding).where(documents.c.id == document_id)).scalar()
+
+
+@requires_db
+def test_save_card_stores_a_vector_of_the_card_in_one_embedding_request(make_user, monkeypatch):
+    fake = CountingEmbedding(size=get_settings().embed_dim)
+    fake.requests = []
+    monkeypatch.setattr(graph, "get_embeddings", lambda: fake)
+    user = make_user()
+    with_summary, without = add_document(user, "contract.pdf"), add_document(user, "notes.docx")
+
+    graph.save_card(user, with_summary, "Contract: supply deal", ["Acme", "Globex"])
+    assert len(fake.requests) == 1 and set(fake.requests[0]) == {"Acme", "Globex", "contract.pdf: Contract: supply deal"}
+    assert list(card_embedding(with_summary)) == pytest.approx(fake.embed_query("contract.pdf: Contract: supply deal"))
+
+    graph.save_card(user, without, "", [])
+    assert list(card_embedding(without)) == pytest.approx(fake.embed_query("notes.docx"))
+
+
 class RecordingStore:
     def __init__(self):
         self.filters = []

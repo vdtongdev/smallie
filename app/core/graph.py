@@ -223,15 +223,25 @@ def save_facts(user_id: str, facts: list[Fact], source: str, conversation_id: st
     return kept
 
 
+def card_text(filename: str, summary: str | None) -> str:
+    return f"{filename}: {summary}" if summary else filename
+
+
 def save_card(user_id: str, document_id: str, summary: str, entities: list[str]) -> None:
     """A document card: the file's summary plus File -mentions-> Entity edges. Re-running replaces it."""
     entities = [e.strip() for e in entities if e.strip()]
-    vectors = _embed(entities)
+    with get_engine().connect() as conn:
+        filename = conn.execute(select(documents.c.filename).where(
+            documents.c.id == document_id, documents.c.user_id == user_id)).scalar()
+    if filename is None:
+        return  # deleted while the card was being written
+    card = card_text(filename, summary)
+    vectors = _embed([*entities, card])  # one request for the entities and the card
     with get_engine().begin() as conn:
         file_node = _file_node(conn, user_id, document_id)
         if file_node is None:
             return  # deleted while the card was being written
-        conn.execute(update(documents).where(documents.c.id == document_id).values(summary=summary))
+        conn.execute(update(documents).where(documents.c.id == document_id).values(summary=summary, card_embedding=vectors[card]))
         conn.execute(delete(graph_edges).where(graph_edges.c.user_id == user_id, graph_edges.c.document_id == document_id))
         for name in entities:
             entity = _entity(conn, user_id, name, vectors.get(name))

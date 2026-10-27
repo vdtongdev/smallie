@@ -15,11 +15,8 @@ log = logging.getLogger(__name__)
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    openrouter_api_key: str = ""
+    embed_api_key: str = ""
     openrouter_chat_model: str = "google/gemma-4-31b-it:free"
-    openrouter_fallback_model: str = ""  # comma-separated, tried in order
-    openrouter_quantizations: str = ""  # comma-separated provider precisions, e.g. "bf16,fp8"; empty = any
-    openrouter_provider_sort: str = ""  # provider order: "throughput", "latency" or "price"; empty = OpenRouter's default (price-weighted)
     openrouter_orchestrator_model: str = ""  # the front-door agent; empty = chat model
     openrouter_judge_model: str = ""  # the team board; empty = orchestrator model, then chat model
     openrouter_embed_model: str = "baai/bge-m3"

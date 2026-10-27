@@ -28,8 +28,8 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     export_tracing(settings)
     require_secret()
-    if not settings.openrouter_api_key:
-        logging.warning("OPENROUTER_API_KEY is not set; chat and document indexing will fail.")
+    if not settings.embed_api_key:
+        logging.warning("EMBED_API_KEY is not set; document indexing and memory search will fail.")
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
     init_db()
     ensure_admin(settings.app_password)

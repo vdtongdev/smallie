@@ -108,3 +108,9 @@ def test_require_secret(monkeypatch):
     monkeypatch.setattr(get_settings(), "model_key_secret", "")
     with pytest.raises(RuntimeError, match="MODEL_KEY_SECRET must be set"):
         model_settings.require_secret()
+
+
+def test_malformed_secret_fails_at_startup(monkeypatch):
+    monkeypatch.setattr(get_settings(), "model_key_secret", "not-a-fernet-key")
+    with pytest.raises(RuntimeError, match="not a valid Fernet key"):
+        model_settings.require_secret()

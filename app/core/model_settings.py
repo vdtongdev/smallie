@@ -26,8 +26,13 @@ def _fernet() -> Fernet:
 
 
 def require_secret() -> None:
-    if not get_settings().model_key_secret:
+    secret = get_settings().model_key_secret
+    if not secret:
         raise RuntimeError("MODEL_KEY_SECRET must be set (see .env.example).")
+    try:
+        Fernet(secret.encode())
+    except ValueError:
+        raise RuntimeError("MODEL_KEY_SECRET is not a valid Fernet key (see .env.example).") from None
 
 
 def _stored(user_id: str):

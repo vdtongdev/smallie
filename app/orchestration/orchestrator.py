@@ -40,7 +40,7 @@ from app.agents.base import LIMIT_MESSAGE, MEMORY_TOOL_NAMES, AgentSpec
 from app.agents.chart.prompts import TABLES_SECTION
 from app.agents.chart.tools import chart_data, chart_table
 from app.agents.delegation import ask_tool_name, make_ask_tool
-from app.agents.factory import build_agent
+from app.agents.factory import build_agent, call_key
 from app.agents.research.agent import mcp_tools
 from app.agents.skills import load_skills, skills_inline
 from app.core.config import get_settings
@@ -145,12 +145,6 @@ def make_prefer_handoff(routes: Sequence[str], research_tools: frozenset[str]):
     return prefer_handoff
 
 
-def _call_key(call: dict) -> tuple[str, str]:
-    """A tool call ignoring case, spacing and argument order."""
-    args = json.dumps(call["args"], sort_keys=True, ensure_ascii=False)
-    return call["name"], " ".join(args.lower().split())
-
-
 def calls_before(messages: Sequence[AnyMessage], call_id: str) -> list[dict]:
     """This run's tool calls (after the last user or hidden message) that came before `call_id`."""
     calls = []
@@ -174,7 +168,7 @@ async def no_repeats(request, handler):
     if call["name"] in MEMORY_TOOL_NAMES:
         return await handler(request)
     earlier = calls_before(request.state["messages"], call["id"])
-    if _call_key(call) in {_call_key(c) for c in earlier}:
+    if call_key(call) in {call_key(c) for c in earlier}:
         return ToolMessage(REPEATED_CALL, tool_call_id=call["id"], name=call["name"])
     if call["name"].startswith("ask_"):
         asks = sum(c["name"] == call["name"] for c in earlier) + (call["name"] == f"ask_{request.runtime.context.failed}")

@@ -341,15 +341,15 @@
     </div>
     <h3 class="settings-group" data-i18n="modelsGroup"></h3>
     <label for="settingsModel" data-i18n="standardModel"></label>
-    <input id="settingsModel" type="text" list="modelChoices" autocomplete="off">
+    <input id="settingsModel" type="text" autocomplete="off">
+    <select id="settingsModelSelect" hidden></select>
     <p id="warnModel" class="slot-warning" role="status"></p>
     <label for="settingsSmall" data-i18n="smallModel"></label>
-    <input id="settingsSmall" type="text" list="modelChoices" autocomplete="off" data-i18n-placeholder="sameAsStandard">
+    <select id="settingsSmall"></select>
     <p id="warnSmall" class="slot-warning" role="status"></p>
     <label for="settingsStrong" data-i18n="strongModel"></label>
-    <input id="settingsStrong" type="text" list="modelChoices" autocomplete="off" data-i18n-placeholder="sameAsStandard">
+    <select id="settingsStrong"></select>
     <p id="warnStrong" class="slot-warning" role="status"></p>
-    <datalist id="modelChoices"></datalist>
     <div class="provider-table">
       <table>
         <thead><tr><th data-i18n="colProvider"></th><th data-i18n="colKeyPage"></th><th data-i18n="apiEndpoint"></th><th data-i18n="model"></th></tr></thead>

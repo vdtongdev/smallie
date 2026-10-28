@@ -288,6 +288,7 @@ dialog {
 #settingsDialog .profile-tag { font-size: 12px; color: var(--muted); }
 #settingsDialog .slot-warning { margin: 4px 0 0; font-size: 12px; color: var(--danger); }
 #settingsDialog .slot-warning:empty { display: none; }
+#settingsDialog select { width: 100%; padding: 8px 10px; font: inherit; }
 .act-meta { font-size: 12px; margin: 2px 0 4px; }
 .act-why { color: var(--muted); }
 .act-warn { color: var(--danger); }

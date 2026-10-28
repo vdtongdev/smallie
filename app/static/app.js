@@ -1065,6 +1065,62 @@ function showSlotWarnings(warning, warnings = {}) {
   for (const [slot, , warnId] of SLOTS) $(warnId).textContent = slot === "model" ? (warning || warnings.model || "") : (warnings[slot] || "");
 }
 
+// The provider's model list is cached per endpoint in localStorage; the settings selects are filled from it.
+const modelsKey = (base_url) => `models:${base_url}`;
+
+function cachedModels(base_url) {
+  try {
+    const list = JSON.parse(localGet(modelsKey(base_url)) || "null")?.models;
+    return Array.isArray(list) ? [...list].sort() : [];
+  } catch {
+    return [];
+  }
+}
+
+// Fetches the list for the saved endpoint in the background and keeps it; refills the selects if the dialog is open.
+async function refreshModels() {
+  const res = await api("/model-settings/models").catch(() => null);
+  const base_url = loadedSettings.base_url;
+  if (!base_url || !res?.models?.length) return;
+  localSet(modelsKey(base_url), JSON.stringify({ models: res.models, fetched_at: Date.now() }));
+  fillModelSelects(slotValues());
+}
+
+const standardSelectShown = () => !$("settingsModelSelect").hidden;
+
+function slotValues() {
+  return {
+    model: (standardSelectShown() ? $("settingsModelSelect") : $("settingsModel")).value.trim(),
+    small_model: $("settingsSmall").value,
+    strong_model: $("settingsStrong").value,
+  };
+}
+
+function modelOptions(models, value, blankLabel) {
+  const make = (v, label) => Object.assign(document.createElement("option"), { value: v, textContent: label });
+  const opts = blankLabel ? [make("", blankLabel)] : [];
+  opts.push(...models.map((id) => make(id, id)));
+  if (value && !models.includes(value)) opts.push(make(value, models.length ? t("notListed").replace("{id}", value) : value));
+  return opts;
+}
+
+function fillModelSelects(values) {
+  const models = cachedModels(loadedSettings.base_url);
+  const useSelect = models.length > 0;
+  $("settingsModelSelect").hidden = !useSelect;
+  $("settingsModel").hidden = useSelect;
+  if (useSelect) {
+    $("settingsModelSelect").replaceChildren(...modelOptions(models, values.model));
+    $("settingsModelSelect").value = values.model || models[0];
+  } else {
+    $("settingsModel").value = values.model;
+  }
+  for (const [slot, id] of SLOTS.slice(1)) {
+    $(id).replaceChildren(...modelOptions(models, values[slot], t("sameAsStandard")));
+    $(id).value = values[slot];
+  }
+}
+
 async function loadSettings() {
   let s = null;
   try {
@@ -1075,23 +1131,17 @@ async function loadSettings() {
   $("settingsKey").value = "";
   $("settingsKey").placeholder = s?.key_hint || "";
   $("settingsUrl").value = s?.base_url || "";
-  for (const [slot, id] of SLOTS) $(id).value = s?.[slot] || "";
   const profile = ["economy", "balanced", "advanced"].includes(s?.profile) ? s.profile : "balanced";
   document.querySelector(`input[name="settingsProfile"][value="${profile}"]`).checked = true;
   loadedSettings = { base_url: s?.base_url || "", model: s?.model || "", small_model: s?.small_model || "", strong_model: s?.strong_model || "", profile };
+  fillModelSelects(loadedSettings);
   setSettingsStatus(s ? t("settingsKeySaved") : t("settingsNone"));
-}
-
-// The server's model list fills the three model fields' suggestions; typing a name still works.
-async function loadModelChoices() {
-  const res = await api("/model-settings/models").catch(() => null);
-  $("modelChoices").replaceChildren(...(res?.models || []).map((id) => Object.assign(document.createElement("option"), { value: id })));
+  return s;
 }
 
 function openSettings() {
   showSlotWarnings("");
   loadSettings();
-  loadModelChoices();
   $("settingsDialog").showModal();
 }
 
@@ -1099,7 +1149,7 @@ function openSettings() {
 async function saveSettings() {
   const key = $("settingsKey").value.trim();
   const base_url = $("settingsUrl").value.trim();
-  const [model, small_model, strong_model] = SLOTS.map(([, id]) => $(id).value.trim());
+  const { model, small_model, strong_model } = slotValues();
   const profile = chosenProfile();
   const hasKey = key || $("settingsKey").placeholder;
   if (!base_url || !model || !hasKey) return setSettingsStatus(t("settingsFieldsRequired"));
@@ -1113,7 +1163,9 @@ async function saveSettings() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...next, api_key: key || null }), // empty slots go as "": the server clears what is left out
     });
+    const endpointChanged = base_url !== loadedSettings.base_url;
     await loadSettings();
+    if (endpointChanged || !cachedModels(base_url).length) await refreshModels();
     showSlotWarnings(res.warning, res.warnings);
     if (res.warning || Object.keys(res.warnings || {}).length) setSettingsStatus(`${t("saved")}. ${res.warning || ""}`.trim());
     else $("settingsDialog").close();
@@ -1241,6 +1293,7 @@ async function start() {
   if (res.status === 401) return showLogin();
   state.me = await res.json();
   showApp();
+  loadSettings().then((s) => s && refreshModels()); // background: cache the provider's model list
 }
 
 start();

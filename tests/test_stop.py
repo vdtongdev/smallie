@@ -489,3 +489,26 @@ async def test_the_resumed_team_run_leaves_the_note_in_the_thread_and_the_steer_
     assert [(m.content, m.name) for m in thread] == [("request", None), ("N", None), (STEER_MESSAGE, STEER)]
     shown = await routes_conversations.messages("t", messages_request(graph), "u1")
     assert [(m["role"], m["content"]) for m in shown] == [("user", "request"), ("user", "N")]
+
+
+def test_turns_pairs_a_request_and_its_notes_with_the_answer():
+    from app.core.memory import turns
+
+    thread = [HumanMessage("R"), HumanMessage("N"), HumanMessage(STEER_MESSAGE, name=STEER), AIMessage("A")]
+    assert turns(thread) == [("R\n\nN", "A")]
+    assert turns([HumanMessage("R"), AIMessage("A"), HumanMessage("R2"), AIMessage("A2")]) == [("R", "A"), ("R2", "A2")]
+
+
+async def test_a_failing_team_read_does_not_break_reload(monkeypatch):
+    monkeypatch.setattr(routes_conversations, "get_conversation", lambda user_id, cid: {"id": cid})
+    graph, _ = await stopped_team_chat_with_note()
+
+    async def broken(config, *a, **k):
+        if "checkpoint_ns" in config.get("configurable", {}) and config["configurable"]["checkpoint_ns"]:
+            raise RuntimeError("boom")
+        return await real(config, *a, **k)
+
+    real = graph.aget_state
+    monkeypatch.setattr(graph, "aget_state", broken, raising=False)
+    shown = await routes_conversations.messages("t", messages_request(graph), "u1")
+    assert shown[-1]["stopped"] is True

@@ -125,11 +125,19 @@ async def _open_pool(stack: AsyncExitStack, max_size: int) -> AsyncConnectionPoo
 
 
 def turns(messages: list[BaseMessage]) -> list[tuple[str, str]]:
-    """(question, final answer text) for each user message of a thread."""
+    """(question, final answer text) for each user request of a thread. A note added to a stopped run
+    (a visible message followed by a `STEER` message) joins its request's question; hidden named
+    messages are never a question."""
+    from app.agents.base import STEER  # base imports this module
+
     pairs: list[list[str]] = []
-    for message in messages:
-        if isinstance(message, HumanMessage) and message.text:
-            pairs.append([message.text, ""])
+    for i, message in enumerate(messages):
+        if isinstance(message, HumanMessage) and message.text and message.name is None:
+            following = messages[i + 1] if i + 1 < len(messages) else None
+            if pairs and isinstance(following, HumanMessage) and following.name == STEER:
+                pairs[-1][0] += f"\n\n{message.text}"
+            else:
+                pairs.append([message.text, ""])
         elif isinstance(message, AIMessage) and message.text and pairs:
             pairs[-1][1] = message.text  # the last text reply of the turn is the answer
     return [(q, a) for q, a in pairs]

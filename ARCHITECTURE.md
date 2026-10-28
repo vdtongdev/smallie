@@ -942,8 +942,9 @@ Every task gets a tier from its difficulty and the profile (`pick_tier`, fixed t
 | `unsupported` | 400 (other than context length) |
 | `context_length` | 400 with `context_length_exceeded` |
 | `server_error` | 5xx, timeout or connection error |
+| `rate_limit` | 429 (limits are per model upstream, so standard can still answer) |
 
-Not retried: rate limit, auth and budget errors (every slot shares one key, so a second call cannot help), a task already on standard, and a failure of the repeated call. A failed attempt is not counted as usage; the pair counts as one call toward the per-message call limit. The reply records the fallback (`from_model`, `category`) and the UI gets a `model_fallback` event. Errors are shown as their category and status only, never the provider's raw text or the key.
+Not retried: auth and budget errors (every slot shares one key, so a second call cannot help), a task already on standard, and a failure of the repeated call. A failed attempt is not counted as usage; the pair counts as one call toward the per-message call limit. The reply records the fallback (`from_model`, `category`) and the UI gets a `model_fallback` event. Errors are shown as their category and status only, never the provider's raw text or the key.
 
 ### Endpoint safety
 

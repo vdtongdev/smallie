@@ -96,7 +96,7 @@ def test_fallback_category_mapping():
     assert fallback_category(_error(openai.InternalServerError, 500)) == "server_error"
     assert fallback_category(openai.APITimeoutError(httpx.Request("POST", "https://x"))) == "server_error"
     assert fallback_category(openai.APIConnectionError(request=httpx.Request("POST", "https://x"))) == "server_error"
-    assert fallback_category(_error(openai.RateLimitError, 429)) is None
+    assert fallback_category(_error(openai.RateLimitError, 429)) == "rate_limit"
     assert fallback_category(_error(openai.AuthenticationError, 401)) is None
     assert fallback_category(ValueError("x")) is None
 
@@ -155,12 +155,46 @@ async def test_no_retry_on_standard_rate_limit_auth(monkeypatch):
     with pytest.raises(openai.NotFoundError):
         await factory.user_model.awrap_model_call(_request("standard"), handler)
     assert handler.models == ["std"]
-    for status, cls in ((429, openai.RateLimitError), (401, openai.AuthenticationError)):
+    for status, cls in ((401, openai.AuthenticationError),):
         _setup(monkeypatch, small=Fake(model_name="tiny", error=_error(cls, status)), standard=Fake(model_name="std"))
         handler = Handler()
         with pytest.raises(cls):
             await factory.user_model.awrap_model_call(_request("small"), handler)
         assert handler.models == ["tiny"]
+
+
+class OpenAIRateLimitError(openai.RateLimitError):
+    """A subclass, like langchain_openai's."""
+
+
+@pytest.mark.parametrize("cls", [openai.RateLimitError, OpenAIRateLimitError])
+@pytest.mark.parametrize("tier", ["small", "strong"])
+async def test_rate_limit_repeats_on_standard(monkeypatch, cls, tier):
+    _setup(monkeypatch, **{tier: Fake(model_name="tiny", error=_error(cls, 429))}, standard=Fake(model_name="std"))
+    handler = Handler()
+    first = await factory.user_model.awrap_model_call(_request(tier), handler)
+    assert handler.models == ["tiny", "std"]
+    result = _unwrap(first)
+    assert result.result[-1].text == "from std"
+    assert result.result[-1].response_metadata["fallback"] == {"from_model": "tiny", "category": "rate_limit"}
+    assert first.command.update == {"tier_failed": True}
+
+
+async def test_standard_rate_limit_still_raises(monkeypatch):
+    _setup(monkeypatch, standard=Fake(model_name="std", error=_error(openai.RateLimitError, 429)))
+    handler = Handler()
+    with pytest.raises(openai.RateLimitError):
+        await factory.user_model.awrap_model_call(_request("standard"), handler)
+    assert handler.models == ["std"]
+
+
+async def test_no_rate_limit_fallback_after_first_token(monkeypatch):
+    _setup(monkeypatch, small=Fake(model_name="tiny", tokens=["Half an"], error=_error(openai.RateLimitError, 429)),
+           standard=Fake(model_name="std"))
+    handler = Handler()
+    with pytest.raises(openai.RateLimitError):
+        await factory.user_model.awrap_model_call(_request("small"), handler)
+    assert handler.models == ["tiny"]
 
 
 async def test_no_retry_when_the_slot_is_empty(monkeypatch):

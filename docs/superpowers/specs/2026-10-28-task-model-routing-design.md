@@ -91,6 +91,7 @@ The fallback lives in the `user_model` middleware, so team tasks and 1v1 replies
 | `unsupported` | `openai.BadRequestError` (400), other than context length |
 | `context_length` | 400 whose code or message is `context_length_exceeded` |
 | `server_error` | `InternalServerError` (5xx), `APITimeoutError`, `APIConnectionError` |
+| `rate_limit` | `openai.RateLimitError` (429), subclasses included |
 
 No retry for:
 - `RateLimitError` and `AuthenticationError`. They propagate as today; all slots share one key, so a second call cannot help.
@@ -127,7 +128,7 @@ Unit (no provider calls):
 3. Plan: missing difficulty, invalid value, mixed case -> as specified; a plan without the field parses; skipped-plan tasks get `medium`/`default`.
 4. Middleware: `context.tier` selects the slot's model; no tier -> standard.
 5. Two tasks in one wave with different tiers each run on their own model.
-6. Fallback (middleware): each retry category repeats the call once on standard, records `fallback`, and later calls of the run stay on standard; rate limit, auth, a standard-tier failure and a failure of the repeated call do not retry.
+6. Fallback (middleware): each retry category repeats the call once on standard, records `fallback`, and later calls of the run stay on standard; auth, a standard-tier failure and a failure of the repeated call do not retry.
 6a. 1v1: the chat route sets the tier from the profile's medium row (Economy -> small, Balanced -> standard, Advanced -> strong); fact extraction stays on standard.
 7. Trace: unknown cost is `null`; no key or raw error text in the workspace or events.
 8. Compatibility: an existing row (only `model`, profile `balanced`) runs every task, 1v1 and direct call on `model`; `init_db` on an old table adds the columns.

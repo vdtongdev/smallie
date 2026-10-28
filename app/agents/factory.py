@@ -52,7 +52,10 @@ def _in_scope(tool, sources) -> bool:
 
 def fallback_category(exc: BaseException) -> str | None:
     """Why a failed call may repeat on the standard model; None for errors that would fail there too
-    (rate limit, bad key) or that are not the model's (call budget, bugs)."""
+    (bad key) or that are not the model's (call budget, bugs). A rate limit is per model upstream, so
+    the standard model can still answer."""
+    if isinstance(exc, openai.RateLimitError):
+        return "rate_limit"
     if isinstance(exc, openai.NotFoundError):
         return "model_not_found"
     if isinstance(exc, openai.BadRequestError):

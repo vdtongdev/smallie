@@ -5,7 +5,7 @@ from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
 from app.core.config import OPENROUTER_BASE_URL, get_settings
 from app.core.endpoint import check_endpoint
-from app.core.model_settings import load_settings
+from app.core.model_settings import ModelSettings, load_settings
 
 # OpenRouter uses these optional headers to show the app name in its dashboard.
 _HEADERS = {"HTTP-Referer": "http://localhost:8000", "X-Title": "smallie"}
@@ -48,12 +48,40 @@ def _build_chat_model(base_url: str, model: str, api_key: str, streaming: bool) 
     )
 
 
-def get_chat_model(user_id: str, *, streaming: bool = True) -> ChatOpenAI:
+TIERS = ("small", "standard", "strong")
+PROFILES = ("economy", "balanced", "advanced")
+DIFFICULTIES = ("easy", "medium", "hard")
+
+# difficulty -> tier, per profile
+_TIER_TABLE = {
+    "economy": {"easy": "small", "medium": "small", "hard": "standard"},
+    "balanced": {"easy": "small", "medium": "standard", "hard": "strong"},
+    "advanced": {"easy": "standard", "medium": "strong", "hard": "strong"},
+}
+
+
+def pick_tier(difficulty: str, profile: str) -> str:
+    """Unknown profile counts as balanced, unknown difficulty as medium."""
+    table = _TIER_TABLE.get(profile) or _TIER_TABLE["balanced"]
+    return table.get(difficulty) or table["medium"]
+
+
+def pick_model(saved: ModelSettings, tier: str) -> tuple[str, str, str]:
+    """(model, tier used, reason). An empty slot falls back to the standard model."""
+    slot = {"small": saved.small_model, "strong": saved.strong_model}.get(tier)
+    if tier in ("small", "strong") and slot:
+        return slot, tier, f"{tier} model"
+    if tier in ("small", "strong"):
+        return saved.model, "standard", f"{tier} model not set, used standard"
+    return saved.model, "standard", "standard model"
+
+
+def get_chat_model(user_id: str, *, tier: str = "standard", streaming: bool = True) -> ChatOpenAI:
     """The user's own model server, from their saved settings only."""
     saved = load_settings(user_id)
     if saved is None:
         raise NoModelSettings()
-    return _build_chat_model(saved.base_url, saved.model, saved.api_key, streaming)
+    return _build_chat_model(saved.base_url, pick_model(saved, tier)[0], saved.api_key, streaming)
 
 
 def placeholder_model() -> ChatOpenAI:

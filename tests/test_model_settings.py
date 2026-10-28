@@ -5,7 +5,7 @@ import uuid
 
 import pytest
 from cryptography.fernet import Fernet
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 
 from app.core import model_settings
 from app.core.config import get_settings
@@ -97,6 +97,38 @@ def test_deleting_the_account_deletes_the_settings(make_user):
         conn.execute(delete(users).where(users.c.id == uid))
     with get_engine().connect() as conn:
         assert conn.execute(select(table).where(table.c.user_id == uid)).first() is None
+
+
+def test_new_columns_round_trip(make_user):
+    uid = make_user()
+    model_settings.save_settings(uid, URL, "m1", "k", small_model="sm", strong_model="st", profile="advanced")
+    assert model_settings.load_settings(uid) == ModelSettings(URL, "m1", "k", "sm", "st", "advanced")
+    model_settings.save_settings(uid, URL, "m1", None, profile="economy")  # slots written as given: None clears
+    assert model_settings.load_settings(uid) == ModelSettings(URL, "m1", "k", None, None, "economy")
+
+
+def test_profile_none_keeps_stored(make_user):
+    uid = make_user()
+    model_settings.save_settings(uid, URL, "m1", "k")
+    assert model_settings.load_settings(uid).profile == "balanced"
+    model_settings.save_settings(uid, URL, "m1", "k", profile="advanced")
+    model_settings.save_settings(uid, URL, "m2", "k2")
+    assert model_settings.load_settings(uid).profile == "advanced"
+    model_settings.save_settings(uid, URL, "m2", None)
+    assert model_settings.load_settings(uid).profile == "advanced"
+
+
+def test_init_db_adds_columns_to_old_table(make_user):
+    uid = make_user()
+    model_settings.save_settings(uid, URL, "m1", "k")
+    with get_engine().begin() as conn:
+        conn.execute(text("ALTER TABLE model_settings DROP COLUMN small_model, DROP COLUMN strong_model, DROP COLUMN profile"))
+    init_db()
+    with get_engine().connect() as conn:
+        cols = {r[0] for r in conn.execute(text(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = 'model_settings'"))}
+    assert {"small_model", "strong_model", "profile"} <= cols
+    assert model_settings.load_settings(uid) == ModelSettings(URL, "m1", "k", None, None, "balanced")
 
 
 def test_key_hint():

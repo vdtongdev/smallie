@@ -54,6 +54,9 @@ model_settings = Table(
     Column("base_url", Text, nullable=False),
     Column("model", Text, nullable=False),
     Column("api_key", Text, nullable=False),  # Fernet token (app/core/model_settings.py)
+    Column("small_model", Text),  # optional tier slots; empty falls back to `model`
+    Column("strong_model", Text),
+    Column("profile", Text, nullable=False, server_default="balanced"),  # economy | balanced | advanced
     Column("updated_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
 )
 
@@ -164,3 +167,9 @@ def init_db() -> None:
         conn.execute(text(f"ALTER TABLE documents ADD COLUMN IF NOT EXISTS card_embedding vector({get_settings().embed_dim})"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS graph_built_at timestamptz"))
         conn.execute(text("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS mined_turns integer NOT NULL DEFAULT 0"))
+        # These came with task model routing.
+        conn.execute(text(
+            "ALTER TABLE model_settings ADD COLUMN IF NOT EXISTS small_model text, "
+            "ADD COLUMN IF NOT EXISTS strong_model text, "
+            "ADD COLUMN IF NOT EXISTS profile text NOT NULL DEFAULT 'balanced'"
+        ))

@@ -126,8 +126,14 @@ YOUR EARLIER ANSWER:
 
 Write in {language}."""
 
+# The three difficulty levels, shared by PLAN_PROMPT and BOARD_PROMPT so they can't drift. No braces: both are .format()-ed.
+DIFFICULTY_LEVELS = """   - easy: a clear, bounded task, such as a single lookup, an extraction or a straightforward tool use. A database query for items the user named or holds (several tickers or holdings, lookups, simple sums or averages) is easy.
+   - medium: several steps, ordinary research, combining a little evidence, or a database query that needs judgement about what to compare or how to define a figure.
+   - hard: real ambiguity, conflicting evidence, comparing several sources, or a nuanced synthesis.
+"""
+
 # System prompt of the review call. {language}: the reply language, for the question.
-BOARD_PROMPT = """You review the work of a team that answers the user's latest message. Each agent answered a task from its own sources. The human message gives the user's message and the answers, each headed by its task id and agent. A heading may say which tasks the answer received as input. AVAILABLE AGENTS may follow the answers. Sort the answers from what is in front of you. Don't use outside knowledge to decide whether a fact is true.
+BOARD_PROMPT ="""You review the work of a team that answers the user's latest message. Each agent answered a task from its own sources. The human message gives the user's message and the answers, each headed by its task id and agent. A heading may say which tasks the answer received as input. AVAILABLE AGENTS may follow the answers. Sort the answers from what is in front of you. Don't use outside knowledge to decide whether a fact is true.
 
 Fill in these lists:
 - agreements: points the answers agree on, one short sentence each.
@@ -174,10 +180,7 @@ PLAN_PROMPT = """You plan how a team of agents answers the user's latest message
 6. A task that draws a chart depends on the task that produces the data to draw.
 7. Return at most {max_tasks} tasks, each with a different `id`.
 8. Rate each task's `difficulty` as `easy`, `medium` or `hard`, judging the task, not the agent.
-   - easy: a clear, bounded task, such as a single lookup, an extraction or a straightforward tool use.
-   - medium: several steps, ordinary research, a non-trivial query, or combining a little evidence.
-   - hard: real ambiguity, conflicting evidence, comparing several sources, or a nuanced synthesis.
-9. Give each task a `difficulty_reason` of a few words that says why you rated it so.
+""" + DIFFICULTY_LEVELS + """9. Give each task a `difficulty_reason` of a few words that says why you rated it so.
 
 Write every goal in {language}."""
 

@@ -30,13 +30,13 @@ from pydantic import BaseModel
 
 from app.agents.artifacts import KINDS, collect
 from app.agents.remote import CallBudgetExceeded
-from app.agents.base import MEMORY_TOOL_NAMES, TOOL_RESULT_PREVIEW, AgentSpec, RouteInfo, ToolRecorder, turn_messages, user_request
+from app.agents.base import MEMORY_TOOL_NAMES, TOOL_RESULT_PREVIEW, AgentSpec, RouteInfo, ToolRecorder, request_parts, turn_messages, user_request
 from app.agents.registry import AGENTS
 from app.core.config import get_settings
 from app.core.llm import get_chat_model
 from app.core.memory import TEAM_MODE, AgentContext
 from app.core.prompts import reply_language
-from app.orchestration.prompts import BOARD_PROMPT, CHALLENGE_MESSAGE, CONFLICT_MESSAGE, DRAW_MESSAGE, DRAWING_NOTE, NOTHING_FOUND_MESSAGE, PLAN_PROMPT, ROUND_MESSAGE, TASK_MESSAGE, TEAM_MESSAGE
+from app.orchestration.prompts import BOARD_PROMPT, CHALLENGE_MESSAGE, CONFLICT_MESSAGE, DRAW_MESSAGE, DRAWING_NOTE, NOTE_HEADING, NOTHING_FOUND_MESSAGE, PLAN_PROMPT, ROUND_MESSAGE, TASK_MESSAGE, TEAM_MESSAGE
 from app.orchestration.team_plan import Plan, Task, add_follow_ups, after_user_files, dead_inputs, fallback_tasks, ready, validate_plan
 from app.orchestration.router import ORCHESTRATOR, AssistantState, available_agents
 
@@ -174,7 +174,7 @@ def clean(board: Board, speakers: Sequence[str], tasks: Sequence[str] | None = N
 async def ask_board(messages: list[AnyMessage], answers: list[dict], config: RunnableConfig, *,
                     user_id: str, inputs: Mapping[str, list[str]] | None = None, agents: Sequence[AgentSpec] | None = None) -> Review:
     """One model call; `config` carries the usage counter's callbacks. `inputs`: task id -> the task ids it received; `agents`: the available agents, which follow-ups may use."""
-    question = user_request(messages)
+    question, notes = request_parts(messages)[0], _notes(messages)
     # Texts go into the message, not a template: answers may contain braces.
     def head(a: dict) -> str:
         line = f"{a.get('task', a['agent'])} ({a['agent']})"
@@ -184,7 +184,7 @@ async def ask_board(messages: list[AnyMessage], answers: list[dict], config: Run
             line += f"\nPREVIOUSLY CHALLENGED, report its outcome: {a['challenge']}"
         return line
 
-    human = f"USER MESSAGE:\n{question}\n\nANSWERS:\n" + "\n\n".join(f"{head(a)}:\n{a['text']}" for a in answers)
+    human = f"USER MESSAGE:\n{question}\n\n{notes + chr(10) * 2 if notes else ''}ANSWERS:\n" + "\n\n".join(f"{head(a)}:\n{a['text']}" for a in answers)
     board = (await asyncio.to_thread(get_chat_model, user_id)).with_structured_output(
         Review, method="function_calling")
     if agents:  # texts go into the message, not a template
@@ -284,6 +284,12 @@ def _round_notes(routes: Sequence[str], available: Sequence[tuple[AgentSpec, Rou
 
 def _bullets(lines: Sequence[str]) -> str:
     return "\n".join(f"- {line}" for line in lines) or "none"
+
+
+def _notes(messages: Sequence[AnyMessage]) -> str:
+    """The user's notes added after a stop as a block under `NOTE_HEADING`, or "" with none."""
+    notes = request_parts(messages)[1:]
+    return f"{NOTE_HEADING}\n{_bullets(notes)}" if notes else ""
 
 
 def _drawing(drawers: Sequence[str]) -> str:
@@ -422,19 +428,20 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
             return Command(update={"workspace": {"tasks": tasks}}, goto="synthesize")
         for t in todo:
             t["status"] = "running"
-        wave, language = workspace["wave"] + 1, reply_language(messages)
+        wave, language, notes = workspace["wave"] + 1, reply_language(messages), _notes(messages)
         available = await available_agents(runtime.context.user_id, specs)
-        notes = {spec.route: info.prompt_note for spec, info in available}
+        prompt_notes = {spec.route: info.prompt_note for spec, info in available}
         sends = []
         drawing = _drawing(drawers_of(tasks))
         for t in todo:
             if t["goal"]:
                 inputs, missing = _inputs(t, {**workspace, "tasks": tasks})
-                note = TASK_MESSAGE.format(goal=t["goal"], inputs=inputs, missing=missing, language=language, drawing=drawing)
+                note = TASK_MESSAGE.format(goal=t["goal"], inputs=inputs, missing=missing, language=language, drawing=drawing,
+                                          notes=f"{notes}\n\n" if notes else "")
             else:  # fallback and reply tasks: the plain round note
-                note = ROUND_MESSAGE.format(language=language, drawing=drawing)
-            if notes.get(t["agent"]):
-                note = f"{note}\n{notes[t['agent']]}"
+                note = ROUND_MESSAGE.format(language=language, drawing=drawing, notes=f"\n\n{notes}" if notes else "")
+            if prompt_notes.get(t["agent"]):
+                note = f"{note}\n{prompt_notes[t['agent']]}"
             sends.append(job(t["id"], t["agent"], 1, "plan", note, messages))
         ids, routes = [t["id"] for t in todo], [t["agent"] for t in todo]
         entry = {"type": "wave", "wave": wave, "kind": "plan", "tasks": ids, "agents": routes}
@@ -669,7 +676,8 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
                                    for d in board.differences]),
                 conflicts=_bullets([f"{c.claim} ({', '.join(c.routes)}): {c.issue}, cause: {c.cause}" for c in board.conflicts]),
                 open_points=_bullets(open_points), not_done=_bullets(not_done),
-                language=reply_language(messages), drawing=_drawing(drawers))
+                language=reply_language(messages), drawing=_drawing(drawers),
+                notes=f"{_notes(messages)}\n\n" if _notes(messages) else "")
             command = await ask_orchestrator(state, runtime, note, bool(drawers))
             did_handoff = command.goto in by_route  # it handed off: the answers stand
             answer = AIMessage("\n\n".join(a["text"] for a in answers), name=ORCHESTRATOR) if did_handoff \

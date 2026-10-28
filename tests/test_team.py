@@ -681,15 +681,15 @@ def test_prompts_format():
     from app.orchestration import prompts
 
     prompts.BOARD_PROMPT.format(language="English")
-    prompts.ROUND_MESSAGE.format(language="English", drawing="")
+    prompts.ROUND_MESSAGE.format(language="English", drawing="", notes="")
     prompts.CONFLICT_MESSAGE.format(conflicts="", others="", own="", language="English")
-    prompts.TEAM_MESSAGE.format(answers="", differences="none", conflicts="none", open_points="none", not_done="none", language="English", drawing="")
+    prompts.TEAM_MESSAGE.format(answers="", differences="none", conflicts="none", open_points="none", not_done="none", language="English", drawing="", notes="")
 
 
 def test_round_message_formats_with_language():
     from app.orchestration.prompts import ROUND_MESSAGE
 
-    text = ROUND_MESSAGE.format(language="English", drawing="")
+    text = ROUND_MESSAGE.format(language="English", drawing="", notes="")
     assert "English" in text
     assert "{" not in text and "}" not in text
 
@@ -1468,7 +1468,7 @@ async def test_transcript_is_the_workspace(monkeypatch):
 def test_task_message_formats():
     from app.orchestration.prompts import TASK_MESSAGE
 
-    text = TASK_MESSAGE.format(goal="G", inputs="none", missing="none", language="Vietnamese", drawing="")
+    text = TASK_MESSAGE.format(goal="G", inputs="none", missing="none", language="Vietnamese", drawing="", notes="")
     assert "Vietnamese" in text and "{" not in text
 
 
@@ -1843,7 +1843,7 @@ def test_team_message_formats():
     from app.orchestration.prompts import TEAM_MESSAGE
 
     text = TEAM_MESSAGE.format(answers="a", differences="d", conflicts="c", open_points="o", not_done="n",
-                               language="Vietnamese", drawing=" DRAW")
+                               language="Vietnamese", drawing=" DRAW", notes="")
     assert "Vietnamese" in text and "DRAW" in text and "{" not in text
 
 
@@ -1910,15 +1910,77 @@ async def test_plan_rerun_after_a_note_takes_the_request_and_note_as_its_goal(mo
 
 # --- steer notes (stop and resume) ---
 
-from app.agents.base import STEER
+from app.agents.base import STEER, user_request
 from app.core.prompts import STEER_MESSAGE
 from app.orchestration.stopping import add_note, is_stopped
 
 NOTE_HEADING = "USER NOTES added after a stop:"
+NOTE_THREAD = [HumanMessage(THREE), HumanMessage("N-NOTE"), HumanMessage(STEER_MESSAGE, name=STEER)]
 
 
 def _task_notes(log, agent):
     return [e["last"].text for e in _starts(log, agent)]
+
+
+async def test_note_reaches_pending_tasks(monkeypatch):
+    log = []
+    plan = Plan(tasks=[Task(id="t1", agent="docs", goal="extract"), Task(id="t2", agent="sql", goal="check", depends_on=["t1"])])
+    _, assistant, _ = _docs_sql(monkeypatch, plan, log)
+    await _stream(assistant, {"messages": NOTE_THREAD})
+
+    for agent in ("docs", "sql"):
+        note = _task_notes(log, agent)[0]
+        assert NOTE_HEADING in note and "- N-NOTE" in note
+    assert len(_starts(log, "docs")) == 1
+
+
+async def test_note_reaches_review_and_write_up(monkeypatch):
+    seen = []
+
+    async def ainvoke(messages, config):
+        seen.append(messages[1].content)
+        return Board()
+
+    monkeypatch.setattr(team, "get_chat_model", lambda model=None: SimpleNamespace(
+        with_structured_output=lambda schema, method: SimpleNamespace(ainvoke=ainvoke)))
+    answers = [{"agent": "sql", "task": "t1", "text": "X"}]
+    await team.ask_board(NOTE_THREAD, answers, {}, user_id="u")
+    await team.ask_board([HumanMessage("Q"), HumanMessage("N-NOTE"), HumanMessage("s", name=STEER)], answers, {}, user_id="u")
+    await team.ask_board([HumanMessage("Q")], answers, {}, user_id="u")
+    assert f"{NOTE_HEADING}\n- N-NOTE" in seen[0] and seen[0].count("N-NOTE") == 1
+    assert seen[1] == f"USER MESSAGE:\nQ\n\n{NOTE_HEADING}\n- N-NOTE\n\nANSWERS:\nt1 (sql):\nX"
+    assert seen[2] == "USER MESSAGE:\nQ\n\nANSWERS:\nt1 (sql):\nX"  # no notes: as before
+
+
+
+async def test_note_reaches_the_write_up(monkeypatch):
+    log = []
+    plan = Plan(tasks=[Task(id="t1", agent="docs", goal="a"), Task(id="t2", agent="sql", goal="b")])
+    model, assistant, _ = _docs_sql(monkeypatch, plan, log, board=False)
+    _board(monkeypatch, then=Board(differences=[Difference(routes=["docs", "sql"], explanation="e", cause="date", sides=[])]))
+    await _stream(assistant, {"messages": NOTE_THREAD})
+    [write_up] = _writeups(model)
+    assert f"{NOTE_HEADING}\n- N-NOTE" in write_up
+
+
+def test_without_notes_the_team_prompts_are_unchanged():
+    from app.orchestration import prompts
+
+    task = prompts.TASK_MESSAGE.format(goal="G", inputs="I", missing="M", language="English", drawing="", notes="")
+    assert task == ("TEAM TASK (not visible to the user). Your task: G\n\n1. Do this task with your own sources only.\n2. Give each figure or claim with its source and as-of date.\n3. Say plainly when your sources hold nothing on it, and don't guess.\n4. Compare every input below with what your own source shows. When an input does not match, say so in your answer with the value you found and where you found it.\n\nYou can't see the other agents' work except the inputs. Never write as another agent and never attribute data to one.\n\nINPUTS (results of other agents' tasks for this message):\nI\n\nMISSING INPUTS (these produced nothing; do the task without them):\nM\n\n Write in English.")
+    round_ = prompts.ROUND_MESSAGE.format(language="English", drawing="", notes="")
+    assert round_ == ("TEAM ROUND (not visible to the user). Answer the user's latest message with your own sources only. Give each figure or claim with its source and as-of date. Say plainly when your sources hold nothing on it, and don't guess. Answer only the part your own sources cover, even when the message gives tasks to other agents: they answer their own parts. You can't see their answers, so never write as another agent, never attribute data to one, and never claim another agent checked your figures. Write in English.")
+    result = prompts.TEAM_MESSAGE.format(answers="A", differences="D", conflicts="C", open_points="O", not_done="N", language="English", drawing="", notes="")
+    assert result.startswith("TEAM RESULT for the user's latest message (not visible to the user). The team's work on it is done: write the answer from this now, without calling any tool. Write it in English, whatever language the answers are in.\n\nANSWERS (task id, agent, text):\nA\n\n")
+    assert result.endswith("7. When an answer says it failed, say plainly which part is missing.")
+
+
+async def test_no_notes_no_heading_in_a_run(monkeypatch):
+    log = []
+    plan = Plan(tasks=[Task(id="t1", agent="docs", goal="extract")])
+    _, assistant, _ = _docs_sql(monkeypatch, plan, log)
+    await _stream(assistant, _ask(THREE))
+    assert "USER NOTES" not in _task_notes(log, "docs")[0]
 
 
 async def _cancel_when(assistant, first, started_agent, log, config):
@@ -2074,6 +2136,49 @@ async def test_team_note_during_review_reruns_the_review(monkeypatch):
 
     assert len(asked) == 2 and "N-NOTE" in asked[1]
     assert len(_starts(log, "docs")) == 1 and len(_starts(log, "sql")) == 1
+    await _noted_thread(assistant, config)
+
+
+async def test_note_during_plan_ends_with_an_answer(monkeypatch):
+    log, goals = [], []
+    result = Plan(tasks=[Task(id="t1", agent="docs", goal="extract"), Task(id="t2", agent="sql", goal="check", depends_on=["t1"])])
+
+    async def plan(messages, *args, **kwargs):
+        goals.append(user_request(messages))
+        if len(goals) == 1:
+            await asyncio.sleep(30)
+        return result
+
+    monkeypatch.setattr(team, "ask_plan", plan)
+    _board(monkeypatch, then=Board())
+    agents = {n: Fake(n, f"{n} text", log=log) for n in ("docs", "sql", "research")}
+    assistant = _assistant(monkeypatch, per_agent(orchestrator=[AIMessage("Final.")]), documents=("handbook.pdf",), **agents)
+    config = {"configurable": {"thread_id": "note-plan"}}
+
+    await _cancel_once(assistant, _ask(THREE), config, lambda: goals)
+    await add_note(assistant, config, "N-NOTE")
+    await _resume(assistant, config)
+
+    assert goals == [THREE, f"{THREE}\n\nN-NOTE"]
+    await _noted_thread(assistant, config)
+
+
+async def test_note_during_review_ends_with_an_answer(monkeypatch):
+    log = []
+    board, asked = _slow_first(Board())
+    monkeypatch.setattr(team, "ask_board", board)
+    _plan(monkeypatch, Plan(tasks=[Task(id="t1", agent="docs", goal="extract"),
+                                   Task(id="t2", agent="sql", goal="check", depends_on=["t1"])]))
+    agents = {n: Fake(n, f"{n} text", log=log) for n in ("docs", "sql", "research")}
+    assistant = _assistant(monkeypatch, per_agent(orchestrator=[AIMessage("Final.")]), documents=("handbook.pdf",), **agents)
+    config = {"configurable": {"thread_id": "note-review"}}
+
+    await _cancel_once(assistant, _ask(THREE), config, lambda: asked)
+    assert len(_ends(log, "docs")) == 1  # the first wave finished before the cut
+    await add_note(assistant, config, "N-NOTE")
+    await _resume(assistant, config)
+
+    assert len(_starts(log, "docs")) == 1 and len(_starts(log, "sql")) == 1  # no wave reran
     await _noted_thread(assistant, config)
 
 

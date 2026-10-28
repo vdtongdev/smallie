@@ -85,11 +85,14 @@ ATTEMPT_MESSAGE = """ATTEMPT (not visible to the user): the {route} specialist a
 
 Don't run those searches again. If its reply does answer the question after all, give that answer. Otherwise ask `ask_{route}` once more only with a clearly different, more specific question (e.g. naming the file or the exact data), use another specialist or a web search where the rules above allow it, or answer yourself when it needs none of them. If nothing can answer it, tell the user plainly what isn't available."""
 
+# Heads the user's notes added after a stop: the {notes} slot of the team messages and the board message (app/orchestration/team.py `_notes`).
+NOTE_HEADING = "USER NOTES added after a stop:"
+
 # Fills the {drawing} slot of ROUND_MESSAGE and TEAM_MESSAGE when the team has a drawer; {agent}: its route. The slot is empty otherwise.
 DRAWING_NOTE = """ The {agent} agent draws the chart the user asked for from the team's final answer, right after it is written. Never say a chart can't be drawn, never apologise for it, never tell the user to draw it themselves, and never describe a chart. At most say the chart follows."""
 
-# Team mode (app/orchestration/team.py). Hidden message for each participant in the first round: the thread plus this, as the last message (name TEAM).
-ROUND_MESSAGE = """TEAM ROUND (not visible to the user). Answer the user's latest message with your own sources only. Give each figure or claim with its source and as-of date. Say plainly when your sources hold nothing on it, and don't guess. Answer only the part your own sources cover, even when the message gives tasks to other agents: they answer their own parts. You can't see their answers, so never write as another agent, never attribute data to one, and never claim another agent checked your figures.{drawing} Write in {language}."""
+# Team mode (app/orchestration/team.py). Hidden message for each participant in the first round: the thread plus this, as the last message (name TEAM). {notes}: the user's notes under NOTE_HEADING, or empty.
+ROUND_MESSAGE = """TEAM ROUND (not visible to the user). Answer the user's latest message with your own sources only. Give each figure or claim with its source and as-of date. Say plainly when your sources hold nothing on it, and don't guess. Answer only the part your own sources cover, even when the message gives tasks to other agents: they answer their own parts. You can't see their answers, so never write as another agent, never attribute data to one, and never claim another agent checked your figures.{drawing} Write in {language}.{notes}"""
 
 # Hidden message for the participants of a conflict round. {conflicts}: bullets, one per conflict;
 # {others}: the other side's answers; {own}: this agent's earlier answer.
@@ -145,10 +148,10 @@ Set `question` only when the answers can't go on without information only the us
 Write every text field in {language}. Leave a list empty when it has no entry."""
 
 # Hidden message for one planned task: the thread plus this, as the last message (name TEAM).
-# {drawing}: DRAWING_NOTE when the team has a drawer, else empty; {goal}: what the task must produce; {inputs}: the finished tasks it depends on, or "none"; {missing}: the ones that produced nothing, or "none".
+# {notes}: the user's notes under NOTE_HEADING, or empty; {drawing}: DRAWING_NOTE when the team has a drawer, else empty; {goal}: what the task must produce; {inputs}: the finished tasks it depends on, or "none"; {missing}: the ones that produced nothing, or "none".
 TASK_MESSAGE = """TEAM TASK (not visible to the user). Your task: {goal}
 
-1. Do this task with your own sources only.
+{notes}1. Do this task with your own sources only.
 2. Give each figure or claim with its source and as-of date.
 3. Say plainly when your sources hold nothing on it, and don't guess.
 4. Compare every input below with what your own source shows. When an input does not match, say so in your answer with the value you found and where you found it.
@@ -176,10 +179,10 @@ PLAN_PROMPT = """You plan how a team of agents answers the user's latest message
 
 Write every goal in {language}."""
 
-# Hidden message for the orchestrator's final write-up. {differences} and {conflicts} are "none" when empty.
+# Hidden message for the orchestrator's final write-up. {notes}: the user's notes under NOTE_HEADING, or empty. {differences} and {conflicts} are "none" when empty.
 TEAM_MESSAGE = """TEAM RESULT for the user's latest message (not visible to the user). The team's work on it is done: write the answer from this now, without calling any tool. Write it in {language}, whatever language the answers are in.
 
-ANSWERS (task id, agent, text):
+{notes}ANSWERS (task id, agent, text):
 {answers}
 
 EXPLAINED DIFFERENCES (each with its cause):

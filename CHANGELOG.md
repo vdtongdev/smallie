@@ -215,3 +215,21 @@ Versions are `major.minor.patch`: the major version stays 0 for now, each minor 
   - Chat models used temperature 0. At 0, a reply that starts repeating keeps repeating; that is how the 1,392-call reply happened
   - 0.3 lowers that chance. The trade-off: weaker models slip words of another script into Vietnamese answers a little more often
   - Set in `app/core/config.py` and documented in `.env.example`
+
+## 0.6.0 - Task model routing
+- **Task model routing** (`app/agents/factory.py`: `UserModel`, `pick_tier`, `pick_model`): each task runs on a small, standard or strong model chosen by its difficulty and the user's profile, instead of one model for everything
+  - Settings has three profiles, Economy, Balanced and Advanced, and three model slots (small, standard, strong). The Settings dialog is wider, describes each difficulty level, and has a close button; the model lists are cached in the browser and the three models are dropdowns
+  - The team planner rates each task's difficulty (easy, medium, hard), and the review rates follow-up tasks. A plain database query counts as easy. 1v1 replies count as medium
+  - A small or strong model call that fails before streaming any text is repeated once on the standard model, and the run stays on standard. This covers rate limits (429), a missing model, a request too long for the model, an unsupported request, and server errors or timeouts; a wrong key is not retried. The Activity popup names both models and the reason
+  - Activity shows each task's difficulty, model, calls, tokens, cost and any fallback from the moment the task starts, chart tasks included. A reload rebuilds it from the saved results; older results without the second model name still show
+  - Limits: a 429 on the standard model still fails the task, and the plan, review and write-up always run on standard
+  - Existing accounts keep working; the new `model_settings` columns are added on app start
+- **Fix: a team follow-up searched again instead of using the answer already in the chat**
+  - The planner saw only the newest message, so "use the news above" planned a fresh research task
+  - The planner now also gets the earlier messages and answers (capped in length) and is told to reuse results already in the chat (`ask_plan`, `PLAN_PROMPT`)
+- **Fix: the database task failed with "RemoteException" when a free model was rate limited**
+  - Errors from an agent server arrive as subclasses of the provider's error types, which were not recognised, so the fallback never ran
+  - Subclass names are now matched (`app/agents/factory.py`), so small or strong model rate limits and auth errors are handled like local ones, with the retry on standard described above
+- **Fix: a follow-up database task was skipped because the task it depended on had failed**
+  - A follow-up kept waiting on a failed, withdrawn or skipped task
+  - A follow-up no longer waits on such a task and runs with what it has (`add_follow_ups`)

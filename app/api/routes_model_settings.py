@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, field_validator
 
 from app.core.auth import get_current_user
+from app.core.llm import PROFILES
 from app.core.endpoint import UnsafeEndpoint, check_endpoint
 from app.core.model_settings import delete_settings, key_hint, load_settings, save_settings
 
@@ -21,11 +22,19 @@ class ModelSettingsBody(BaseModel):
     base_url: str
     model: str
     api_key: str | None = None
+    small_model: str | None = None
+    strong_model: str | None = None
+    profile: str | None = None
 
-    @field_validator("base_url", "model", "api_key")
+    @field_validator("base_url", "model", "api_key", "small_model", "strong_model")
     @classmethod
     def _strip(cls, value):
         return value.strip() if isinstance(value, str) else value
+
+    @field_validator("small_model", "strong_model")
+    @classmethod
+    def _empty_is_none(cls, value):
+        return value or None
 
     @field_validator("base_url", "model")
     @classmethod
@@ -66,7 +75,25 @@ async def get_model_settings(user_id: str = Depends(get_current_user)):
     saved = await asyncio.to_thread(load_settings, user_id)
     if saved is None:
         raise HTTPException(404, "No model settings")
-    return {"base_url": saved.base_url, "model": saved.model, "key_hint": key_hint(saved.api_key)}
+    return {
+        "base_url": saved.base_url,
+        "model": saved.model,
+        "small_model": saved.small_model,
+        "strong_model": saved.strong_model,
+        "profile": saved.profile,
+        "key_hint": key_hint(saved.api_key),
+    }
+
+
+@router.get("/model-settings/models")
+async def list_saved_models(user_id: str = Depends(get_current_user)):
+    saved = await asyncio.to_thread(load_settings, user_id)
+    if saved is None:
+        return {"models": []}
+    try:
+        return {"models": await _listed_models(saved.base_url, saved.api_key)}
+    except HTTPException:
+        return {"models": []}
 
 
 @router.put("/model-settings")
@@ -75,6 +102,8 @@ async def put_model_settings(body: ModelSettingsBody, user_id: str = Depends(get
         await asyncio.to_thread(check_endpoint, body.base_url)
     except UnsafeEndpoint as exc:
         _refuse(str(exc))
+    if body.profile is not None and body.profile not in PROFILES:
+        _refuse("Unknown profile")
     key = body.api_key
     if key is None:
         saved = await asyncio.to_thread(load_settings, user_id)
@@ -86,9 +115,23 @@ async def put_model_settings(body: ModelSettingsBody, user_id: str = Depends(get
     if key.startswith("sk-ant-"):
         _refuse("This looks like an Anthropic key; use https://api.anthropic.com/v1/")
     listed = await _listed_models(body.base_url, key)
-    await asyncio.to_thread(save_settings, user_id, body.base_url, body.model, body.api_key)
+    await asyncio.to_thread(
+        save_settings,
+        user_id,
+        body.base_url,
+        body.model,
+        body.api_key,
+        small_model=body.small_model,
+        strong_model=body.strong_model,
+        profile=body.profile,
+    )
     warning = None if body.model in listed else "This server doesn't list that model; check the name."
-    return {"saved": True, "warning": warning}
+    warnings = {
+        slot: f"This server doesn't list the {slot.removesuffix('_model')} model; check the name."
+        for slot in ("small_model", "strong_model")
+        if getattr(body, slot) and getattr(body, slot) not in listed
+    }
+    return {"saved": True, "warning": warning, "warnings": warnings}
 
 
 @router.delete("/model-settings", status_code=204)

@@ -24,6 +24,7 @@ class UsageCounter(AsyncCallbackHandler):
         self.input_tokens = 0
         self.output_tokens = 0
         self.cost = 0.0
+        self.cost_known = False  # a reply reported a cost (0.0 is a cost; a missing field is not)
 
     async def on_llm_end(self, response: LLMResult, **kwargs) -> None:
         for generations in response.generations:
@@ -38,17 +39,22 @@ class UsageCounter(AsyncCallbackHandler):
         self.model_calls += 1
         self.input_tokens += usage.get("input_tokens", 0)
         self.output_tokens += usage.get("output_tokens", 0)
-        self.cost += message.response_metadata.get("cost") or 0.0
+        self.add_cost(message.response_metadata.get("cost"))
+
+    def add_cost(self, cost: float | None) -> None:
+        if cost is not None:
+            self.cost, self.cost_known = self.cost + cost, True
 
     def totals(self) -> dict:
         return {"model_calls": self.model_calls, "input_tokens": self.input_tokens,
-                "output_tokens": self.output_tokens, "cost": self.cost}
+                "output_tokens": self.output_tokens, "cost": self.cost if self.cost_known else None}
 
     def add(self, totals: dict) -> None:
         """Add another counter's totals: what an agent server reports for its run, whose model
         calls this process never sees (app/agents/remote.py)."""
-        for key in ("model_calls", "input_tokens", "output_tokens", "cost"):
+        for key in ("model_calls", "input_tokens", "output_tokens"):
             setattr(self, key, getattr(self, key) + (totals.get(key) or 0))
+        self.add_cost(totals.get("cost"))
 
 
 async def get_usage(store: BaseStore, user_id: str) -> dict:

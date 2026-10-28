@@ -458,7 +458,7 @@ async def test_auth_error_names_the_users_host(monkeypatch):
 
     exc = openai.AuthenticationError("bad", response=httpx.Response(401, request=httpx.Request("POST", "http://x")), body=None)
     events = await _run_chat(monkeypatch, _settings(), _raising(exc))
-    error = events[1]
+    error = next(e for e in events if e["type"] == "error")
     assert error["code"] == "auth"
     assert "api.deepseek.com" in error["message"] and "OPENROUTER" not in error["message"]
     assert "sk-secret" not in error["message"]
@@ -468,4 +468,98 @@ async def test_no_model_raised_inside_a_run_maps_to_no_model(monkeypatch):
     from app.core.llm import NoModelSettings
 
     events = await _run_chat(monkeypatch, _settings(), _raising(NoModelSettings()))
-    assert events[1]["code"] == "no_model"
+    assert next(e for e in events if e["type"] == "error")["code"] == "no_model"
+
+
+async def _run_kind(monkeypatch, kind, saved):
+    """Run the chat route with a stub assistant; returns (SSE events, the context the assistant got)."""
+    import json
+    from types import SimpleNamespace
+
+    from app.api.routes_chat import ChatRequest, chat
+
+    seen = {}
+
+    async def astream(*args, **kwargs):
+        seen["context"] = kwargs["context"]
+        return
+        yield
+
+    async def none(*args, **kwargs):
+        return ""
+
+    async def spy(*args, **kwargs):
+        pass
+
+    monkeypatch.setattr(routes_chat, "create_conversation", lambda u, k, m: {"id": "c1", "title": "t"})
+    monkeypatch.setattr(routes_chat, "touch_conversation", lambda cid: None)
+    monkeypatch.setattr(routes_chat, "recall_facts", lambda u: "")
+    monkeypatch.setattr(routes_chat, "load_settings", lambda u: saved)
+    monkeypatch.setattr(routes_chat, "_recent_chats", none)
+    monkeypatch.setattr(routes_chat, "_user", none)
+    monkeypatch.setattr(routes_chat, "add_usage", spy)
+    monkeypatch.setattr(routes_chat, "_chat_input", lambda *a: none())
+    assistant = SimpleNamespace(astream=astream)
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(assistant=assistant, store=None)))
+    response = await chat(kind, ChatRequest(message="hi"), request, "u1")
+    raw = [part async for part in response.body_iterator]
+    return [json.loads(p[len("data: "):]) for p in raw], seen["context"]
+
+
+def _saved(**kw):
+    from app.core.model_settings import ModelSettings
+
+    return ModelSettings("https://x/v1", "std-m", "SECRET-KEY", **kw)
+
+
+async def test_1v1_economy_runs_small(monkeypatch):
+    events, context = await _run_kind(monkeypatch, "auto", _saved(small_model="small-m", profile="economy"))
+    assert context.tier == "small"
+    routing = [e for e in events if e["type"] == "routing"]
+    assert routing == [{"type": "routing", "difficulty": "medium", "profile": "economy", "tier": "small",
+                        "model": "small-m", "reason": "small model"}]
+    assert events[0]["type"] == "conversation" and events[1]["type"] == "routing"
+
+
+async def test_1v1_old_row_uses_model(monkeypatch):
+    events, context = await _run_kind(monkeypatch, "auto", _saved())
+    assert context.tier == "standard"
+    routing = next(e for e in events if e["type"] == "routing")
+    assert routing["model"] == "std-m" and routing["tier"] == "standard" and routing["profile"] == "balanced"
+
+
+async def test_1v1_economy_without_small_slot(monkeypatch):
+    events, context = await _run_kind(monkeypatch, "sql", _saved(profile="economy"))
+    routing = next(e for e in events if e["type"] == "routing")
+    assert routing["model"] == "std-m" and routing["tier"] == "standard" and "small" in routing["reason"]
+    assert context.tier == "small"  # the agent asks for small; the empty slot falls back to standard at call time
+
+
+async def test_team_top_context_is_standard(monkeypatch):
+    events, context = await _run_kind(monkeypatch, "team", _saved(small_model="small-m", profile="economy"))
+    assert context.tier == "standard"
+    assert not [e for e in events if e["type"] == "routing"]
+
+
+async def test_routing_event_has_no_key(monkeypatch):
+    events, _ = await _run_kind(monkeypatch, "auto", _saved(profile="advanced", strong_model="big-m"))
+    routing = next(e for e in events if e["type"] == "routing")
+    assert routing["tier"] == "standard" or routing["tier"] == "strong"
+    assert "SECRET-KEY" not in str(routing) and "api_key" not in routing
+
+
+async def test_task_started_event_reaches_ui():
+    started = {"type": "task_started", "task": "t1", "agent": "sql", "tier": "small", "model": "m", "difficulty": "easy"}
+    assert _to_events("custom", started, ("team:T",)) == [started]
+
+
+async def test_model_fallback_event_reaches_ui():
+    fallback = {"type": "model_fallback", "from_model": "small-m", "category": "model not found"}
+    assert _to_events("custom", fallback, ("orchestrator:1",)) == [fallback]
+    events = await _collect([
+        ((), "custom", fallback),
+        ((), "custom", {"type": "speaker", "agent": "sql", "task": "t1", "ns": "team:T|speak:A"}),
+        (("team:T", "speak:A"), "custom", fallback),
+        (("sql:1",), "custom", fallback),
+    ])
+    assert events == [fallback, {**fallback, "agent": "sql", "task": "t1"}, {**fallback, "agent": "sql"}]

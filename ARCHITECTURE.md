@@ -143,7 +143,9 @@ This file describes `main` plus the 0.4.0 remote agents (section 10) and the 0.5
    - `token`: text as it is generated
    - `tool_call`: which tool is called with which arguments (with `agent` when a specialist the orchestrator asked made it)
    - `tool_result`: tool output, plus charts
-   - Team mode adds `plan`, `plan_updated`, `wave`, `spoke`, `review`, `synthesize`, `needs_human` and `charts` events
+   - Team mode adds `plan`, `plan_updated`, `wave`, `task_started`, `spoke`, `review`, `synthesize`, `needs_human` and `charts` events
+   - A 1v1 reply starts with a `routing` event (difficulty, profile, tier, model, reason) right after `conversation`
+   - `model_fallback` tells the UI that a model call was repeated once on the standard model (section 14); it comes in team and 1v1 turns
    - The UI renders as events arrive
 
 ### Completion Phase
@@ -756,11 +758,11 @@ message ──► plan ─── nobody's data is needed ──► orchestrator 
                               write-up ──► chart task draws from the final answer (if there is one)
 ```
 
-- **The plan:** one model call (it sees the chat so far, so a follow-up reuses earlier answers) returns the tasks, each with an agent, a goal and the tasks it depends on. Tasks for agents that are not available are dropped, and there are at most `TEAM_MAX_TASKS` (default 6). If the call fails or the plan is unusable (a cycle, or every task dropped), the team falls back to the simple plan: every agent the message points to answers on its own. An empty plan means no specialist is needed and the orchestrator answers as in normal mode. Small talk (at most 5 words, no question mark, no data words) and a message that names exactly one agent skip the plan call.
+- **The plan:** one model call (it sees the chat so far, so a follow-up reuses earlier answers) returns the tasks, each with an agent, a goal, the tasks it depends on and a difficulty (easy, medium or hard) that picks the task's model under the user's profile (section 14). Tasks that skip the plan call (the simple plan, one named agent, replies) are medium. Tasks for agents that are not available are dropped, and there are at most `TEAM_MAX_TASKS` (default 6). If the call fails or the plan is unusable (a cycle, or every task dropped), the team falls back to the simple plan: every agent the message points to answers on its own. An empty plan means no specialist is needed and the orchestrator answers as in normal mode. Small talk (at most 5 words, no question mark, no data words) and a message that names exactly one agent skip the plan call.
 - **Waves:** a wave is the set of tasks that are ready (their inputs are done). They run at the same time, and the next wave starts when the whole wave is back, so a fast task waits for the slowest one in its wave. A task receives the user's message, its goal and the results of the tasks it depends on (the text and the tables, so no model copies data). If every input of a task failed or found nothing, the task is skipped; if only some did, it runs and is told which are missing. A planned task with no input of its own waits for the tasks that read the user's files and gets their results; it still runs if those find nothing. The fallback plan runs every agent at once.
 - **Withdrawal:** an agent whose sources hold nothing on its task withdraws, and the others go on. When every agent withdraws, the orchestrator answers as in normal mode and says plainly that those agents found nothing.
 - **Write-up:** the orchestrator writes one answer from the results. When a single agent took part and nothing is in doubt, its own answer is shown as is, with no extra model call. The write-up names the cause of a difference (definition, date, source, error or unknown), keeps what was observed in the data apart from a possible explanation, and lists open doubts and any task that never ran.
-- **Chart task:** the chart agent works last, on the final answer, because it should chart only data that survived the checks. It draws from the answer's table, or from figures written in the answer when there is no table, and never adds or changes a figure. If it fails, the answer is shown without a chart. Nothing waits for a chart task.
+- **Chart task:** the chart agent works last, on the final answer, because it should chart only data that survived the checks. It draws from the answer's table, or from figures written in the answer when there is no table, and never adds or changes a figure. If it fails, the answer is shown without a chart. The Activity popup shows its difficulty and model like any other task's. Nothing waits for a chart task.
 - **Pause:** if the answers cannot go on without something only the user knows (for example which of two files they mean), the judge asks one short question and the chat waits. The user's next message resumes the same turn. If it names an agent that is not taking part yet, that agent gets a task and runs one wave before the judge looks again; a free-text answer brings nobody in.
 
 ### Checks
@@ -783,7 +785,7 @@ The same review call can add tasks the results call for: a document reveals a re
 
 ### The judge model
 
-The judge is one structured model call per reviewed wave. It uses the account's own model from Settings, the same one as the plan call and the agents (there is no separate judge model setting any more). Three judges were measured on the round table's board, on the same scenarios, with the old fixed models:
+The judge is one structured model call per reviewed wave. It uses the standard model from Settings, the same one as the plan call (there is no separate judge model setting any more). Three judges were measured on the round table's board, on the same scenarios, with the old fixed models:
 
 | Judge | Result |
 |---|---|
@@ -895,9 +897,9 @@ Every account, the admin's included, chats on its own model server: an OpenAI-co
 
 ### Storage
 
-- Table `model_settings`: `user_id` (PK, FK to `users`, deleted with the account), `base_url`, `model`, `api_key` (Fernet token), `updated_at`. Created by `init_db`; `READER_TABLES` lists it, so `agent_reader` can SELECT it.
+- Table `model_settings`: `user_id` (PK, FK to `users`, deleted with the account), `base_url`, `model` (the standard model), `small_model` and `strong_model` (both nullable), `profile` (`economy`, `balanced` or `advanced`, default `balanced`), `api_key` (Fernet token), `updated_at`. Created by `init_db`, which also adds the three 0.6.0 columns with `ADD COLUMN IF NOT EXISTS`; `READER_TABLES` lists the table, so `agent_reader` can SELECT it. An existing row with only `model` set runs every task on `model`.
 - `MODEL_KEY_SECRET` (Fernet key) encrypts the key. It is required at startup of the main app and of every agent server. Changing it makes saved keys unreadable, so users enter them again.
-- `GET /api/model-settings` returns `base_url`, `model` and `key_hint` (`sk-…` + last 4), never the key. `PUT` saves, `DELETE` clears. All three are scoped by `user_id` (`app/api/routes_model_settings.py`, `app/core/model_settings.py`).
+- `GET /api/model-settings` returns `base_url`, `model`, `small_model`, `strong_model`, `profile` and `key_hint` (`sk-…` + last 4), never the key. `PUT` saves (`profile` must be one of the three, else 400; each set model not listed by the endpoint gets a warning naming its slot), `DELETE` clears. `GET /api/model-settings/models` lists the endpoint's model ids for the dropdowns (empty on any failure). All three are scoped by `user_id` (`app/api/routes_model_settings.py`, `app/core/model_settings.py`).
 
 ### Saving: the connection check
 
@@ -909,11 +911,40 @@ Every account, the admin's included, chats on its own model server: an OpenAI-co
 
 ### Model calls
 
-- `get_chat_model(user_id)` (`app/core/llm.py`) loads the user's row, checks endpoint safety and returns a `ChatOpenAI` client for that endpoint, key and model (temperature 0, `stream_usage=True`, `max_retries=1`). `_build_chat_model` is `lru_cache`d on (base_url, model, api_key, streaming), so saving new settings yields a new client; the endpoint check runs when a client is built. No row raises `NoModelSettings`. It never reads `EMBED_API_KEY`.
-- **Agents** (`app/agents/factory.py`): a `user_model` middleware, first in the list, replaces each call's model with the user's. `build_agent` gets a placeholder model with no usable key, so a call that skipped the middleware fails rather than spending anyone's key.
+- `get_chat_model(user_id, tier="standard")` (`app/core/llm.py`) loads the user's row, applies `pick_model` for the tier, checks endpoint safety and returns a `ChatOpenAI` client for that endpoint, key and model (temperature 0, `stream_usage=True`, `max_retries=1`). `_build_chat_model` is `lru_cache`d on (base_url, model, api_key, streaming), so saving new settings yields a new client; the endpoint check runs when a client is built. No row raises `NoModelSettings`. It never reads `EMBED_API_KEY`.
+- **Agents** (`app/agents/factory.py`): a `user_model` middleware, first in the list, picks each call's model from the user's settings and the run's tier (`AgentContext.tier`, a name, never a key), and holds the fallback below. `build_agent` gets a placeholder model with no usable key, so a call that skipped the middleware fails rather than spending anyone's key.
 - **Direct calls** pass the `user_id` they already have: the team planner and judge, fact extraction, document cards.
 - **Agent servers** call the same `get_chat_model`. They read the row themselves as `agent_reader` and decrypt it with the same `MODEL_KEY_SECRET`. The key never travels in request bodies, headers or `AgentContext`, so it stays out of traces and run records.
 - **Errors**: `openai.AuthenticationError` and `RateLimitError` messages name the user's server host. The OpenRouter `usage.cost` capture stays, so a cost figure shows only when the endpoint reports one.
+
+### Profiles and tiers (0.6.0)
+
+Each account chooses a **profile** and up to three models on its one endpoint: the standard model (`model`, required), a small model and a strong model (both optional; empty means standard). Settings shows the profile as three cards (Economy, Balanced (recommended), Advanced) and the models as dropdowns filled from the endpoint's list.
+
+Every task gets a tier from its difficulty and the profile (`pick_tier`, fixed table):
+
+| Difficulty | Economy | Balanced | Advanced |
+|---|---|---|---|
+| easy | small | small | standard |
+| medium | small | standard | strong |
+| hard | standard | strong | strong |
+
+- **Team tasks** are rated easy, medium or hard by the plan call (section 11); a follow-up is rated by the review that adds it. Tasks that skip both (the simple plan, one named agent, replies) are medium. Planning, review, the write-up and the chart task always use standard.
+- **1v1 replies** have no plan call, so every message counts as medium.
+- Fact extraction and document cards always use standard.
+- An empty small or strong slot resolves to standard.
+
+**Fallback.** When a model call on small or strong fails with a model-level error, the same call is repeated once on standard, and the rest of that agent run stays on standard. Only if no token has streamed yet.
+
+| Category | Error |
+|---|---|
+| `model_not_found` | 404 |
+| `unsupported` | 400 (other than context length) |
+| `context_length` | 400 with `context_length_exceeded` |
+| `server_error` | 5xx, timeout or connection error |
+| `rate_limit` | 429 (limits are per model upstream, so standard can still answer) |
+
+Not retried: auth and budget errors (every slot shares one key, so a second call cannot help), a task already on standard, and a failure of the repeated call. A failed attempt is not counted as usage; the pair counts as one call toward the per-message call limit. The reply records the fallback (`from_model`, `to_model`, `category`) and the UI gets a `model_fallback` event. Errors are shown as their category and status only, never the provider's raw text or the key.
 
 ### Endpoint safety
 

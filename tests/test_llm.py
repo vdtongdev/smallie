@@ -57,6 +57,17 @@ def test_changed_key_gets_a_new_client(user_settings):
     assert second.openai_api_key.get_secret_value() == "sk-new"
 
 
+def test_tier_selects_the_slot_model(user_settings):
+    user_settings["value"] = ModelSettings("https://api.deepseek.com/v1", "std", "k", small_model="sm", strong_model="st")
+    assert get_chat_model("u1", tier="strong").model_name == "st"
+    assert get_chat_model("u1", tier="small").model_name == "sm"
+
+
+def test_no_tier_is_standard(user_settings):
+    user_settings["value"] = ModelSettings("https://api.deepseek.com/v1", "std", "k", small_model="sm", strong_model="st")
+    assert get_chat_model("u1").model_name == "std"
+
+
 def test_openrouter_headers_only_for_openrouter(user_settings):
     user_settings["value"] = ModelSettings("https://openrouter.ai/api/v1", "m", "k")
     assert get_chat_model("u1").default_headers

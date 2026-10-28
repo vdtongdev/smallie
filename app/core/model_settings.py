@@ -19,6 +19,9 @@ class ModelSettings:
     base_url: str
     model: str
     api_key: str
+    small_model: str | None = None  # tier slots; None = use `model`
+    strong_model: str | None = None
+    profile: str = "balanced"
 
 
 def _fernet() -> Fernet:
@@ -49,12 +52,18 @@ def load_settings(user_id: str) -> ModelSettings | None:
     except InvalidToken:
         log.warning("Model API key of user %s does not decrypt (MODEL_KEY_SECRET changed?)", user_id)
         return None
-    return ModelSettings(row.base_url, row.model, key)
+    return ModelSettings(row.base_url, row.model, key, row.small_model, row.strong_model, row.profile)
 
 
-def save_settings(user_id: str, base_url: str, model: str, api_key: str | None) -> None:
-    """Upsert. `api_key=None` keeps the stored key."""
-    values = {"base_url": base_url, "model": model, "updated_at": func.now()}
+def save_settings(user_id: str, base_url: str, model: str, api_key: str | None, *,
+                  small_model: str | None = None, strong_model: str | None = None,
+                  profile: str | None = None) -> None:
+    """Upsert. `api_key=None` keeps the stored key, `profile=None` the stored profile (new rows get
+    "balanced"). The small and strong slots are written as given: None clears them."""
+    values = {"base_url": base_url, "model": model, "small_model": small_model,
+              "strong_model": strong_model, "updated_at": func.now()}
+    if profile is not None:
+        values["profile"] = profile
     if api_key is None:  # keep the stored key: update the row, it must exist
         if _stored(user_id) is None:
             raise ValueError("API key required")

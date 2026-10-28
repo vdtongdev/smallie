@@ -51,6 +51,7 @@ class AgentContext:
     sources: tuple[str, ...] = ()  # sources the agent may use (team mode); empty = no limit
     failed: str = ""  # route that already gave up on the latest message (the orchestrator's fallback)
     deny_tools: tuple[str, ...] = ()  # tools hidden from the agent and refused if called (team mode: charts have one drawer)
+    tier: str = "standard"  # model slot for this run: small, standard or strong (a tier, never a model name or key)
 
 
 def memory_namespace(user_id: str) -> tuple[str, ...]:

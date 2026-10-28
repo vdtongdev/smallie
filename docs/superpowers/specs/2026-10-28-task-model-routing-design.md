@@ -59,11 +59,13 @@ Unknown `profile` values read as `balanced`; unknown tiers as `standard`.
 
 - `Task` (`app/orchestration/team_plan.py`) gets `difficulty: str = "medium"` and `difficulty_reason: str = ""`. Both have defaults: a missing required field rejects the whole plan (trap `structured-output-required-fields`).
 - `PLAN_PROMPT` gets the rules, written about the task, never the agent:
-  - **easy**: a clear, bounded task; a single lookup, extraction or straightforward tool use.
-  - **medium**: several steps, ordinary research, a non-trivial query, combining a little evidence.
+  - **easy**: a clear, bounded task; a single lookup, extraction or straightforward tool use. A database query for items the user named or holds (several tickers or holdings, lookups, simple sums or averages) is easy.
+  - **medium**: several steps, ordinary research, combining a little evidence, or a database query that needs judgement about what to compare or how to define a figure.
   - **hard**: real ambiguity, conflicting evidence, comparing several sources, nuanced synthesis.
-- `validate_plan` lowercases the value; anything other than the three becomes `medium`. Each workspace task records `difficulty_source`: `plan` or `default`.
-- Tasks that skip the plan call take `medium`, source `default`: fallback plan, one named agent, retry tasks (`retry_tasks` keeps the old task's difficulty when it has one), reply tasks, follow-ups from the review.
+- The three definitions are one shared constant, `DIFFICULTY_LEVELS` (`app/orchestration/prompts.py`), used by `PLAN_PROMPT` and `BOARD_PROMPT`, so the plan call and the review rate by the same rules.
+- `validate_plan` lowercases the value; anything other than the three becomes `medium`. Each workspace task records `difficulty_source`: `plan`, `review` or `default`.
+- A follow-up added by the review carries the review's `difficulty` and `difficulty_reason` (source `review`); a missing or invalid rating falls back to `medium`, source `default`.
+- Tasks that skip the plan call take `medium`, source `default`: fallback plan, one named agent, retry tasks (`retry_tasks` keeps the old task's difficulty when it has one), reply tasks.
 
 ## 1v1 mode
 

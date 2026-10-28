@@ -37,7 +37,8 @@ GRAPH = "agent"  # the graph name in langgraph.json; every agent server serves o
 # steps already streamed, so the chat events skip it.
 RUN_NODE = "run"
 # Errors a remote specialist reports by name only, raised again as the exceptions the chat route
-# turns into its "rate limit" / "invalid key" messages.
+# turns into its "rate limit" / "invalid key" messages. Matched by name suffix, so
+# langchain_openai's OpenAI-prefixed subclasses count too.
 _OPENAI_ERRORS = {"RateLimitError": (openai.RateLimitError, 429),
                   "AuthenticationError": (openai.AuthenticationError, 401)}
 
@@ -192,7 +193,10 @@ def _openai_error(exc: RemoteException, url: str) -> Exception:
     data = exc.args[0] if exc.args and isinstance(exc.args[0], dict) else {}
     if data.get("error") == "NoModelSettings":
         return NoModelSettings()
-    if found := _OPENAI_ERRORS.get(data.get("error", "")):
+    name = str(data.get("error", ""))
+    # endswith: langchain_openai's subclasses (OpenAIRateLimitError, OpenAIAuthenticationError)
+    found = next((v for k, v in _OPENAI_ERRORS.items() if name.endswith(k)), None)
+    if found:
         cls, status = found
         response = httpx.Response(status, request=httpx.Request("POST", url))
         return cls(f"{data['error']} from the {url} agent", response=response, body=None)

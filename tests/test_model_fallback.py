@@ -107,7 +107,7 @@ async def test_small_404_repeats_on_standard(monkeypatch):
     result = _unwrap(await factory.user_model.awrap_model_call(_request("small"), handler))
     assert handler.models == ["tiny", "std"]
     assert result.result[-1].text == "from std"
-    assert result.result[-1].response_metadata["fallback"] == {"from_model": "tiny", "category": "model_not_found"}
+    assert result.result[-1].response_metadata["fallback"] == {"from_model": "tiny", "to_model": "std", "category": "model_not_found"}
 
 
 async def test_fallback_sticks_for_the_run(monkeypatch):
@@ -176,7 +176,7 @@ async def test_rate_limit_repeats_on_standard(monkeypatch, cls, tier):
     assert handler.models == ["tiny", "std"]
     result = _unwrap(first)
     assert result.result[-1].text == "from std"
-    assert result.result[-1].response_metadata["fallback"] == {"from_model": "tiny", "category": "rate_limit"}
+    assert result.result[-1].response_metadata["fallback"] == {"from_model": "tiny", "to_model": "std", "category": "rate_limit"}
     assert first.command.update == {"tier_failed": True}
 
 
@@ -231,7 +231,7 @@ async def test_model_fallback_event_is_emitted(monkeypatch):
     events = []
     monkeypatch.setattr(factory, "get_stream_writer", lambda: events.append)
     await factory.user_model.awrap_model_call(_request("small"), Handler())
-    assert events == [{"type": "model_fallback", "from_model": "tiny", "category": "model_not_found"}]
+    assert events == [{"type": "model_fallback", "from_model": "tiny", "to_model": "std", "category": "model_not_found"}]
 
 
 def test_context_crosses_to_agent_server():

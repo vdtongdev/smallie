@@ -1997,6 +1997,44 @@ async def test_fallback_reaches_trace(monkeypatch):
     assert next(r for r in transcript["results"].values() if r["agent"] == "sql")["fallback"] == fell
 
 
+async def test_task_start_event_carries_the_trace_before_spoke(monkeypatch):
+    _profile(monkeypatch, "economy")
+    _plan(monkeypatch, _rated("medium", "hard"))
+    _board(monkeypatch, then=Board())
+    _, assistant = _two(monkeypatch, [])
+    chunks = await _stream(assistant, _ask())
+    started = {e["agent"]: e for e in _events(chunks, "task_started")}
+    assert set(started) == {"sql", "research"}
+    assert (started["sql"]["difficulty"], started["sql"]["tier"], started["sql"]["model"]) == ("medium", "small", "small-model")
+    assert (started["research"]["difficulty"], started["research"]["tier"], started["research"]["model"]) == ("hard", "standard", "std-model")
+    assert started["sql"]["task"] and started["sql"]["reason"] and SECRET not in json.dumps(started)
+    order = [(c["type"], c["task"]) for mode, c in chunks if mode == "custom" and c["type"] in ("task_started", "spoke")]
+    for event in started.values():
+        assert order.index(("task_started", event["task"])) < order.index(("spoke", event["task"]))
+
+
+async def test_chart_task_records_and_announces_its_trace(monkeypatch):
+    _profile(monkeypatch, "economy")
+    _plan(monkeypatch, Plan(tasks=[Task(id="t1", agent="sql", goal="a", difficulty="easy"),
+                                   Task(id="t2", agent="chart", goal="c", difficulty="hard")]))
+    _board(monkeypatch, then=Board())
+    fell = {"from_model": "small-model", "to_model": "std-model", "category": "rate_limit"}
+    model = per_agent(orchestrator=[AIMessage("Final.")])
+    assistant = _assistant(monkeypatch, model, sql=Fake("sql", "Cap.", log=[], table=TABLE),
+                           research=Fake("research", "Notes.", log=[]),
+                           chart=Fake("chart", "Drawn.", log=[], tools=False, meta={"fallback": fell}))
+    chunks = await _stream(assistant, _ask("chart AAPL"))
+    started = next(e for e in _events(chunks, "task_started") if e["agent"] == "chart")
+    assert (started["difficulty"], started["tier"], started["model"]) == ("hard", "standard", "std-model")
+    spoke = next(e for e in _events(chunks, "spoke") if e["agent"] == "chart")
+    assert (spoke["task"], spoke["difficulty"], spoke["tier"], spoke["model"]) == ("t2", "hard", "standard", "std-model")
+    assert spoke["fallback"] == fell and spoke["duration_s"] >= 0 and "model_calls" in spoke["usage"]
+    transcript = (await _thread(assistant))[-1].additional_kwargs["team"]
+    saved = transcript["results"]["t2"]
+    assert (saved["difficulty"], saved["tier"], saved["model"], saved["profile"]) == ("hard", "standard", "std-model", "economy")
+    assert saved["fallback"] == fell and "usage" in saved and SECRET not in json.dumps(transcript, default=str)
+
+
 async def test_writeup_and_draw_use_standard(monkeypatch):
     _profile(monkeypatch, "economy")
     _plan(monkeypatch, Plan(tasks=[Task(id="t1", agent="sql", goal="a", difficulty="easy"),

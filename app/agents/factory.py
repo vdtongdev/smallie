@@ -105,12 +105,12 @@ class UserModel(AgentMiddleware[TierState, AgentContext]):
                         tier, category, getattr(e, "status_code", None))
         standard = await asyncio.to_thread(get_chat_model, context.user_id)
         response = await handler(request.override(model=standard))
-        from_model = getattr(model, "model_name", "")
+        from_model, to_model = getattr(model, "model_name", ""), getattr(standard, "model_name", "")
         message = response.result[-1] if response.result else None
         if isinstance(message, AIMessage):
-            message.response_metadata["fallback"] = {"from_model": from_model, "category": category}
+            message.response_metadata["fallback"] = {"from_model": from_model, "to_model": to_model, "category": category}
         try:
-            get_stream_writer()({"type": "model_fallback", "from_model": from_model, "category": category})
+            get_stream_writer()({"type": "model_fallback", "from_model": from_model, "to_model": to_model, "category": category})
         except RuntimeError:
             pass  # not inside a streamed run
         return ExtendedModelResponse(model_response=response, command=Command(update={"tier_failed": True}))

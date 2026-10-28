@@ -436,6 +436,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
                  "difficulty_reason": task["difficulty_reason"], "profile": profile, "tier": tier, "model": model,
                  "reason": reason, "fallback": None}
         entry = {"agent": route, "round": task["round"], "tools": [], "artifacts": {}}
+        emit({"type": "task_started", "task": tid, "agent": route, **trace})
 
         def done(text: str, status: str, budget: bool = False) -> dict:
             result = {**entry, **trace, "usage": counter.totals(), "duration_s": round(time.monotonic() - started, 2),
@@ -682,15 +683,22 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         for task in (t for t in workspace["tasks"] if t["status"] == "pending" and ANSWER in t["depends_on"]):
             route, tid = task["agent"], task["id"]
             emit({"type": "speaker", "agent": route, "task": tid, "ns": config["configurable"]["checkpoint_ns"]})
+            saved = await asyncio.to_thread(load_settings, runtime.context.user_id)
+            profile = saved.profile if saved else "balanced"
+            model, tier, reason = pick_model(saved, "standard") if saved else ("", "standard", "standard model")
+            trace = {"difficulty": task["difficulty"], "difficulty_source": task["difficulty_source"],
+                     "difficulty_reason": task["difficulty_reason"], "profile": profile, "tier": tier, "model": model,
+                     "reason": reason, "fallback": None}
+            emit({"type": "task_started", "task": tid, "agent": route, **trace})
             # With a table on this turn's answer the chart agent charts that table: it may not copy numbers.
             deny = ("chart_data",) if answer.additional_kwargs.get("tables") else ()
             context = dataclasses.replace(runtime.context, sources=NO_SOURCES, deny_tools=deny, tier="standard")
             note = HumanMessage(DRAW_MESSAGE.format(language=reply_language(messages)), name=TEAM)
-            recorder = ToolRecorder()
+            recorder, counter, started = ToolRecorder(), UsageCounter(), time.monotonic()
             tools, text, charts = [], "", []
             try:
                 result = await agents[route].ainvoke({"messages": [*messages, note]},
-                                                     merge_configs(config, {"callbacks": [recorder]}), context=context)
+                                                     merge_configs(config, {"callbacks": [recorder, counter]}), context=context)
             except (openai.RateLimitError, openai.AuthenticationError):
                 raise
             except Exception as exc:  # noqa: BLE001 - the final answer stands without the chart
@@ -700,7 +708,11 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
                 turn = turn_messages(result.get("messages", []))
                 tools = result["tools"] if "tools" in result else recorder.tools or _tools(turn)
                 status[tid], text, charts = "done", by_route[route].result(result), collect(turn).get("charts", [])
-            results[tid] = {"agent": route, "round": 1, "tools": tools, "artifacts": {}, "text": text}
+                trace["fallback"] = next((m.response_metadata["fallback"] for m in turn
+                                          if isinstance(m, AIMessage) and m.response_metadata.get("fallback")), None)
+            results[tid] = {"agent": route, "round": 1, "tools": tools, "artifacts": {}, **trace, "usage": counter.totals(),
+                            "duration_s": round(time.monotonic() - started, 2), "text": text}
+            emit({"type": "spoke", "task": tid, **{k: v for k, v in results[tid].items() if k != "artifacts"}, "withdrew": False})
             artifacts.append({"charts": charts})
         update = {"results": results, "status": status}
         merged = _merge(artifacts)

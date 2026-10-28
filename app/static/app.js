@@ -393,9 +393,14 @@ function modelLine(m, agent) {
 }
 
 function fallbackLine(f, tier) {
-  const who = tier && tier !== "standard" ? tierWord(tier) : f.from_model;
   const why = t("fb_" + f.category);
-  return t("fallbackLine").replace("{model}", who).replace("{why}", why === "fb_" + f.category ? f.category : why);
+  const reason = why === "fb_" + f.category ? f.category : why;
+  if (f.to_model) { // older saved results have no `to_model`: they keep the plain line below
+    const from = tier && tier !== "standard" ? `${tierWord(tier).toLowerCase()} ${f.from_model}` : f.from_model;
+    return t("fallbackLineTo").replace("{model}", from).replace("{why}", reason).replace("{to}", f.to_model);
+  }
+  const who = tier && tier !== "standard" ? tierWord(tier) : f.from_model;
+  return t("fallbackLine").replace("{model}", who).replace("{why}", reason);
 }
 
 // The model line, its reason and any fallback, under a task's badge in the popup.
@@ -850,6 +855,10 @@ async function sendMessage(text) {
             touch(turn);
             break;
           }
+          case "task_started": // the task's model line while it runs; `spoke` replaces it with the full one
+            answerOf(event.agent, event.task).meta = event;
+            touch(turn);
+            break;
           case "spoke": { // the task's final entry: what a reload shows
             const mine = answerOf(event.agent, event.task);
             mine.text = event.text;

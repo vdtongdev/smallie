@@ -143,7 +143,7 @@ This file describes `main` plus the 0.4.0 remote agents (section 10) and the 0.5
    - `token`: text as it is generated
    - `tool_call`: which tool is called with which arguments (with `agent` when a specialist the orchestrator asked made it)
    - `tool_result`: tool output, plus charts
-   - Team mode adds `plan`, `plan_updated`, `wave`, `spoke`, `review`, `synthesize`, `needs_human` and `charts` events
+   - Team mode adds `plan`, `plan_updated`, `wave`, `task_started`, `spoke`, `review`, `synthesize`, `needs_human` and `charts` events
    - A 1v1 reply starts with a `routing` event (difficulty, profile, tier, model, reason) right after `conversation`
    - `model_fallback` tells the UI that a model call was repeated once on the standard model (section 14); it comes in team and 1v1 turns
    - The UI renders as events arrive
@@ -762,7 +762,7 @@ message ──► plan ─── nobody's data is needed ──► orchestrator 
 - **Waves:** a wave is the set of tasks that are ready (their inputs are done). They run at the same time, and the next wave starts when the whole wave is back, so a fast task waits for the slowest one in its wave. A task receives the user's message, its goal and the results of the tasks it depends on (the text and the tables, so no model copies data). If every input of a task failed or found nothing, the task is skipped; if only some did, it runs and is told which are missing. A planned task with no input of its own waits for the tasks that read the user's files and gets their results; it still runs if those find nothing. The fallback plan runs every agent at once.
 - **Withdrawal:** an agent whose sources hold nothing on its task withdraws, and the others go on. When every agent withdraws, the orchestrator answers as in normal mode and says plainly that those agents found nothing.
 - **Write-up:** the orchestrator writes one answer from the results. When a single agent took part and nothing is in doubt, its own answer is shown as is, with no extra model call. The write-up names the cause of a difference (definition, date, source, error or unknown), keeps what was observed in the data apart from a possible explanation, and lists open doubts and any task that never ran.
-- **Chart task:** the chart agent works last, on the final answer, because it should chart only data that survived the checks. It draws from the answer's table, or from figures written in the answer when there is no table, and never adds or changes a figure. If it fails, the answer is shown without a chart. Nothing waits for a chart task.
+- **Chart task:** the chart agent works last, on the final answer, because it should chart only data that survived the checks. It draws from the answer's table, or from figures written in the answer when there is no table, and never adds or changes a figure. If it fails, the answer is shown without a chart. The Activity popup shows its difficulty and model like any other task's. Nothing waits for a chart task.
 - **Pause:** if the answers cannot go on without something only the user knows (for example which of two files they mean), the judge asks one short question and the chat waits. The user's next message resumes the same turn. If it names an agent that is not taking part yet, that agent gets a task and runs one wave before the judge looks again; a free-text answer brings nobody in.
 
 ### Checks
@@ -944,7 +944,7 @@ Every task gets a tier from its difficulty and the profile (`pick_tier`, fixed t
 | `server_error` | 5xx, timeout or connection error |
 | `rate_limit` | 429 (limits are per model upstream, so standard can still answer) |
 
-Not retried: auth and budget errors (every slot shares one key, so a second call cannot help), a task already on standard, and a failure of the repeated call. A failed attempt is not counted as usage; the pair counts as one call toward the per-message call limit. The reply records the fallback (`from_model`, `category`) and the UI gets a `model_fallback` event. Errors are shown as their category and status only, never the provider's raw text or the key.
+Not retried: auth and budget errors (every slot shares one key, so a second call cannot help), a task already on standard, and a failure of the repeated call. A failed attempt is not counted as usage; the pair counts as one call toward the per-message call limit. The reply records the fallback (`from_model`, `to_model`, `category`) and the UI gets a `model_fallback` event. Errors are shown as their category and status only, never the provider's raw text or the key.
 
 ### Endpoint safety
 

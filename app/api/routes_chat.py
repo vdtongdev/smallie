@@ -31,7 +31,7 @@ from app.core.usage import UsageCounter, add_usage
 router = APIRouter(tags=["chat"])
 log = logging.getLogger(__name__)
 
-TEAM_EVENTS = frozenset({"plan", "plan_updated", "wave", "review", "synthesize", "needs_human", "spoke", "charts"})  # custom events of a team turn
+TEAM_EVENTS = frozenset({"plan", "plan_updated", "wave", "review", "synthesize", "needs_human", "task_started", "spoke", "charts"})  # custom events of a team turn
 UI_EVENTS = TEAM_EVENTS | {"model_fallback"}  # custom events the UI gets, in a team turn or a 1v1 reply
 
 

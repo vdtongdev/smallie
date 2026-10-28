@@ -548,6 +548,11 @@ async def test_routing_event_has_no_key(monkeypatch):
     assert "SECRET-KEY" not in str(routing) and "api_key" not in routing
 
 
+async def test_task_started_event_reaches_ui():
+    started = {"type": "task_started", "task": "t1", "agent": "sql", "tier": "small", "model": "m", "difficulty": "easy"}
+    assert _to_events("custom", started, ("team:T",)) == [started]
+
+
 async def test_model_fallback_event_reaches_ui():
     fallback = {"type": "model_fallback", "from_model": "small-m", "category": "model not found"}
     assert _to_events("custom", fallback, ("orchestrator:1",)) == [fallback]

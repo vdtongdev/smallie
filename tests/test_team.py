@@ -1906,3 +1906,201 @@ async def test_plan_rerun_after_a_note_takes_the_request_and_note_as_its_goal(mo
 
     final = (await _thread(assistant))[-1]
     assert final.additional_kwargs["team"]["goal"] == f"{SQL_QUESTION}\n\n{note}"
+
+
+# --- steer notes (stop and resume) ---
+
+from app.agents.base import STEER
+from app.core.prompts import STEER_MESSAGE
+from app.orchestration.stopping import add_note, is_stopped
+
+NOTE_HEADING = "USER NOTES added after a stop:"
+
+
+def _task_notes(log, agent):
+    return [e["last"].text for e in _starts(log, agent)]
+
+
+async def _cancel_when(assistant, first, started_agent, log, config):
+    """Run until `started_agent` has started (its Fake is sleeping), then cancel the run."""
+    task = asyncio.create_task(_stream(assistant, first, config))
+    while not _starts(log, started_agent):
+        await asyncio.sleep(0.01)
+    await asyncio.sleep(0.05)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert is_stopped(await assistant.aget_state(config))
+
+
+async def _resume(assistant, config):
+    return [(mode, chunk) async for _, mode, chunk in assistant.astream(
+        None, config, context=TEAM_CONTEXT, stream_mode=["messages", "updates", "custom"], subgraphs=True)]
+
+
+def _ends(log, agent):
+    return [e for e in log if e["event"] == "end" and e["agent"] == agent]
+
+
+async def test_team_stopped_mid_wave_reruns_only_unfinished(monkeypatch):
+    log = []
+    plan = Plan(tasks=[Task(id="t1", agent="docs", goal="extract"), Task(id="t2", agent="sql", goal="check", depends_on=["t1"])])
+    plans = _plan(monkeypatch, plan)
+    _board(monkeypatch, then=Board())
+    sql = Fake("sql", "SQL TEXT", log=log, delay=30)
+    agents = {"docs": Fake("docs", "DOCS TEXT", log=log), "sql": sql, "research": Fake("research", "R", log=log)}
+    model = per_agent(orchestrator=[AIMessage("Final.")])
+    assistant = _assistant(monkeypatch, model, documents=("handbook.pdf",), **agents)
+    config = {"configurable": {"thread_id": "stop1"}}
+
+    await _cancel_when(assistant, _ask(THREE), "sql", log, config)
+    sql.delay = 0
+    await _resume(assistant, config)
+
+    assert len(plans) == 1
+    assert len(_starts(log, "docs")) == 1 and len(_ends(log, "docs")) == 1
+    assert len(_ends(log, "sql")) == 1 and len(_starts(log, "sql")) == 2
+    thread = await _thread(assistant, config)
+    assert thread[-1].text == "Final." and not is_stopped(await assistant.aget_state(config))
+
+
+async def test_team_note_reruns_only_the_cut_off_wave(monkeypatch):
+    log = []
+    plan = Plan(tasks=[Task(id="t1", agent="docs", goal="extract"),
+                       Task(id="t2", agent="sql", goal="check", depends_on=["t1"]),
+                       Task(id="t3", agent="research", goal="look", depends_on=["t1"])])
+    plans = _plan(monkeypatch, plan)
+    _board(monkeypatch, then=Board())
+    research = Fake("research", "R TEXT", log=log, delay=30)
+    agents = {"docs": Fake("docs", "DOCS TEXT", log=log), "sql": Fake("sql", "SQL TEXT", log=log), "research": research}
+    model = per_agent(orchestrator=[AIMessage("Final.")])
+    assistant = _assistant(monkeypatch, model, documents=("handbook.pdf",), **agents)
+    config = {"configurable": {"thread_id": "stop2"}}
+
+    await _cancel_when(assistant, _ask(THREE), "research", log, config)
+    assert len(_ends(log, "sql")) == 1  # t2 returned before the cut
+    research.delay = 0
+    await add_note(assistant, config, "N-NOTE")
+    await _resume(assistant, config)
+
+    assert len(plans) == 1 and len(_starts(log, "docs")) == 1
+    assert len(_ends(log, "sql")) == 2 and len(_ends(log, "research")) == 1
+    for agent in ("sql", "research"):
+        assert NOTE_HEADING in _task_notes(log, agent)[-1] and "N-NOTE" in _task_notes(log, agent)[-1]
+    assert NOTE_HEADING not in _task_notes(log, "docs")[0]
+    thread = await _thread(assistant, config)
+    assert [(m.text, m.name) for m in thread[:3]] == [(THREE, None), ("N-NOTE", None), (STEER_MESSAGE, STEER)]
+    assert thread[-1].text == "Final."
+
+
+class Seeing(Fake):
+    """A Fake that also keeps the texts of every input it got."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.inputs = []
+
+    async def ainvoke(self, input, config=None, **kwargs):
+        self.inputs.append([m.text for m in input["messages"]])
+        return await super().ainvoke(input, config, **kwargs)
+
+
+def _slow_first(result):
+    """A scripted plan or board call that hangs on its first call (until cancelled), then returns `result`.
+    Returns the fake and the list of messages it was asked with."""
+    asked = []
+
+    async def fake(messages, *args, **kwargs):
+        asked.append([m.text for m in messages])
+        if len(asked) == 1:
+            await asyncio.sleep(30)
+        return result
+
+    return fake, asked
+
+
+async def _cancel_once(assistant, first, config, reached):
+    """Run until `reached()` is true, then cancel the run."""
+    task = asyncio.create_task(_stream(assistant, first, config))
+    while not reached():
+        await asyncio.sleep(0.01)
+    await asyncio.sleep(0.05)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert is_stopped(await assistant.aget_state(config))
+
+
+async def _noted_thread(assistant, config):
+    thread = await _thread(assistant, config)
+    assert [(m.text, m.name) for m in thread[:3]] == [(THREE, None), ("N-NOTE", None), (STEER_MESSAGE, STEER)]
+    assert thread[-1].text == "Final." and not is_stopped(await assistant.aget_state(config))
+
+
+async def test_team_note_during_plan_reruns_the_plan(monkeypatch):
+    log = []
+    plan, asked = _slow_first(Plan(tasks=[Task(id="t1", agent="docs", goal="extract"),
+                                          Task(id="t2", agent="sql", goal="check", depends_on=["t1"])]))
+    monkeypatch.setattr(team, "ask_plan", plan)
+    _board(monkeypatch, then=Board())
+    agents = {n: Fake(n, f"{n} text", log=log) for n in ("docs", "sql", "research")}
+    assistant = _assistant(monkeypatch, per_agent(orchestrator=[AIMessage("Final.")]), documents=("handbook.pdf",), **agents)
+    config = {"configurable": {"thread_id": "stop-plan"}}
+
+    await _cancel_once(assistant, _ask(THREE), config, lambda: asked)
+    assert not log  # no wave ran before the cut
+    await add_note(assistant, config, "N-NOTE")
+    await _resume(assistant, config)
+
+    assert len(asked) == 2 and "N-NOTE" in asked[1]
+    assert len(_starts(log, "docs")) == 1 and len(_starts(log, "sql")) == 1
+    await _noted_thread(assistant, config)
+
+
+async def test_team_note_during_review_reruns_the_review(monkeypatch):
+    log = []
+    board, asked = _slow_first(Board())
+    monkeypatch.setattr(team, "ask_board", board)
+    _plan(monkeypatch, Plan(tasks=[Task(id="t1", agent="docs", goal="extract"),
+                                   Task(id="t2", agent="sql", goal="check", depends_on=["t1"])]))
+    agents = {n: Fake(n, f"{n} text", log=log) for n in ("docs", "sql", "research")}
+    assistant = _assistant(monkeypatch, per_agent(orchestrator=[AIMessage("Final.")]), documents=("handbook.pdf",), **agents)
+    config = {"configurable": {"thread_id": "stop-review"}}
+
+    await _cancel_once(assistant, _ask(THREE), config, lambda: asked)
+    assert len(_ends(log, "docs")) == 1 and len(_ends(log, "sql")) == 1  # both waves finished before the cut
+    await add_note(assistant, config, "N-NOTE")
+    await _resume(assistant, config)
+
+    assert len(asked) == 2 and "N-NOTE" in asked[1]
+    assert len(_starts(log, "docs")) == 1 and len(_starts(log, "sql")) == 1
+    await _noted_thread(assistant, config)
+
+
+async def test_team_note_during_a_challenge_round_reruns_that_round(monkeypatch):
+    log = []
+    docs = Seeing("docs", "DOCS TEXT", log=log)
+
+    async def board(messages, answers, config, user_id=None, inputs=None, agents=None):
+        if len(_starts(log, "docs")) == 1:  # after the plan waves: challenge t1, whose round then hangs
+            docs.delay = 30
+            return _challenge()
+        return Board()
+
+    monkeypatch.setattr(team, "ask_board", board)
+    plans = _plan(monkeypatch, _docs_then_sql())
+    agents = {"docs": docs, "sql": Fake("sql", "SQL TEXT", log=log), "research": Fake("research", "R", log=log)}
+    assistant = _assistant(monkeypatch, per_agent(orchestrator=[AIMessage("Final.")]), documents=("handbook.pdf",), **agents)
+    config = {"configurable": {"thread_id": "stop-challenge"}}
+
+    await _cancel_once(assistant, _ask(THREE), config, lambda: len(_starts(log, "docs")) == 2)
+    docs.delay = 0
+    await add_note(assistant, config, "N-NOTE")
+    await _resume(assistant, config)
+
+    assert len(plans) == 1 and len(_starts(log, "sql")) == 1
+    assert len(_starts(log, "docs")) == 3 and len(_ends(log, "docs")) == 2  # the challenge round ran again
+    again = _starts(log, "docs")[-1]["last"]
+    assert again.name == "team" and "Q-SPLIT?" in again.text  # the same round, its note as it was
+    assert "N-NOTE" in docs.inputs[-1] and "N-NOTE" not in docs.inputs[0]
+    await _noted_thread(assistant, config)

@@ -3,10 +3,12 @@
 import re
 
 from langchain_core.messages import HumanMessage
+from langgraph.constants import TASKS
 
 from app.agents.base import STEER
 from app.core.memory import TEAM_MODE
 from app.core.prompts import STEER_MESSAGE
+from app.orchestration.team import steer
 
 RESUME_WORDS = ("resume", "continue", "go on", "tiếp tục", "làm tiếp", "tiếp đi")
 RESUME_MAX_WORDS = 5
@@ -24,14 +26,19 @@ def is_resume(message: str) -> bool:
 
 
 async def add_note(assistant, config, note: str) -> None:
-    """Add the user's note and the hidden steer message to a stopped run's thread. No `as_node`: the
-    steps left stay, and the cut-off step reruns with the note. The update goes to the graph that
-    holds the cut-off step: the team's own checkpoint for a team turn, so its earlier waves stay."""
+    """Add the user's note and the hidden steer message to a stopped run's thread, so the cut-off step runs again
+    with it. No `as_node`: the steps left stay. A team turn is updated in the team's own checkpoint, so its earlier
+    waves stay, with `team.steer`'s `Command`: its `goto` names the cut-off step, which the team reaches by `Command`
+    or `Send`, so an update with no `goto` would leave nothing to run."""
+    messages = [HumanMessage(note), HumanMessage(STEER_MESSAGE, name=STEER)]
     snapshot = await assistant.aget_state(config, subgraphs=True)
-    target = next((task.state.config for task in snapshot.tasks
-                   if task.name == TEAM_MODE and hasattr(task.state, "config")), config)
-    await assistant.aupdate_state(
-        target, {"messages": [HumanMessage(note), HumanMessage(STEER_MESSAGE, name=STEER)]})
+    sub = next((task.state for task in snapshot.tasks if task.name == TEAM_MODE and hasattr(task.state, "config")), None)
+    if sub is None:
+        await assistant.aupdate_state(config, {"messages": messages})
+        return
+    saved = await assistant.checkpointer.aget_tuple(sub.config)
+    sends = saved.checkpoint["channel_values"].get(TASKS, []) if saved else []
+    await assistant.aupdate_state(sub.config, steer(sub.values, sub.next, sends, messages))
 
 
 def stop_namespace(user_id: str) -> tuple[str, ...]:

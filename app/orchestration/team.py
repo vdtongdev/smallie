@@ -310,6 +310,30 @@ def _brief(task: dict) -> dict:
     return {k: task[k] for k in ("id", "agent", "goal", "depends_on")}
 
 
+def steer(values: dict, next_nodes: Sequence[str], sends: Sequence[Send], note: list[AnyMessage]) -> Command:
+    """The update (`aupdate_state` with no `as_node`) that adds a steer note to a stopped team run and runs the
+    cut-off step again with it; earlier steps stay. `values`: the stopped team's state as `aget_state` shows it
+    (finished tasks of the cut-off step applied); `sends`: the step's pending Sends. An update drops the pending
+    Sends and schedules only the static edges of the node it is written as, and the team routes with `Command`,
+    so the update's `goto` names the step. Every task of a cut-off wave runs again, the finished ones too: a wave
+    from `dispatch` is dispatched again (its tasks pending, its entries in `history` dropped), so the task notes
+    are built with the note; a challenge or conflict round from `review` is sent again as it was, the note added
+    to its thread. Any other step (plan, review, synthesize, draw) runs again and reads the note from the state."""
+    if "speak" not in next_nodes:
+        return Command(update={"messages": note}, goto=list(next_nodes))
+    workspace = values["workspace"]
+    history = workspace["history"]
+    at = max(i for i, e in enumerate(history) if e["type"] == "wave")
+    wave = history[at]
+    again = wave["kind"] == "plan"  # `dispatch` sent it, else a review's challenge or conflict round
+    tasks = [{**t, "status": "pending" if again else "running"} if t["id"] in wave["tasks"] else t for t in workspace["tasks"]]
+    reset = {**workspace, "reset": True, "tasks": tasks, "history": history[:at] if again else history[:at + 1]}
+    if again:
+        return Command(update={"messages": note, "workspace": {**reset, "wave": wave["wave"] - 1}}, goto="dispatch")
+    return Command(update={"messages": note, "workspace": reset},
+                   goto=[Send(s.node, {**s.arg, "messages": [*s.arg["messages"], *note]}) for s in sends])
+
+
 def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
     """The `team` subgraph. `agents`: route -> compiled graph or RemoteAgent; `orchestrator`: the
     orchestrator node function (it reads `team_note` as a hidden message)."""

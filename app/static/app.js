@@ -542,12 +542,21 @@ function setBusy(busy) {
   $("newChatBtn").disabled = busy;
 }
 
-// Stops the running reply: tells the server, then drops the stream. Before the chat has an id, only the stream goes.
+// Stops the running reply. The server stops it and the stream ends with a `stopped` event; the fetch is
+// aborted only when the stream does not end by itself in time (a run the server has not registered yet,
+// or a lost request), so a reply that just finished is never marked stopped.
 async function stopReply() {
+  const { abort, ended } = state;
+  let stopped = false;
+  let failed = false;
   if (state.conversationId) {
-    await fetch(`/api/chat/${state.conversationId}/stop`, { method: "POST" }).catch(() => {});
+    try {
+      const res = await fetch(`/api/chat/${state.conversationId}/stop`, { method: "POST" });
+      stopped = !!(await res.json().catch(() => ({}))).stopped;
+    } catch { failed = true; }
   }
-  state.abort?.abort();
+  if (!failed) await Promise.race([ended, new Promise((r) => setTimeout(r, stopped ? 5000 : 1000))]);
+  abort?.abort();
 }
 
 // ---------- conversations ----------
@@ -738,7 +747,9 @@ async function sendMessage(text) {
   let finished = false;
   let waiting = false; // showing "thinking" after a fallback
   let stopped = false; // the user stopped the reply
+  let endStream;
   const abort = (state.abort = new AbortController());
+  state.ended = new Promise((resolve) => (endStream = resolve)); // settles when this stream is over
   let synthesized = false; // the team's write-up started
   // A task's answer: in the latest wave that ran it, else (a chart task after the write-up) in `drawn`.
   const answerOf = (agent, task) => {
@@ -907,19 +918,23 @@ async function sendMessage(text) {
     finishTurn(turn);
     document.querySelectorAll(".msg.assistant:empty").forEach((el) => el.remove());
     setBusy(false);
+    endStream();
     loadConversations();
     loadUsage();
   }
 }
 
+// Stop must not go through form submission: an empty required box would block it.
+$("sendBtn").addEventListener("click", (e) => {
+  if (!state.busy) return;
+  e.preventDefault();
+  stopReply();
+});
+
 $("chatForm").onsubmit = (e) => {
   e.preventDefault();
-  if (state.busy) { // the Send button became Stop; Enter in the box never stops
-    if (e.submitter === $("sendBtn")) stopReply();
-    return;
-  }
   const text = $("input").value.trim();
-  if (!text) return;
+  if (!text || state.busy) return;
   $("input").value = "";
   autoSize();
   sendMessage(text);

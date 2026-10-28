@@ -1,4 +1,5 @@
 import asyncio
+import json
 import itertools
 from dataclasses import replace
 from types import SimpleNamespace
@@ -14,7 +15,12 @@ from app.agents.registry import AGENTS, get
 from app.agents.research import agent as research_agent
 from app.core.config import get_settings
 from app.core.memory import AgentContext
+from app.core.model_settings import ModelSettings
 from app.core.prompts import reply_language
+from app.core.usage import UsageCounter, add_usage, get_usage
+from app.agents.remote import RemoteAgent
+from langgraph.store.memory import InMemoryStore
+from app.agents import factory
 from app.orchestration import graph as graph_module
 from app.orchestration import team
 from app.orchestration.router import build_router
@@ -116,6 +122,70 @@ async def test_ask_plan_uses_the_users_model_once(monkeypatch):
     assert asked == ["u-7"] and len(calls) == 1
 
 
+NEWS = "Nvidia, Meta deepen AI ties with $3 billion investment deal (Reuters, October 27, 2026)"
+
+
+async def _planner_input(monkeypatch, thread):
+    seen = []
+
+    async def ainvoke(messages, config):
+        seen.append(messages)
+        return Plan()
+
+    monkeypatch.setattr(team, "get_chat_model", lambda user_id: SimpleNamespace(
+        with_structured_output=lambda schema, method: SimpleNamespace(ainvoke=ainvoke)))
+    await team.ask_plan(thread, [(get("sql"), RouteInfo()), (get("research"), RouteInfo())],
+                        {"callbacks": []}, user_id="u")
+    return seen[0][1].content
+
+
+async def test_planner_sees_the_earlier_answer_the_message_refers_to(monkeypatch):
+    """The user asks to analyse "the news" from the previous answer; the planner must be able to
+    see that answer, or it plans a new news search."""
+    thread = [HumanMessage("Find three recent, credible news reports about NVIDIA."),
+              AIMessage(NEWS, name="orchestrator"),
+              HumanMessage("pull the data of nvida from database and analyze if the news actually reflect")]
+    human = await _planner_input(monkeypatch, thread)
+    assert NEWS in human
+    assert human.index(NEWS) < human.index("analyze if the news")
+
+
+async def test_planner_cuts_each_earlier_message(monkeypatch):
+    thread = [HumanMessage("first"), AIMessage("A" * (team.PLAN_MESSAGE_LIMIT + 500)), HumanMessage("second")]
+    human = await _planner_input(monkeypatch, thread)
+    assert "A" * team.PLAN_MESSAGE_LIMIT in human
+    assert "A" * (team.PLAN_MESSAGE_LIMIT + 1) not in human
+
+
+async def test_planner_drops_the_oldest_turns_past_the_total_cap(monkeypatch):
+    big = team.PLAN_MESSAGE_LIMIT
+    thread = [HumanMessage("OLDEST " + "x" * big)]
+    for i in range(team.PLAN_HISTORY_LIMIT // big + 2):
+        thread += [AIMessage(f"ANSWER{i} " + "y" * big), HumanMessage(f"ask{i}")]
+    latest = "LATEST " + "z" * (big * 3)
+    thread.append(HumanMessage(latest))
+    human = await _planner_input(monkeypatch, thread)
+    assert "OLDEST" not in human
+    assert f"ANSWER{team.PLAN_HISTORY_LIMIT // big + 1} " in human
+    assert latest in human
+
+
+async def test_planner_leaves_out_hidden_notes_and_tool_messages(monkeypatch):
+    from app.orchestration.orchestrator import HIDDEN
+    hidden = next(iter(HIDDEN))
+    thread = [HumanMessage("first"), HumanMessage("HIDDENNOTE", name=hidden),
+              AIMessage("", tool_calls=[{"name": "t", "args": {}, "id": "1"}]),
+              ToolMessage("TOOLRESULT", tool_call_id="1"), AIMessage("final answer"), HumanMessage("second")]
+    human = await _planner_input(monkeypatch, thread)
+    assert "HIDDENNOTE" not in human and "TOOLRESULT" not in human
+    assert "final answer" in human
+
+
+async def test_planner_input_for_a_new_chat_has_no_chat_section(monkeypatch):
+    human = await _planner_input(monkeypatch, [HumanMessage("question?")])
+    assert human.startswith("USER MESSAGE:\nquestion?\n\nAGENTS:")
+
+
 def test_plan_prompt_formats():
     from app.orchestration.prompts import PLAN_PROMPT
     assert "6" in PLAN_PROMPT.format(language="English", max_tasks=6)
@@ -142,7 +212,8 @@ async def test_board_uses_the_users_model(monkeypatch):
 class Fake(Runnable):
     """An agent that logs when it runs and answers with scripted texts (the last one repeats)."""
 
-    def __init__(self, name, *texts, log, delay=0.0, tools=None, chart=None, table=None):
+    def __init__(self, name, *texts, log, delay=0.0, tools=None, chart=None, table=None, meta=None):
+        self.meta = meta
         self.name, self.texts, self.log, self.delay, self.chart = name, list(texts), log, delay, chart
         # A speaker answers from its source, so it calls its source tool (Task 6); the drawer has none.
         self.tools = name != "chart" if tools is None else tools
@@ -155,11 +226,11 @@ class Fake(Runnable):
     async def ainvoke(self, input, config=None, **kwargs):
         loop = asyncio.get_running_loop()
         self.log.append({"event": "start", "agent": self.name, "at": loop.time(), "last": input["messages"][-1],
-                         "sources": kwargs["context"].sources, "deny": kwargs["context"].deny_tools})
+                         "sources": kwargs["context"].sources, "deny": kwargs["context"].deny_tools, "tier": kwargs["context"].tier})
         await asyncio.sleep(self.delay)
         text = self.texts[min(self.calls, len(self.texts) - 1)]
         self.calls += 1
-        out = [AIMessage(text)]
+        out = [AIMessage(text, response_metadata=self.meta or {})]
         if self.tools:
             tool_name = "search_documents" if self.name == "docs" else "run_sql"
             out = [AIMessage("", tool_calls=[{"name": tool_name, "args": {"query": "SELECT 1"}, "id": "k1"}]),
@@ -1697,6 +1768,40 @@ async def test_follow_up_runs_with_its_inputs(monkeypatch):
     assert [(t["id"], t["origin"]) for t in final["tasks"]] == [("t1", "plan"), ("t2", "follow_up")]
 
 
+async def test_follow_up_does_not_wait_on_a_failed_task(monkeypatch):
+    log = []
+    plan = Plan(tasks=[Task(id="t1", agent="docs", goal="a"), Task(id="t2", agent="research", goal="b")])
+    _, assistant, agents = _docs_sql(monkeypatch, plan, log, docs=_Failing(), board=False)
+    _board(monkeypatch, _follow(depends_on=("t1", "t2")), then=Board())
+    await _stream(assistant, _ask(THREE))
+
+    assert agents["sql"].calls == 1
+    tasks = (await _thread(assistant))[-1].additional_kwargs["team"]["tasks"]
+    follow = next(t for t in tasks if t["origin"] == "follow_up")
+    assert follow["status"] == "done" and follow["depends_on"] == ["t2"]
+
+
+async def test_follow_up_whose_only_input_failed_still_runs(monkeypatch):
+    class FailsOnce(Fake):
+        async def ainvoke(self, input, config=None, **kwargs):
+            if self.calls == 0:
+                self.calls += 1
+                raise RuntimeError("boom")
+            return await super().ainvoke(input, config, **kwargs)
+
+    log = []
+    plan = Plan(tasks=[Task(id="t1", agent="sql", goal="a"), Task(id="t2", agent="research", goal="b"),
+                       Task(id="t3", agent="research", goal="c", depends_on=["t1", "t2"])])
+    _, assistant, agents = _docs_sql(monkeypatch, plan, log, sql=FailsOnce("sql", "SQL TEXT", log=log), board=False)
+    _board(monkeypatch, _follow(depends_on=("t1",)), then=Board())
+    await _stream(assistant, _ask(THREE))
+
+    assert agents["sql"].calls == 2
+    tasks = (await _thread(assistant))[-1].additional_kwargs["team"]["tasks"]
+    follow = next(t for t in tasks if t["origin"] == "follow_up")
+    assert follow["status"] == "done" and follow["depends_on"] == []
+
+
 async def test_follow_ups_past_the_cap_are_named(monkeypatch):
     monkeypatch.setattr(get_settings(), "team_max_tasks", 2)
     log = []
@@ -2209,3 +2314,197 @@ async def test_team_note_during_a_challenge_round_reruns_that_round(monkeypatch)
     assert again.name == "team" and "Q-SPLIT?" in again.text  # the same round, its note as it was
     assert "N-NOTE" in docs.inputs[-1] and "N-NOTE" not in docs.inputs[0]
     await _noted_thread(assistant, config)
+
+
+async def test_one_named_speaker_and_reply_tasks_are_medium_default(monkeypatch):
+    _research_does_not_join(monkeypatch)
+    _plan(monkeypatch)
+    _board(monkeypatch, Board())
+    assistant = _assistant(monkeypatch, per_agent(sql=[AIMessage("unused")]), sql=Fake("sql", "Cap is 3T.", log=[]))
+    await _stream(assistant, _ask(SQL_QUESTION))
+    tasks = (await _thread(assistant))[-1].additional_kwargs["team"]["tasks"]
+    assert [(x["difficulty"], x["difficulty_source"]) for x in tasks] == [("medium", "default")]
+
+    assistant, _, _ = await _chart_asks(monkeypatch, "check handbook.pdf")
+    tasks = (await _thread(assistant))[-1].additional_kwargs["team"]["tasks"]
+    docs = next(x for x in tasks if x["origin"] == "reply")
+    assert (docs["difficulty"], docs["difficulty_source"]) == ("medium", "default")
+
+
+def test_retry_keeps_old_difficulty():
+    spec, info = SimpleNamespace(route="sql"), RouteInfo()
+    old = {"goal": "g", "tasks": [
+        {"id": "t1", "agent": spec.route, "goal": "x", "depends_on": [], "status": "done", "origin": "plan",
+         "difficulty": "hard", "difficulty_reason": "why", "difficulty_source": "plan"},
+        {"id": "t2", "agent": spec.route, "goal": "y", "depends_on": [], "status": "done", "origin": "plan"}]}
+    messages = [HumanMessage("q"), AIMessage("a", additional_kwargs={"team": old}), HumanMessage("try again")]
+    out = team.retry_tasks(messages, [(spec, info)])
+    assert [(x["difficulty"], x["difficulty_reason"], x["difficulty_source"]) for x in out] == [
+        ("hard", "why", "plan"), ("medium", "", "default")]
+
+
+# --- each task runs on its tier and records its model ---
+
+SECRET = "sk-SECRET-KEY"
+
+
+def _profile(monkeypatch, profile):
+    saved = ModelSettings("http://x", "std-model", SECRET, small_model="small-model", strong_model="strong-model", profile=profile)
+    monkeypatch.setattr(team, "load_settings", lambda user_id: saved)
+
+
+def _rated(*levels):
+    agents = ["sql", "research"]
+    return Plan(tasks=[Task(id=f"t{i + 1}", agent=agents[i], goal=f"g{i}", difficulty=d) for i, d in enumerate(levels)])
+
+
+async def test_task_runs_on_its_tier(monkeypatch):
+    _profile(monkeypatch, "economy")
+    _plan(monkeypatch, _rated("medium", "medium"))
+    _board(monkeypatch, then=Board())
+    log = []
+    _, assistant = _two(monkeypatch, log)
+    await _stream(assistant, _ask())
+    assert {e["agent"]: e["tier"] for e in log if e["event"] == "start"} == {"sql": "small", "research": "small"}
+
+
+async def test_parallel_tasks_get_their_own_tier(monkeypatch):
+    _profile(monkeypatch, "balanced")
+    _plan(monkeypatch, _rated("easy", "hard"))
+    _board(monkeypatch, then=Board())
+    log = []
+    _, assistant = _two(monkeypatch, log)
+    await _stream(assistant, _ask())
+    assert {e["agent"]: e["tier"] for e in log if e["event"] == "start"} == {"sql": "small", "research": "strong"}
+
+
+async def test_spoke_carries_trace(monkeypatch):
+    _profile(monkeypatch, "economy")
+    _plan(monkeypatch, _rated("medium", "hard"))
+    _board(monkeypatch, then=Board())
+    _, assistant = _two(monkeypatch, [])
+    chunks = await _stream(assistant, _ask())
+    spoke = {e["agent"]: e for e in _events(chunks, "spoke")}
+    assert (spoke["sql"]["tier"], spoke["sql"]["model"]) == ("small", "small-model")
+    assert (spoke["research"]["tier"], spoke["research"]["model"]) == ("standard", "std-model")
+    assert spoke["sql"]["reason"] and spoke["sql"]["fallback"] is None
+    assert set(spoke["sql"]["usage"]) == {"model_calls", "input_tokens", "output_tokens", "cost"}
+    assert SECRET not in json.dumps([e for _, e in chunks if isinstance(e, dict)], default=str)
+    plan = _events(chunks, "plan")[0]
+    assert [t["difficulty"] for t in plan["tasks"]] == ["medium", "hard"]
+    transcript = (await _thread(assistant))[-1].additional_kwargs["team"]
+    result = next(r for r in transcript["results"].values() if r["agent"] == "sql")
+    assert result["difficulty"] == "medium" and result["difficulty_source"] == "plan" and result["profile"] == "economy"
+    assert result["model"] == "small-model" and result["duration_s"] >= 0
+    assert SECRET not in json.dumps(transcript, default=str)
+
+
+async def test_fallback_reaches_trace(monkeypatch):
+    _profile(monkeypatch, "economy")
+    _plan(monkeypatch, _rated("easy", "easy"))
+    _board(monkeypatch, then=Board())
+    fell = {"from_model": "small-model", "category": "model_not_found"}
+    model = per_agent(orchestrator=[AIMessage("Final.")])
+    assistant = _assistant(monkeypatch, model, sql=Fake("sql", "Cap.", log=[], meta={"fallback": fell}),
+                           research=Fake("research", "Notes.", log=[]))
+    chunks = await _stream(assistant, _ask())
+    spoke = {e["agent"]: e for e in _events(chunks, "spoke")}
+    assert spoke["sql"]["fallback"] == fell and spoke["research"]["fallback"] is None
+    transcript = (await _thread(assistant))[-1].additional_kwargs["team"]
+    assert next(r for r in transcript["results"].values() if r["agent"] == "sql")["fallback"] == fell
+
+
+async def test_task_start_event_carries_the_trace_before_spoke(monkeypatch):
+    _profile(monkeypatch, "economy")
+    _plan(monkeypatch, _rated("medium", "hard"))
+    _board(monkeypatch, then=Board())
+    _, assistant = _two(monkeypatch, [])
+    chunks = await _stream(assistant, _ask())
+    started = {e["agent"]: e for e in _events(chunks, "task_started")}
+    assert set(started) == {"sql", "research"}
+    assert (started["sql"]["difficulty"], started["sql"]["tier"], started["sql"]["model"]) == ("medium", "small", "small-model")
+    assert (started["research"]["difficulty"], started["research"]["tier"], started["research"]["model"]) == ("hard", "standard", "std-model")
+    assert started["sql"]["task"] and started["sql"]["reason"] and SECRET not in json.dumps(started)
+    order = [(c["type"], c["task"]) for mode, c in chunks if mode == "custom" and c["type"] in ("task_started", "spoke")]
+    for event in started.values():
+        assert order.index(("task_started", event["task"])) < order.index(("spoke", event["task"]))
+
+
+async def test_chart_task_records_and_announces_its_trace(monkeypatch):
+    _profile(monkeypatch, "economy")
+    _plan(monkeypatch, Plan(tasks=[Task(id="t1", agent="sql", goal="a", difficulty="easy"),
+                                   Task(id="t2", agent="chart", goal="c", difficulty="hard")]))
+    _board(monkeypatch, then=Board())
+    fell = {"from_model": "small-model", "to_model": "std-model", "category": "rate_limit"}
+    model = per_agent(orchestrator=[AIMessage("Final.")])
+    assistant = _assistant(monkeypatch, model, sql=Fake("sql", "Cap.", log=[], table=TABLE),
+                           research=Fake("research", "Notes.", log=[]),
+                           chart=Fake("chart", "Drawn.", log=[], tools=False, meta={"fallback": fell}))
+    chunks = await _stream(assistant, _ask("chart AAPL"))
+    started = next(e for e in _events(chunks, "task_started") if e["agent"] == "chart")
+    assert (started["difficulty"], started["tier"], started["model"]) == ("hard", "standard", "std-model")
+    spoke = next(e for e in _events(chunks, "spoke") if e["agent"] == "chart")
+    assert (spoke["task"], spoke["difficulty"], spoke["tier"], spoke["model"]) == ("t2", "hard", "standard", "std-model")
+    assert spoke["fallback"] == fell and spoke["duration_s"] >= 0 and "model_calls" in spoke["usage"]
+    transcript = (await _thread(assistant))[-1].additional_kwargs["team"]
+    saved = transcript["results"]["t2"]
+    assert (saved["difficulty"], saved["tier"], saved["model"], saved["profile"]) == ("hard", "standard", "std-model", "economy")
+    assert saved["fallback"] == fell and "usage" in saved and SECRET not in json.dumps(transcript, default=str)
+
+
+async def test_writeup_and_draw_use_standard(monkeypatch):
+    _profile(monkeypatch, "economy")
+    _plan(monkeypatch, Plan(tasks=[Task(id="t1", agent="sql", goal="a", difficulty="easy"),
+                                   Task(id="t2", agent="research", goal="b", difficulty="easy"),
+                                   Task(id="t3", agent="chart", goal="c", difficulty="easy")]))
+    _board(monkeypatch, then=Board())
+    log, model = [], per_agent(orchestrator=[AIMessage("Final.")])
+    assistant = _assistant(monkeypatch, model, sql=Fake("sql", "Cap is 3T.", log=log),
+                           research=Fake("research", "Cap is 2T.", log=log), chart=Fake("chart", "Drawn.", log=log))
+    tiers = []
+    real = factory.get_chat_model
+    monkeypatch.setattr(factory, "get_chat_model", lambda *a, **k: (tiers.append(k.get("tier", "standard")), real(*a, **k))[1])
+    config = {"configurable": {"thread_id": "t9"}}
+    async for _ in assistant.astream(_ask("chart AAPL"), config, context=replace(TEAM_CONTEXT, tier="strong"),
+                                     stream_mode=["custom"], subgraphs=True):
+        pass
+    assert tiers == ["standard"]  # the write-up
+    assert [e["tier"] for e in log if e["event"] == "start" and e["agent"] == "chart"] == ["standard"]
+
+
+
+class _Counting(Fake):
+    """An in-process agent whose model calls reach the callbacks, as a real one's do."""
+
+    async def ainvoke(self, input, config=None, **kwargs):
+        for handler in config["callbacks"].handlers if hasattr(config["callbacks"], "handlers") else config["callbacks"]:
+            if isinstance(handler, UsageCounter):
+                for _ in range(2):
+                    handler.count(AIMessage("x", usage_metadata={"input_tokens": 10, "output_tokens": 1, "total_tokens": 11}))
+        return await super().ainvoke(input, config, **kwargs)
+
+
+class _Server:
+    async def ainvoke(self, input, config=None, **kwargs):
+        usage = {"model_calls": 3, "input_tokens": 100, "output_tokens": 5, "cost": None}
+        return {"messages": [*input["messages"], AIMessage("Cap is 3T.")], "findings": "x", "usage": usage}
+
+
+async def test_task_usage_not_saved_twice(monkeypatch):
+    _plan(monkeypatch, _rated("medium", "medium"))
+    _board(monkeypatch, then=Board())
+    monkeypatch.setattr(team, "load_settings", lambda user_id: None)
+    remote = RemoteAgent(SQL, "http://sql:8000", service_token="t", timeout_s=5, remote=_Server())
+    model = per_agent(orchestrator=[AIMessage("Final.")])
+    assistant = _assistant(monkeypatch, model, sql=remote, research=_Counting("research", "Notes.", log=[]))
+    request = UsageCounter()
+    config = {**CONFIG, "callbacks": [request]}
+    chunks = await _stream(assistant, _ask(), config)
+
+    # remote task: 3 calls from the server; in-process task: 2 calls. Plus the write-up call (1, no tokens reported).
+    assert (request.model_calls, request.input_tokens, request.output_tokens) == (6, 120, 7)
+    store = InMemoryStore()
+    await add_usage(store, "u1", request)
+    assert (await get_usage(store, "u1"))["input_tokens"] == 120
+    spoke = {e["agent"]: e["usage"] for e in _events(chunks, "spoke")}
+    assert spoke["sql"]["model_calls"] == 3 and spoke["research"]["model_calls"] == 2

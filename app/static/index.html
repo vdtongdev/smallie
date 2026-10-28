@@ -174,6 +174,19 @@
         <p class="muted">Your key is stored encrypted on the server and sent only to the provider you chose. Your messages, parts of the answers and the documents you upload are also turned into search vectors (embeddings) through OpenRouter, on the app's account.</p>
 
 
+        <h2>Models and profiles</h2>
+        <p>In team mode the assistant rates every task <strong>easy</strong>, <strong>medium</strong> or <strong>hard</strong>.
+          Your <strong>profile</strong> in Settings then picks which of your models does it: the <em>small</em> model for light work,
+          the <em>standard</em> model, or the <em>strong</em> model for the hardest work. A 1v1 chat is rated the same way, once per message.</p>
+        <ul>
+          <li><strong>Economy</strong> (spend less): easy and medium tasks go to the small model, hard tasks to the standard model.</li>
+          <li><strong>Balanced</strong> (recommended): easy tasks go to the small model, medium to the standard model, hard to the strong model.</li>
+          <li><strong>Advanced</strong> (best answers): easy tasks go to the standard model, medium and hard to the strong model.</li>
+        </ul>
+        <p>The standard model is required. The small and strong models are optional: when one is empty, its tasks use the standard model.
+          If a small or strong model fails (for example the name is wrong, or the provider rate-limits it), the same step is repeated once on the standard model.
+          The <em>Activity</em> button above a reply shows which model handled each task and why.</p>
+
         <h2>Tips</h2>
         <ul>
           <li>Name what you want: a company or ticker, a time range, the number of results.</li>
@@ -272,6 +285,19 @@
         <p class="muted">Key được lưu mã hoá trên máy chủ và chỉ gửi tới nhà cung cấp bạn chọn. Tin nhắn, một phần câu trả lời và tài liệu bạn tải lên cũng được chuyển thành vector tìm kiếm (embedding) qua OpenRouter, bằng tài khoản của ứng dụng.</p>
 
 
+        <h2>Model và gói cấu hình</h2>
+        <p>Ở chế độ nhóm, trợ lý đánh giá mỗi nhiệm vụ là <strong>dễ</strong>, <strong>vừa</strong> hoặc <strong>khó</strong>.
+          <strong>Gói cấu hình</strong> trong Cài đặt rồi chọn model nào làm việc đó: model <em>nhỏ</em> cho việc nhẹ,
+          model <em>tiêu chuẩn</em>, hoặc model <em>mạnh</em> cho việc khó nhất. Chat 1v1 cũng được đánh giá như vậy, mỗi tin nhắn một lần.</p>
+        <ul>
+          <li><strong>Tiết kiệm</strong> (chi ít hơn): nhiệm vụ dễ và vừa dùng model nhỏ, nhiệm vụ khó dùng model tiêu chuẩn.</li>
+          <li><strong>Cân bằng</strong> (khuyên dùng): nhiệm vụ dễ dùng model nhỏ, vừa dùng model tiêu chuẩn, khó dùng model mạnh.</li>
+          <li><strong>Nâng cao</strong> (câu trả lời tốt nhất): nhiệm vụ dễ dùng model tiêu chuẩn, vừa và khó dùng model mạnh.</li>
+        </ul>
+        <p>Model tiêu chuẩn là bắt buộc. Model nhỏ và model mạnh là tuỳ chọn: nếu để trống, các nhiệm vụ đó dùng model tiêu chuẩn.
+          Nếu model nhỏ hoặc mạnh bị lỗi (ví dụ sai tên, hoặc nhà cung cấp giới hạn tần suất gọi), bước đó được chạy lại một lần bằng model tiêu chuẩn.
+          Nút <em>Hoạt động</em> phía trên câu trả lời cho biết model nào xử lý từng nhiệm vụ và vì sao.</p>
+
         <h2>Mẹo</h2>
         <ul>
           <li>Nói rõ điều bạn cần: tên công ty hoặc mã cổ phiếu, khoảng thời gian, số lượng kết quả.</li>
@@ -298,14 +324,39 @@
   </dialog>
 
   <dialog id="settingsDialog" aria-labelledby="settingsTitle">
+    <form method="dialog" class="dialog-close"><button class="icon-btn" data-i18n-title="close">×</button></form>
     <h2 id="settingsTitle" data-i18n="settings"></h2>
     <p id="settingsStatus" class="muted" role="status"></p>
     <label for="settingsKey" data-i18n="apiKey"></label>
     <input id="settingsKey" type="password" autocomplete="off">
     <label for="settingsUrl" data-i18n="apiEndpoint"></label>
     <input id="settingsUrl" type="text" autocomplete="off">
-    <label for="settingsModel" data-i18n="model"></label>
+    <h3 class="settings-group" data-i18n="profileGroup"></h3>
+    <div class="profile-cards" role="radiogroup">
+      <label class="profile-card"><input type="radio" name="settingsProfile" value="economy">
+        <strong data-i18n="economyProfile"></strong><span class="profile-tag" data-i18n="economyTag"></span><span class="muted" data-i18n="economyLine"></span></label>
+      <label class="profile-card"><input type="radio" name="settingsProfile" value="balanced">
+        <strong data-i18n="balancedProfile"></strong><span class="profile-tag" data-i18n="balancedTag"></span><span class="muted" data-i18n="balancedLine"></span></label>
+      <label class="profile-card"><input type="radio" name="settingsProfile" value="advanced">
+        <strong data-i18n="advancedProfile"></strong><span class="profile-tag" data-i18n="advancedTag"></span><span class="muted" data-i18n="advancedLine"></span></label>
+    </div>
+    <p class="muted" data-i18n="difficultyIntro"></p>
+    <ul class="difficulty-list muted">
+      <li><strong data-i18n="easy"></strong>: <span data-i18n="easyHelp"></span></li>
+      <li><strong data-i18n="medium"></strong>: <span data-i18n="mediumHelp"></span></li>
+      <li><strong data-i18n="hard"></strong>: <span data-i18n="hardHelp"></span></li>
+    </ul>
+    <h3 class="settings-group" data-i18n="modelsGroup"></h3>
+    <label for="settingsModel" data-i18n="standardModel"></label>
     <input id="settingsModel" type="text" autocomplete="off">
+    <select id="settingsModelSelect" hidden></select>
+    <p id="warnModel" class="slot-warning" role="status"></p>
+    <label for="settingsSmall" data-i18n="smallModel"></label>
+    <select id="settingsSmall"></select>
+    <p id="warnSmall" class="slot-warning" role="status"></p>
+    <label for="settingsStrong" data-i18n="strongModel"></label>
+    <select id="settingsStrong"></select>
+    <p id="warnStrong" class="slot-warning" role="status"></p>
     <div class="provider-table">
       <table>
         <thead><tr><th data-i18n="colProvider"></th><th data-i18n="colKeyPage"></th><th data-i18n="apiEndpoint"></th><th data-i18n="model"></th></tr></thead>

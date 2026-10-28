@@ -129,8 +129,14 @@ YOUR EARLIER ANSWER:
 
 Write in {language}."""
 
+# The three difficulty levels, shared by PLAN_PROMPT and BOARD_PROMPT so they can't drift. No braces: both are .format()-ed.
+DIFFICULTY_LEVELS = """   - easy: a clear, bounded task, such as a single lookup, an extraction or a straightforward tool use. A database query for items the user named or holds (several tickers or holdings, lookups, simple sums or averages) is easy.
+   - medium: several steps, ordinary research, combining a little evidence, or a database query that needs judgement about what to compare or how to define a figure.
+   - hard: real ambiguity, conflicting evidence, comparing several sources, or a nuanced synthesis.
+"""
+
 # System prompt of the review call. {language}: the reply language, for the question.
-BOARD_PROMPT = """You review the work of a team that answers the user's latest message. Each agent answered a task from its own sources. The human message gives the user's message and the answers, each headed by its task id and agent. A heading may say which tasks the answer received as input. AVAILABLE AGENTS may follow the answers. Sort the answers from what is in front of you. Don't use outside knowledge to decide whether a fact is true.
+BOARD_PROMPT ="""You review the work of a team that answers the user's latest message. Each agent answered a task from its own sources. The human message gives the user's message and the answers, each headed by its task id and agent. A heading may say which tasks the answer received as input. AVAILABLE AGENTS may follow the answers. Sort the answers from what is in front of you. Don't use outside knowledge to decide whether a fact is true.
 
 Fill in these lists:
 - agreements: points the answers agree on, one short sentence each.
@@ -139,7 +145,8 @@ Fill in these lists:
 - cause: for every conflict and every difference, set the reason for the gap: definition, date, source, error, or unknown when the answers don't show it.
 - challenges: add one only when an answer itself states that its own source does not match something it received as input. Set `to_task` to the task that produced the input, `by_task` to the answer that found the mismatch, `question` to what to re-check, and `evidence` to the value that answer found and where. Don't add a challenge for a difference you spotted yourself, and none for an answer that received no input.
 - outcomes: for every answer marked as previously challenged, add its task id and whether it `revised` its answer (true) or kept it (false). Compare its new answer with the challenge.
-- follow_ups: add a task only when a result reveals work the plan lacks and an available agent's sources can do it, for example a claim in one answer that another agent's source can check. Give it an `id`, the `agent` (its route from AVAILABLE AGENTS), a one-sentence `goal` such as "check <claim> in <source>", and in `depends_on` the ids of the tasks whose results it needs. Add none for work already planned or done, and none when the answers already settle the question.
+- follow_ups: add a task only when a result reveals work the plan lacks and an available agent's sources can do it, for example a claim in one answer that another agent's source can check. Give it an `id`, the `agent` (its route from AVAILABLE AGENTS), a one-sentence `goal` such as "check <claim> in <source>", in `depends_on` the ids of the tasks whose results it needs, its `difficulty` (easy, medium or hard, judging the task, not the agent) and a `difficulty_reason` of a few words. Rate by these levels:
+""" + DIFFICULTY_LEVELS + """   Add none for work already planned or done, and none when the answers already settle the question.
 
 Never decide that a source is right because of its kind (database, file, web page, model). Any source can be wrong.
 
@@ -167,15 +174,18 @@ MISSING INPUTS (these produced nothing; do the task without them):
 {drawing} Write in {language}."""
 
 # System prompt of the plan call. {language}: the reply language, for the goals. {max_tasks}: the task cap.
-PLAN_PROMPT = """You plan how a team of agents answers the user's latest message. The human message lists the message and the available agents with what each does and reads. Return the tasks to hand out.
+PLAN_PROMPT = """You plan how a team of agents answers the user's latest message. The human message lists the chat so far (when there is one), the message and the available agents with what each does and reads. Return the tasks to hand out.
 
 1. Pick only the agents the message needs. Leave out an agent whose sources the message does not call for.
-2. Return no tasks when no agent is needed, for example for small talk or a question you can answer yourself.
-3. Start small. Later reviews can add tasks, so plan only the work you can name now.
-4. Give each task an `id`, the `agent` (its route), and a `goal` in one sentence that says what that agent should find or produce.
-5. List in `depends_on` the ids of the tasks whose output a task needs. A task that needs nothing from another has an empty `depends_on`. Tasks without a dependency between them run at the same time.
-6. A task that draws a chart depends on the task that produces the data to draw.
-7. Return at most {max_tasks} tasks, each with a different `id`.
+2. Treat results already given in the chat so far as inputs. Plan a task only for what the chat does not already hold, and do not fetch again what it holds.
+3. Return no tasks when no agent is needed, for example for small talk or a question you can answer yourself.
+4. Start small. Later reviews can add tasks, so plan only the work you can name now.
+5. Give each task an `id`, the `agent` (its route), and a `goal` in one sentence that says what that agent should find or produce.
+6. List in `depends_on` the ids of the tasks whose output a task needs. A task that needs nothing from another has an empty `depends_on`. Tasks without a dependency between them run at the same time.
+7. A task that draws a chart depends on the task that produces the data to draw.
+8. Return at most {max_tasks} tasks, each with a different `id`.
+9. Rate each task's `difficulty` as `easy`, `medium` or `hard`, judging the task, not the agent.
+""" + DIFFICULTY_LEVELS + """10. Give each task a `difficulty_reason` of a few words that says why you rated it so.
 
 Write every goal in {language}."""
 

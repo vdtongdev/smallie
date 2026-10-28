@@ -2,10 +2,15 @@ import asyncio
 import json
 import logging
 from collections.abc import Callable, Sequence
+from typing import NotRequired
+
+import openai
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import (
     AgentMiddleware,
+    AgentState,
+    ExtendedModelResponse,
     ModelCallLimitMiddleware,
     ModelRequest,
     after_model,
@@ -13,15 +18,19 @@ from langchain.agents.middleware import (
     wrap_model_call,
     wrap_tool_call,
 )
+from langchain_core.callbacks import AsyncCallbackHandler
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import BaseTool
+from langgraph.config import get_stream_writer
 from langgraph.errors import GraphBubbleUp
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.store.base import BaseStore
+from langgraph.types import Command
 
 from app.core.config import get_settings
-from app.core.llm import get_chat_model, placeholder_model
+from app.core.llm import get_chat_model, pick_model, placeholder_model
 from app.core.memory import MEMORY_TOOLS, TEAM_MODE, TOOL_SOURCE, AgentContext
+from app.core.model_settings import load_settings
 from app.core.prompts import LAST_CALL_NOTE, MEMORIES_SECTION, RECENT_CHATS_SECTION, SAME_RESULT, USER_SECTION, reply_language
 
 log = logging.getLogger(__name__)
@@ -41,11 +50,73 @@ def _in_scope(tool, sources) -> bool:
     return not sources or tag is None or tag in sources
 
 
-@wrap_model_call
-async def user_model(request: ModelRequest, handler):
-    """Agents are built once at startup; the model is the calling user's, chosen per model call."""
-    model = await asyncio.to_thread(get_chat_model, request.runtime.context.user_id)
-    return await handler(request.override(model=model))
+def fallback_category(exc: BaseException) -> str | None:
+    """Why a failed call may repeat on the standard model; None for errors that would fail there too
+    (bad key) or that are not the model's (call budget, bugs). A rate limit is per model upstream, so
+    the standard model can still answer."""
+    if isinstance(exc, openai.RateLimitError):
+        return "rate_limit"
+    if isinstance(exc, openai.NotFoundError):
+        return "model_not_found"
+    if isinstance(exc, openai.BadRequestError):
+        return "context_length" if "context_length_exceeded" in f"{exc.code} {exc.message}" else "unsupported"
+    if isinstance(exc, (openai.InternalServerError, openai.APITimeoutError, openai.APIConnectionError)):
+        return "server_error"
+    return None
+
+
+class _TokenSeen(AsyncCallbackHandler):
+    """Notes that a model call streamed output."""
+
+    seen = False
+
+    async def on_llm_new_token(self, token, **kwargs):
+        self.seen = True
+
+
+class TierState(AgentState):
+    tier_failed: NotRequired[bool]  # a call of this run fell back to the standard model: later calls start there
+
+
+class UserModel(AgentMiddleware[TierState, AgentContext]):
+    """Agents are built once at startup; the model is the calling user's, chosen per model call from
+    the run's tier. A small or strong model that fails the server's way is repeated once on the
+    standard model, and the run stays there."""
+
+    state_schema = TierState
+
+    async def awrap_model_call(self, request: ModelRequest, handler):
+        context = request.runtime.context
+        tier = "standard" if request.state.get("tier_failed") else context.tier
+        model = await asyncio.to_thread(get_chat_model, context.user_id, tier=tier)
+        if tier == "standard":
+            return await handler(request.override(model=model))
+        saved = await asyncio.to_thread(load_settings, context.user_id)
+        if saved is None or pick_model(saved, tier)[1] == "standard":
+            return await handler(request.override(model=model))  # an empty slot is the standard model already
+        tokens = _TokenSeen()
+        try:
+            return await handler(request.override(model=model.model_copy(update={"callbacks": [tokens]})))
+        except Exception as e:
+            category = fallback_category(e)
+            if category is None or tokens.seen:
+                raise
+            log.warning("Model call on the %s tier fell back to standard: %s (HTTP %s)",
+                        tier, category, getattr(e, "status_code", None))
+        standard = await asyncio.to_thread(get_chat_model, context.user_id)
+        response = await handler(request.override(model=standard))
+        from_model, to_model = getattr(model, "model_name", ""), getattr(standard, "model_name", "")
+        message = response.result[-1] if response.result else None
+        if isinstance(message, AIMessage):
+            message.response_metadata["fallback"] = {"from_model": from_model, "to_model": to_model, "category": category}
+        try:
+            get_stream_writer()({"type": "model_fallback", "from_model": from_model, "to_model": to_model, "category": category})
+        except RuntimeError:
+            pass  # not inside a streamed run
+        return ExtendedModelResponse(model_response=response, command=Command(update={"tier_failed": True}))
+
+
+user_model = UserModel()
 
 
 @after_model

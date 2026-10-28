@@ -71,9 +71,16 @@ def put(env, **body):
 def test_get_never_returns_the_key(env):
     env.user()
     assert env.client.get("/api/model-settings").status_code == 404
-    assert put(env).json() == {"saved": True, "warning": None}
+    assert put(env).json() == {"saved": True, "warning": None, "warnings": {}}
     r = env.client.get("/api/model-settings")
-    assert r.json() == {"base_url": URL, "model": "m1", "key_hint": "sk-…1234"}
+    assert r.json() == {
+        "base_url": URL,
+        "model": "m1",
+        "small_model": None,
+        "strong_model": None,
+        "profile": "balanced",
+        "key_hint": "sk-…1234",
+    }
     assert KEY not in r.text
 
 
@@ -126,7 +133,11 @@ def test_unlisted_model_saves_with_a_warning(env):
     uid = env.user()
     r = put(env, model="other")
     assert r.status_code == 200
-    assert r.json() == {"saved": True, "warning": "This server doesn't list that model; check the name."}
+    assert r.json() == {
+        "saved": True,
+        "warning": "This server doesn't list that model; check the name.",
+        "warnings": {},
+    }
     assert load_settings(uid).model == "other"
 
 
@@ -179,3 +190,62 @@ def test_delete_removes_the_settings(env):
     assert env.client.delete("/api/model-settings").status_code == 204
     assert load_settings(uid) is None
     assert env.client.get("/api/model-settings").status_code == 404
+
+
+def test_get_returns_slots_and_profile_never_key(env):
+    env.user()
+    r = put(env, small_model=" s1 ", strong_model="", profile="economy")
+    assert r.status_code == 200
+    r = env.client.get("/api/model-settings")
+    assert r.json() == {
+        "base_url": URL,
+        "model": "m1",
+        "small_model": "s1",
+        "strong_model": None,
+        "profile": "economy",
+        "key_hint": "sk-…1234",
+    }
+    assert KEY not in r.text
+
+
+def test_invalid_profile_400(env):
+    uid = env.user()
+    r = put(env, profile="turbo")
+    assert r.status_code == 400
+    assert load_settings(uid) is None
+
+
+def test_unlisted_slot_model_warns_naming_slot(env):
+    uid = env.user()
+    r = put(env, strong_model="big")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["warning"] is None
+    assert set(body["warnings"]) == {"strong_model"}
+    assert "strong" in body["warnings"]["strong_model"]
+    assert load_settings(uid).strong_model == "big"
+
+
+def test_models_list_uses_saved_key(env):
+    env.user()
+    put(env)
+    env.respond(lambda request: httpx.Response(200, json={"data": [{"id": "a"}, {"id": "b"}]}))
+    r = env.client.get("/api/model-settings/models")
+    assert r.json() == {"models": ["a", "b"]}
+    assert env.sent[-1].headers["authorization"] == f"Bearer {KEY}"
+    assert KEY not in r.text
+
+
+def test_models_list_empty_on_failure(env):
+    env.user()
+    put(env)
+    env.respond(lambda request: httpx.Response(500))
+    assert env.client.get("/api/model-settings/models").json() == {"models": []}
+
+
+def test_other_user_cannot_read_slots(env):
+    env.user()
+    put(env, small_model="s1")
+    env.user()
+    assert env.client.get("/api/model-settings").status_code == 404
+    assert env.client.get("/api/model-settings/models").json() == {"models": []}

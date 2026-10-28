@@ -30,3 +30,18 @@ async def test_counter_sums_calls_and_store_keeps_totals():
     await add_usage(store, "u1", counter)
     assert await get_usage(store, "u1") == {"input_tokens": 300, "output_tokens": 50, "cost": 0.02}
     assert (await get_usage(store, "u2"))["input_tokens"] == 0
+
+
+async def test_unknown_cost_is_none():
+    counter = UsageCounter()
+    assert counter.totals()["cost"] is None
+    free = AIMessage("hi", usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2})
+    counter.count(free)
+    assert counter.totals()["cost"] is None
+    counter.count(AIMessage("hi", response_metadata={"cost": 0.0}))
+    assert counter.totals()["cost"] == 0.0  # a reported zero is known
+    other = UsageCounter()
+    other.add({"model_calls": 1, "cost": None})
+    assert other.totals()["cost"] is None
+    other.add({"model_calls": 1, "cost": 0.5})
+    assert other.totals()["cost"] == 0.5

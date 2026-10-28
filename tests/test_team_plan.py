@@ -113,6 +113,13 @@ def test_follow_ups_get_fresh_ids_and_respect_the_cap():
     assert dropped == ["f2"]
 
 
+def test_follow_up_drops_dependencies_on_dead_tasks_and_keeps_live_ones():
+    tasks = [task("t1", "failed"), task("t2", "withdrew"), task("t3", "skipped"), task("t4", "done")]
+    ups = [t("x", "sql", goal="a", deps=["t1", "t2", "t3", "t4"]), t("y", "sql", goal="b", deps=["t1"])]
+    _, added, _ = add_follow_ups(tasks, ups, ["sql"], 9)
+    assert [x["depends_on"] for x in added] == [["t4"], []]
+
+
 def test_invalid_follow_ups_are_dropped():
     tasks = [task("t1", "done")]
     ups = [t("x", "ghost"), t("y", "sql", deps=["t9"]), t("z", "sql", goal="ok", deps=["t1"])]
@@ -158,3 +165,43 @@ def test_a_dead_file_task_never_skips_its_waiters():
 def test_a_dead_planned_input_still_skips():
     tasks = [_t("t1", "docs", status="withdrew"), _t("t2", "research", ["t1"])]
     assert dead_inputs(tasks[1], tasks) == (["t1"], True)
+
+
+def test_plan_without_difficulty_parses():
+    plan = Plan.model_validate({"tasks": [{"agent": "sql", "goal": "g"}]})
+    assert plan.tasks[0].difficulty == "medium" and plan.tasks[0].difficulty_reason == ""
+
+
+def test_difficulty_normalized():
+    def rated(**kw):
+        return Task(id="t1", agent="sql", goal="g", **kw)
+
+    plan = Plan(tasks=[rated(difficulty="Hard ", difficulty_reason="why"), rated(difficulty="extreme"), rated()])
+    out = validate_plan(plan, ["sql"], 6)
+    assert [(x["difficulty"], x["difficulty_source"]) for x in out] == [
+        ("hard", "plan"), ("medium", "default"), ("medium", "default")]
+    assert out[0]["difficulty_reason"] == "why"
+
+
+def test_tasks_outside_the_plan_are_medium_default():
+    base = [{"id": "t1", "agent": "sql", "goal": "g", "depends_on": [], "status": "done"}]
+    added = add_follow_ups(base, [t("x", "docs")], ["docs", "sql"], 6)[1]
+    for x in fallback_tasks(["sql"]) + added:
+        assert (x["difficulty"], x["difficulty_reason"], x["difficulty_source"]) == ("medium", "", "default")
+
+
+def test_follow_up_rating_from_review():
+    ups = [Task(id="x", agent="sql", goal="g", difficulty="Easy ", difficulty_reason="one lookup")]
+    _, added, _ = add_follow_ups([task("t1", "done")], ups, ["sql"], 6)
+    assert (added[0]["difficulty"], added[0]["difficulty_reason"], added[0]["difficulty_source"]) == ("easy", "one lookup", "review")
+
+
+def test_follow_up_without_rating_is_medium_default():
+    _, added, _ = add_follow_ups([task("t1", "done")], [t("x", "sql")], ["sql"], 6)
+    assert (added[0]["difficulty"], added[0]["difficulty_reason"], added[0]["difficulty_source"]) == ("medium", "", "default")
+
+
+def test_follow_up_invalid_rating_is_medium_default():
+    ups = [Task(id="x", agent="sql", goal="g", difficulty="extreme", difficulty_reason="why")]
+    _, added, _ = add_follow_ups([task("t1", "done")], ups, ["sql"], 6)
+    assert (added[0]["difficulty"], added[0]["difficulty_reason"], added[0]["difficulty_source"]) == ("medium", "", "default")

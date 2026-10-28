@@ -122,6 +122,70 @@ async def test_ask_plan_uses_the_users_model_once(monkeypatch):
     assert asked == ["u-7"] and len(calls) == 1
 
 
+NEWS = "Nvidia, Meta deepen AI ties with $3 billion investment deal (Reuters, October 27, 2026)"
+
+
+async def _planner_input(monkeypatch, thread):
+    seen = []
+
+    async def ainvoke(messages, config):
+        seen.append(messages)
+        return Plan()
+
+    monkeypatch.setattr(team, "get_chat_model", lambda user_id: SimpleNamespace(
+        with_structured_output=lambda schema, method: SimpleNamespace(ainvoke=ainvoke)))
+    await team.ask_plan(thread, [(get("sql"), RouteInfo()), (get("research"), RouteInfo())],
+                        {"callbacks": []}, user_id="u")
+    return seen[0][1].content
+
+
+async def test_planner_sees_the_earlier_answer_the_message_refers_to(monkeypatch):
+    """The user asks to analyse "the news" from the previous answer; the planner must be able to
+    see that answer, or it plans a new news search."""
+    thread = [HumanMessage("Find three recent, credible news reports about NVIDIA."),
+              AIMessage(NEWS, name="orchestrator"),
+              HumanMessage("pull the data of nvida from database and analyze if the news actually reflect")]
+    human = await _planner_input(monkeypatch, thread)
+    assert NEWS in human
+    assert human.index(NEWS) < human.index("analyze if the news")
+
+
+async def test_planner_cuts_each_earlier_message(monkeypatch):
+    thread = [HumanMessage("first"), AIMessage("A" * (team.PLAN_MESSAGE_LIMIT + 500)), HumanMessage("second")]
+    human = await _planner_input(monkeypatch, thread)
+    assert "A" * team.PLAN_MESSAGE_LIMIT in human
+    assert "A" * (team.PLAN_MESSAGE_LIMIT + 1) not in human
+
+
+async def test_planner_drops_the_oldest_turns_past_the_total_cap(monkeypatch):
+    big = team.PLAN_MESSAGE_LIMIT
+    thread = [HumanMessage("OLDEST " + "x" * big)]
+    for i in range(team.PLAN_HISTORY_LIMIT // big + 2):
+        thread += [AIMessage(f"ANSWER{i} " + "y" * big), HumanMessage(f"ask{i}")]
+    latest = "LATEST " + "z" * (big * 3)
+    thread.append(HumanMessage(latest))
+    human = await _planner_input(monkeypatch, thread)
+    assert "OLDEST" not in human
+    assert f"ANSWER{team.PLAN_HISTORY_LIMIT // big + 1} " in human
+    assert latest in human
+
+
+async def test_planner_leaves_out_hidden_notes_and_tool_messages(monkeypatch):
+    from app.orchestration.orchestrator import HIDDEN
+    hidden = next(iter(HIDDEN))
+    thread = [HumanMessage("first"), HumanMessage("HIDDENNOTE", name=hidden),
+              AIMessage("", tool_calls=[{"name": "t", "args": {}, "id": "1"}]),
+              ToolMessage("TOOLRESULT", tool_call_id="1"), AIMessage("final answer"), HumanMessage("second")]
+    human = await _planner_input(monkeypatch, thread)
+    assert "HIDDENNOTE" not in human and "TOOLRESULT" not in human
+    assert "final answer" in human
+
+
+async def test_planner_input_for_a_new_chat_has_no_chat_section(monkeypatch):
+    human = await _planner_input(monkeypatch, [HumanMessage("question?")])
+    assert human.startswith("USER MESSAGE:\nquestion?\n\nAGENTS:")
+
+
 def test_plan_prompt_formats():
     from app.orchestration.prompts import PLAN_PROMPT
     assert "6" in PLAN_PROMPT.format(language="English", max_tasks=6)
@@ -1702,6 +1766,40 @@ async def test_follow_up_runs_with_its_inputs(monkeypatch):
     assert "DOCS TEXT" in note and "check the claim" in note
     final = (await _thread(assistant))[-1].additional_kwargs["team"]
     assert [(t["id"], t["origin"]) for t in final["tasks"]] == [("t1", "plan"), ("t2", "follow_up")]
+
+
+async def test_follow_up_does_not_wait_on_a_failed_task(monkeypatch):
+    log = []
+    plan = Plan(tasks=[Task(id="t1", agent="docs", goal="a"), Task(id="t2", agent="research", goal="b")])
+    _, assistant, agents = _docs_sql(monkeypatch, plan, log, docs=_Failing(), board=False)
+    _board(monkeypatch, _follow(depends_on=("t1", "t2")), then=Board())
+    await _stream(assistant, _ask(THREE))
+
+    assert agents["sql"].calls == 1
+    tasks = (await _thread(assistant))[-1].additional_kwargs["team"]["tasks"]
+    follow = next(t for t in tasks if t["origin"] == "follow_up")
+    assert follow["status"] == "done" and follow["depends_on"] == ["t2"]
+
+
+async def test_follow_up_whose_only_input_failed_still_runs(monkeypatch):
+    class FailsOnce(Fake):
+        async def ainvoke(self, input, config=None, **kwargs):
+            if self.calls == 0:
+                self.calls += 1
+                raise RuntimeError("boom")
+            return await super().ainvoke(input, config, **kwargs)
+
+    log = []
+    plan = Plan(tasks=[Task(id="t1", agent="sql", goal="a"), Task(id="t2", agent="research", goal="b"),
+                       Task(id="t3", agent="research", goal="c", depends_on=["t1", "t2"])])
+    _, assistant, agents = _docs_sql(monkeypatch, plan, log, sql=FailsOnce("sql", "SQL TEXT", log=log), board=False)
+    _board(monkeypatch, _follow(depends_on=("t1",)), then=Board())
+    await _stream(assistant, _ask(THREE))
+
+    assert agents["sql"].calls == 2
+    tasks = (await _thread(assistant))[-1].additional_kwargs["team"]["tasks"]
+    follow = next(t for t in tasks if t["origin"] == "follow_up")
+    assert follow["status"] == "done" and follow["depends_on"] == []
 
 
 async def test_follow_ups_past_the_cap_are_named(monkeypatch):

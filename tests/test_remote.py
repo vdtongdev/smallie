@@ -168,6 +168,8 @@ async def test_counts_the_usage_the_server_reports(wrap):
 
 @pytest.mark.parametrize("name, expected", [
     ("RateLimitError", openai.RateLimitError), ("AuthenticationError", openai.AuthenticationError),
+    ("OpenAIRateLimitError", openai.RateLimitError),
+    ("OpenAIAuthenticationError", openai.AuthenticationError),
     ("ValueError", RemoteException),
 ])
 async def test_remote_errors_become_openai_errors(name, expected):

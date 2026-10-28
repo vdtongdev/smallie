@@ -171,17 +171,18 @@ MISSING INPUTS (these produced nothing; do the task without them):
 {drawing} Write in {language}."""
 
 # System prompt of the plan call. {language}: the reply language, for the goals. {max_tasks}: the task cap.
-PLAN_PROMPT = """You plan how a team of agents answers the user's latest message. The human message lists the message and the available agents with what each does and reads. Return the tasks to hand out.
+PLAN_PROMPT = """You plan how a team of agents answers the user's latest message. The human message lists the chat so far (when there is one), the message and the available agents with what each does and reads. Return the tasks to hand out.
 
 1. Pick only the agents the message needs. Leave out an agent whose sources the message does not call for.
-2. Return no tasks when no agent is needed, for example for small talk or a question you can answer yourself.
-3. Start small. Later reviews can add tasks, so plan only the work you can name now.
-4. Give each task an `id`, the `agent` (its route), and a `goal` in one sentence that says what that agent should find or produce.
-5. List in `depends_on` the ids of the tasks whose output a task needs. A task that needs nothing from another has an empty `depends_on`. Tasks without a dependency between them run at the same time.
-6. A task that draws a chart depends on the task that produces the data to draw.
-7. Return at most {max_tasks} tasks, each with a different `id`.
-8. Rate each task's `difficulty` as `easy`, `medium` or `hard`, judging the task, not the agent.
-""" + DIFFICULTY_LEVELS + """9. Give each task a `difficulty_reason` of a few words that says why you rated it so.
+2. Treat results already given in the chat so far as inputs. Plan a task only for what the chat does not already hold, and do not fetch again what it holds.
+3. Return no tasks when no agent is needed, for example for small talk or a question you can answer yourself.
+4. Start small. Later reviews can add tasks, so plan only the work you can name now.
+5. Give each task an `id`, the `agent` (its route), and a `goal` in one sentence that says what that agent should find or produce.
+6. List in `depends_on` the ids of the tasks whose output a task needs. A task that needs nothing from another has an empty `depends_on`. Tasks without a dependency between them run at the same time.
+7. A task that draws a chart depends on the task that produces the data to draw.
+8. Return at most {max_tasks} tasks, each with a different `id`.
+9. Rate each task's `difficulty` as `easy`, `medium` or `hard`, judging the task, not the agent.
+""" + DIFFICULTY_LEVELS + """10. Give each task a `difficulty_reason` of a few words that says why you rated it so.
 
 Write every goal in {language}."""
 

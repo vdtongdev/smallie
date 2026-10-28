@@ -41,6 +41,7 @@ from app.core.usage import UsageCounter
 from app.core.prompts import reply_language
 from app.orchestration.prompts import BOARD_PROMPT, CHALLENGE_MESSAGE, CONFLICT_MESSAGE, DRAW_MESSAGE, DRAWING_NOTE, NOTHING_FOUND_MESSAGE, PLAN_PROMPT, ROUND_MESSAGE, TASK_MESSAGE, TEAM_MESSAGE
 from app.orchestration.team_plan import Plan, Task, add_follow_ups, after_user_files, dead_inputs, fallback_tasks, ready, validate_plan
+from app.orchestration.orchestrator import HIDDEN
 from app.orchestration.router import ORCHESTRATOR, AssistantState, available_agents
 
 log = logging.getLogger(__name__)
@@ -51,6 +52,8 @@ RETRY = re.compile(r"\b(again|retry|redo|rerun)\b|thử lại|làm lại|chạy 
 NO_SOURCES = ("none",)  # empty sources means unscoped, so the chart task gets a source no tool carries
 ANSWER = "answer"  # the id a chart task depends on: the final answer, which exists only after `synthesize`
 DRAW_GOAL = "Draw the chart the user asked for from the final answer."
+PLAN_MESSAGE_LIMIT = 2000  # characters kept of each earlier message the planner sees
+PLAN_HISTORY_LIMIT = 12000  # characters of earlier chat the planner sees in all; the oldest turns go first
 LIVE = ("done", "failed")  # statuses whose text reaches the board and the write-up
 
 
@@ -197,11 +200,29 @@ async def ask_board(messages: list[AnyMessage], answers: list[dict], config: Run
     return await board.ainvoke([SystemMessage(system), HumanMessage(human)], config=config)
 
 
+def chat_so_far(earlier: Sequence[AnyMessage]) -> str:
+    """The earlier human messages and final answers, oldest first, each cut to `PLAN_MESSAGE_LIMIT`; the oldest go first past `PLAN_HISTORY_LIMIT`."""
+    turns = []
+    for m in earlier:
+        if isinstance(m, HumanMessage) and m.name not in HIDDEN:
+            who = "User"
+        elif isinstance(m, AIMessage) and not m.tool_calls:
+            who = "Assistant"
+        else:
+            continue
+        if m.text.strip():
+            turns.append(f"{who}: {m.text[:PLAN_MESSAGE_LIMIT]}")
+    while turns and sum(map(len, turns)) > PLAN_HISTORY_LIMIT:
+        turns.pop(0)
+    return "\n\n".join(turns)
+
+
 async def ask_plan(messages: list[AnyMessage], available: Sequence[tuple[AgentSpec, RouteInfo]], config: RunnableConfig, *,
                    user_id: str) -> Plan:
     """The one plan call per message, on the user's model; `config` carries the usage counter's callbacks."""
     settings = get_settings()
-    question = next((m.text for m in reversed(messages) if isinstance(m, HumanMessage)), "")
+    last = next((i for i in range(len(messages) - 1, -1, -1) if isinstance(messages[i], HumanMessage)), None)
+    question = "" if last is None else messages[last].text
     lines = []
     for spec, info in available:
         line = f"- {spec.route}: {spec.description}"
@@ -215,7 +236,8 @@ async def ask_plan(messages: list[AnyMessage], available: Sequence[tuple[AgentSp
             line += f"\n  {info.prompt_note}"
         lines.append(line)
     # Texts go into the message, not a template: they may contain braces.
-    human = f"USER MESSAGE:\n{question}\n\nAGENTS:\n" + "\n".join(lines)
+    chat = chat_so_far(messages[:last] if last else [])
+    human = (f"CHAT SO FAR:\n{chat}\n\n" if chat else "") + f"USER MESSAGE:\n{question}\n\nAGENTS:\n" + "\n".join(lines)
     planner = (await asyncio.to_thread(get_chat_model, user_id)).with_structured_output(
         Plan, method="function_calling")
     system = PLAN_PROMPT.format(language=reply_language(messages), max_tasks=settings.team_max_tasks)

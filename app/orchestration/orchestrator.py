@@ -177,11 +177,16 @@ async def no_repeats(request, handler):
 
 
 def is_composing(messages: Sequence[AnyMessage]) -> bool:
-    """True once the current turn has results to write up (tool results or research findings)."""
-    for message in reversed(messages):
+    """True once the current turn has results to write up (tool results or research findings).
+    A note the user added to a stopped run (a visible message and its `STEER`) does not start a new turn."""
+    for i in range(len(messages) - 1, -1, -1):
+        message = messages[i]
         if isinstance(message, ToolMessage) and message.name not in MEMORY_TOOL_NAMES:
             return True
         if isinstance(message, HumanMessage):
+            if message.name == STEER or (message.name is None and i + 1 < len(messages)
+                                         and getattr(messages[i + 1], "name", None) == STEER):
+                continue
             return message.name in (FINDINGS, TEAM_MODE)
     return False
 

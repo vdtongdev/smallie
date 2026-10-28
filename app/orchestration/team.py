@@ -377,7 +377,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
                 # inputless planned tasks wait for the tasks that read the user's files (the fallback runs everyone at once)
                 tasks = after_user_files(tasks, {s.route for s, _ in available if "user_files" in s.sources})
         emit({"type": "plan", "tasks": [_brief(t) for t in tasks], "fallback": fallback})
-        workspace = {"reset": True, "goal": messages[-1].text, "tasks": tasks, "results": {}, "evidence": [], "artifacts": {},
+        workspace = {"reset": True, "goal": user_request(messages), "tasks": tasks, "results": {}, "evidence": [], "artifacts": {},
                      "history": [], "rounds_at": {}, "wave": 0, "question": "",
                      "synthesis": {"forced": False, "open_points": [], "not_done": []}, "challenged": {}}
         return Command(update={"workspace": workspace}, goto="dispatch")

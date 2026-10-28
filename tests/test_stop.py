@@ -69,8 +69,8 @@ class Harness:
         assistant = SimpleNamespace(aget_state=aget_state, astream=astream)
         self.request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(assistant=assistant, store=self.store)))
 
-    async def start(self, conversation_id=None):
-        response = await chat("auto", ChatRequest(message="hi", conversation_id=conversation_id), self.request, "u1")
+    async def start(self, conversation_id=None, message="hi"):
+        response = await chat("auto", ChatRequest(message=message, conversation_id=conversation_id), self.request, "u1")
         events = []
 
         async def read():
@@ -403,3 +403,89 @@ def test_a_note_sets_the_reply_language_not_the_steer_message():
     assert reply_language([request, HumanMessage("also include the margins"), steer]) == "English"
     assert reply_language([request, HumanMessage("thêm cả biên lợi nhuận nhé"), steer]) == "Vietnamese"
     assert reply_language([HumanMessage("so sánh doanh thu"), AIMessage("x"), request, steer]) == "English"
+
+
+# --- review findings ---
+
+
+async def finished_resume(monkeypatch, thread, message="continue"):
+    """A resumed run that ends: the thread it ends with is `thread`. Returns what the background task saved."""
+    async def astream(*args, **kwargs):
+        yield (), "custom", {"type": "plan"}
+
+    h = Harness(monkeypatch, astream)
+
+    async def aget_state(config):
+        return snapshot(values={"messages": thread})
+
+    h.request.app.state.assistant.aget_state = aget_state
+    asked = []
+
+    async def record_save(store, user_id, conversation, question, answer):
+        asked.append(("save_turn", question, answer))
+
+    async def record_extract(user_id, question, answer, counters, conversation_id=None):
+        asked.append(("extract_facts", question, answer))
+
+    monkeypatch.setattr(routes_chat, "save_turn", record_save)
+    monkeypatch.setattr(routes_chat, "extract_facts", record_extract)
+    response, _, reader = await h.start(conversation_id="c1", message=message)
+    await asyncio.wait_for(reader, 5)
+    await response.background()
+    return asked
+
+
+async def test_a_resumed_run_remembers_the_original_request(monkeypatch):
+    thread = [HumanMessage("compare Q3 revenue"), AIMessage("Q3 was up.", name="orchestrator")]
+    asked = await finished_resume(monkeypatch, thread)
+    assert asked == [("save_turn", "compare Q3 revenue", "Q3 was up."),
+                     ("extract_facts", "compare Q3 revenue", "Q3 was up.")]
+
+
+async def test_a_resumed_run_with_a_note_remembers_request_and_note(monkeypatch):
+    thread = [HumanMessage("compare Q3 revenue"), HumanMessage("use euros"), HumanMessage(STEER_MESSAGE, name=STEER),
+              AIMessage("Q3 was up.", name="orchestrator")]
+    asked = await finished_resume(monkeypatch, thread, message="use euros")
+    assert {q for _, q, _ in asked} == {"compare Q3 revenue\n\nuse euros"}
+
+
+def test_is_composing_decides_from_before_a_note():
+    from app.orchestration.orchestrator import FINDINGS, is_composing
+    from langchain_core.messages import ToolMessage
+
+    request, note = HumanMessage("R"), HumanMessage("N")
+    steer = HumanMessage(STEER_MESSAGE, name=STEER)
+    assert is_composing([request, HumanMessage("found", name=FINDINGS), note, steer])
+    assert is_composing([request, HumanMessage("found", name="team"), note, steer])
+    assert is_composing([request, AIMessage("", tool_calls=[{"name": "ask_sql", "args": {}, "id": "1"}]),
+                         ToolMessage("rows", tool_call_id="1", name="ask_sql"), note, steer])
+    assert not is_composing([request, note, steer])
+
+
+async def stopped_team_chat_with_note():
+    graph, config, calls = await stopped_chat(sub_name="team")
+    await add_note(graph, config, "N")
+    return graph, config
+
+
+def messages_request(graph):
+    return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(assistant=graph)))
+
+
+async def test_a_note_shows_on_reload_while_a_team_turn_is_stopped(monkeypatch):
+    monkeypatch.setattr(routes_conversations, "get_conversation", lambda user_id, cid: {"id": cid})
+    graph, _ = await stopped_team_chat_with_note()
+    shown = await routes_conversations.messages("t", messages_request(graph), "u1")
+    assert [(m["role"], m["content"]) for m in shown[:-1]] == [("user", "request"), ("user", "N")]
+    assert shown[-1]["stopped"] is True
+
+
+async def test_the_resumed_team_run_leaves_the_note_in_the_thread_and_the_steer_hidden(monkeypatch):
+    monkeypatch.setattr(routes_conversations, "get_conversation", lambda user_id, cid: {"id": cid})
+    graph, config = await stopped_team_chat_with_note()
+    async for _ in graph.astream(None, config, subgraphs=True):
+        pass
+    thread = (await graph.aget_state(config)).values["messages"]
+    assert [(m.content, m.name) for m in thread] == [("request", None), ("N", None), (STEER_MESSAGE, STEER)]
+    shown = await routes_conversations.messages("t", messages_request(graph), "u1")
+    assert [(m["role"], m["content"]) for m in shown] == [("user", "request"), ("user", "N")]

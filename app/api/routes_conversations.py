@@ -8,7 +8,7 @@ from app.orchestration.orchestrator import MESSAGE_ROUTES
 from app.orchestration.team import _transcript
 from app.core.auth import get_current_user
 from app.core.conversations import delete_conversation, get_conversation, list_conversations
-from app.core.memory import forget_conversation
+from app.core.memory import TEAM_MODE, forget_conversation
 from app.orchestration.stopping import is_stopped
 
 router = APIRouter(tags=["conversations"])
@@ -25,7 +25,10 @@ async def messages(conversation_id: str, request: Request, user_id: str = Depend
     if not conversation:
         raise HTTPException(404, "Conversation not found")
     state = await request.app.state.assistant.aget_state({"configurable": {"thread_id": conversation_id}})
+    config = {"configurable": {"thread_id": conversation_id}}
     shown = [m for m in map(_serialize, state.values.get("messages", [])) if m]
+    if is_stopped(state):  # a note added to a stopped team turn sits in the team's own checkpoint
+        shown += await _team_notes(request.app.state.assistant, state, config)
     if state.interrupts:  # a paused team turn: its question is not in the thread yet
         shown.append({"role": "assistant", "agent": "orchestrator", "content": state.interrupts[0].value["question"],
                       "pending": True, "team": None, "tool_calls": [], "charts": []})
@@ -33,6 +36,15 @@ async def messages(conversation_id: str, request: Request, user_id: str = Depend
         shown.append({"role": "assistant", "stopped": True, "content": "", "team": _team_transcript(state.values),
                       "tool_calls": [], "charts": []})
     return shown
+
+
+async def _team_notes(assistant, state, config) -> list[dict]:
+    task = next((t for t in getattr(state, "tasks", ()) if t.name == TEAM_MODE and t.state), None)
+    if task is None:
+        return []
+    inner = await assistant.aget_state(task.state) if isinstance(task.state, dict) else task.state
+    held = len(state.values.get("messages", []))
+    return [m for m in map(_serialize, inner.values.get("messages", [])[held:]) if m]
 
 
 def _team_transcript(values: dict) -> dict | None:
@@ -51,6 +63,8 @@ async def remove(conversation_id: str, request: Request, user_id: str = Depends(
 
 def _serialize(message) -> dict | None:
     if isinstance(message, HumanMessage):
+        if message.name:  # a hidden note to the model (steer), not the user's words
+            return None
         return {"role": "user", "content": message.text}
     if isinstance(message, AIMessage):
         return {

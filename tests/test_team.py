@@ -1890,3 +1890,19 @@ async def test_retry_follow_up_reruns_the_previous_team_turn(monkeypatch):
 
     chunks = await _stream(assistant, _ask("thanks"))
     assert not _events(chunks, "wave") and sql.calls == 2
+
+
+async def test_plan_rerun_after_a_note_takes_the_request_and_note_as_its_goal(monkeypatch):
+    from app.agents.base import STEER
+    from app.core.prompts import STEER_MESSAGE
+
+    _research_does_not_join(monkeypatch)
+    _plan(monkeypatch)
+    _board(monkeypatch, Board())
+    assistant = _assistant(monkeypatch, per_agent(sql=[AIMessage("unused")]), sql=Fake("sql", "Cap is 3T.", log=[]))
+    note = "and compare it with last year"
+    thread = [HumanMessage(SQL_QUESTION), HumanMessage(note), HumanMessage(STEER_MESSAGE, name=STEER)]
+    await _stream(assistant, {"messages": thread})
+
+    final = (await _thread(assistant))[-1]
+    assert final.additional_kwargs["team"]["goal"] == f"{SQL_QUESTION}\n\n{note}"

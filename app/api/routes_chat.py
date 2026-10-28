@@ -14,7 +14,7 @@ from starlette.background import BackgroundTask
 
 from app.core.accounts import get_profile
 from app.agents.artifacts import artifacts_from
-from app.agents.base import TOOL_RESULT_PREVIEW
+from app.agents.base import TOOL_RESULT_PREVIEW, user_request
 from app.agents.registry import ROUTES, SILENT_STEPS, STEPS
 from app.agents.remote import RUN_NODE, as_message
 from app.orchestration.orchestrator import HANDOFF
@@ -175,9 +175,10 @@ async def chat(
             return
         pairs = turns(messages)
         answer = pairs[-1][1] if pairs else ""
+        question = user_request(messages)  # a resumed run's message is "continue" or a note, not the question
         if cross_chat:
             try:
-                await save_turn(store, user_id, conversation, body.message, answer)
+                await save_turn(store, user_id, conversation, question, answer)
             except Exception:  # noqa: BLE001
                 log.exception("Saving chat history failed")
         # Only the orchestrator's turns: plain data lookups (sql, chart, docs) rarely say anything
@@ -185,7 +186,7 @@ async def chat(
         if answer and _answered_by(messages) == ORCHESTRATOR:
             extraction = UsageCounter()
             try:
-                await extract_facts(user_id, body.message, answer, [extraction], conversation_id=conversation["id"])
+                await extract_facts(user_id, question, answer, [extraction], conversation_id=conversation["id"])
             except Exception:  # noqa: BLE001
                 log.exception("Extracting facts failed")
             try:

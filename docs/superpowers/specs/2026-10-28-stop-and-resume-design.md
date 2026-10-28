@@ -51,21 +51,21 @@ Limit: the registry is in-process. The plan checks the uvicorn worker count in `
 - The note also goes into `workspace["notes"]`.
 - `TASK_MESSAGE` shows the notes to every task not yet done.
 - `review` and `synthesize` get the notes too, so the board can add a follow-up when a note asks for more ("also check my files").
-- Tasks that already finished do not rerun.
+- After a plain resume, tasks that already finished do not rerun. After a note, the tasks of the cut-off wave all rerun with the note; earlier waves do not.
 - The question pause (`needs_human`, `pause`) is unchanged.
 
 ### Call budget
 
 A resumed run keeps counting against the same message's call cap (`TEAM_MAX_MESSAGE_MODEL_CALLS`), so Stop and continue cannot get around the cap. The plan finds where `RemoteAgent` keeps the count and carries it across a resume.
 
-### Spike first
+### Spike results (2026-10-28, langgraph 1.2.14)
 
-The plan's first task proves two assumptions with a throwaway test:
+1. A cancelled `astream` keeps the writes of tasks that finished in the step that was running, so a plain resume reruns only the unfinished tasks.
+2. Adding the note with `aupdate_state` writes a new checkpoint, which drops the finished writes of the step that was cut off. No form of the call keeps them. With no `as_node`, `next` stays and the whole cut-off step reruns, now with the note.
 
-1. A cancelled `astream` keeps the writes of tasks that finished in the step that was running (the team's parallel `speak` Sends), so only unfinished tasks rerun.
-2. `aupdate_state` can add the note messages without changing `next`.
+Decision (user, 2026-10-28): accept it. A note reruns the whole cut-off step, finished tasks of that step included; that is intended, because the note may change what those tasks should do. Earlier steps (earlier team waves) are kept. A plain resume keeps everything.
 
-Fallback for 2: a `steer` state key that the nodes read, written without touching `next`.
+The team runs as a subgraph of the assistant graph, so the note is added to the state of the graph that holds the cut-off step (the team subgraph's checkpoint for a team turn). Otherwise the parent's `team` task could restart the subgraph from `plan`.
 
 ## 3. Reload
 
@@ -86,7 +86,7 @@ Fallback for 2: a `steer` state key that the nodes read, written without touchin
 Fake models, no quota spent; `requires_db` where checkpoint state is needed.
 
 1. The keyword check matches English and Vietnamese resume words; longer messages do not match.
-2. A team run stopped mid-wave keeps the finished task and reruns only the unfinished one.
+2. A team run stopped mid-wave keeps the finished task and reruns only the unfinished one on a plain resume; with a note it reruns the whole cut-off wave and keeps the earlier waves.
 3. A note reaches a pending task's `TASK_MESSAGE` and the review; a plain resume adds no message to the thread.
 4. The call count carries across a resume.
 5. Stop is scoped by `user_id`: another user's conversation answers 404.

@@ -31,6 +31,8 @@ from app.core.usage import UsageCounter, add_usage
 router = APIRouter(tags=["chat"])
 log = logging.getLogger(__name__)
 
+RUNNING: dict[str, asyncio.Task] = {}  # conversation id -> the task running its reply (one process, one worker)
+
 TEAM_EVENTS = frozenset({"plan", "plan_updated", "wave", "review", "synthesize", "needs_human", "spoke", "charts"})  # custom events of a team turn
 
 
@@ -63,6 +65,8 @@ async def chat(
         conversation = await asyncio.to_thread(get_conversation, user_id, body.conversation_id)
         if not conversation:
             raise HTTPException(404, "Conversation not found")
+        if conversation["id"] in RUNNING:
+            raise HTTPException(409, "This chat is still answering")
     else:
         conversation = await asyncio.to_thread(create_conversation, user_id, kind, body.message)
 
@@ -71,10 +75,11 @@ async def chat(
     config = {"configurable": {"thread_id": conversation["id"]}}
     cross_chat = get_settings().cross_chat_history
     finished = False
+    stopped = False
     usage = UsageCounter()
 
     async def events():
-        nonlocal finished
+        nonlocal finished, stopped
         yield _sse({"type": "conversation", "id": conversation["id"], "title": conversation["title"]})
         settings = None
         try:
@@ -94,9 +99,29 @@ async def chat(
                 stream_mode=["messages", "updates", "custom"],
                 subgraphs=True,
             )
-            async for event in _events_from(stream):
-                yield _sse(event)
-            finished = True
+            # The run is its own task, so Stop can cancel it and this generator still sends `stopped`.
+            queue: asyncio.Queue = asyncio.Queue()
+
+            async def pump():
+                try:
+                    async for event in _events_from(stream):
+                        await queue.put(event)
+                finally:
+                    await queue.put(None)
+
+            run = RUNNING[conversation["id"]] = asyncio.create_task(pump())
+            try:
+                while (event := await queue.get()) is not None:
+                    yield _sse(event)
+                if run.cancelled():
+                    stopped = True
+                else:
+                    run.result()  # an error of the run is handled below
+                    finished = True
+            finally:
+                run.cancel()  # the client left
+                if RUNNING.get(conversation["id"]) is run:
+                    del RUNNING[conversation["id"]]
         except NoModelSettings:
             yield _sse(_NO_MODEL)
         except openai.RateLimitError:
@@ -114,7 +139,7 @@ async def chat(
                 await add_usage(store, user_id, usage)
             except Exception:  # noqa: BLE001 - usage is best effort
                 log.exception("Saving token usage failed")
-        yield _sse({"type": "done"})
+        yield _sse({"type": "stopped" if stopped else "done"})
 
     async def remember_turn():
         # Runs after the response is sent, so the embedding and extraction calls don't delay "done".
@@ -150,6 +175,17 @@ async def chat(
 
     return StreamingResponse(events(), media_type="text/event-stream", background=BackgroundTask(remember_turn),
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@router.post("/chat/{conversation_id}/stop")
+async def stop(conversation_id: str, user_id: str = Depends(get_current_user)):
+    if not await asyncio.to_thread(get_conversation, user_id, conversation_id):
+        raise HTTPException(404, "Conversation not found")
+    run = RUNNING.get(conversation_id)
+    if run is None:
+        return {"stopped": False}
+    run.cancel()
+    return {"stopped": True}
 
 
 async def _chat_input(assistant, config, kind: str, message: str) -> dict | Command:

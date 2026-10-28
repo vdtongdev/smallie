@@ -25,6 +25,7 @@ from app.core.config import get_settings
 from app.core.prompts import STEER_MESSAGE, reply_language
 from app.core.usage import UsageCounter
 from app.orchestration.stopping import add_note, is_resume, is_stopped, load_stop, save_stop
+from tests.test_chat_events import _saved
 
 
 def snapshot(next=(), interrupts=(), values=None):
@@ -58,7 +59,7 @@ class Harness:
         monkeypatch.setattr(routes_chat, "create_conversation", lambda u, k, m: {"id": "c1", "title": "t"})
         monkeypatch.setattr(routes_chat, "touch_conversation", lambda cid: None)
         monkeypatch.setattr(routes_chat, "recall_facts", lambda u: "")
-        monkeypatch.setattr(routes_chat, "load_settings", lambda u: object())
+        monkeypatch.setattr(routes_chat, "load_settings", lambda u: _saved())
         monkeypatch.setattr(routes_chat, "_recent_chats", none)
         monkeypatch.setattr(routes_chat, "_user", none)
         monkeypatch.setattr(routes_chat, "add_usage", record)

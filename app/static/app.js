@@ -148,6 +148,7 @@ function applyLanguage() {
   document.documentElement.lang = state.lang;
   document.querySelectorAll("[data-i18n]").forEach((el) => (el.textContent = t(el.dataset.i18n)));
   document.querySelectorAll("[data-i18n-title]").forEach((el) => (el.title = t(el.dataset.i18nTitle)));
+  document.querySelectorAll("[data-i18n-placeholder]").forEach((el) => (el.placeholder = t(el.dataset.i18nPlaceholder)));
   $("langBtn").textContent = state.lang === "en" ? "Tiếng Việt" : "English";
   $("input").placeholder = t(state.awaiting ? "answerPlaceholder" : "placeholder");
   document.querySelectorAll(".status-line").forEach((node) => renderStatus(node.turn));
@@ -236,7 +237,7 @@ const el = (tag, cls, text) => Object.assign(document.createElement(tag), { clas
 function newTurn(team = false) {
   const turn = {
     el: el("div", "status-line"), badges: [], running: true, step: {}, opener: null,
-    act: { team, plan: [], waves: [], tools: [], drawn: [], asked: [], synthesis: null, question: null },
+    act: { team, plan: [], waves: [], tools: [], drawn: [], asked: [], synthesis: null, question: null, routing: null, fallbacks: [] },
   };
   turn.el.turn = turn;
   turn.head = el("span");
@@ -254,7 +255,7 @@ function newTurn(team = false) {
 }
 
 const stepCount = (act) => act.waves.reduce((n, r) => n + r.answers.reduce((m, a) => m + 1 + a.tools.length, 0), 0)
-  + [...act.drawn, ...act.asked].reduce((n, d) => n + 1 + d.tools.length, 0) + act.tools.length + (act.question ? 1 : 0);
+  + [...act.drawn, ...act.asked].reduce((n, d) => n + 1 + d.tools.length, 0) + act.tools.length + (act.question ? 1 : 0) + (act.routing ? 1 : 0) + act.fallbacks.length;
 
 const waveTitle = (w) => `${t("waveN").replace("{n}", w.wave)} · ${t({ conflict: "kindConflict", challenge: "kindChallenge" }[w.kind] || "kindAnswer")}`;
 
@@ -371,10 +372,50 @@ function boardBlock(b, act) {
   return div;
 }
 
+// Which model handled a task or a 1v1 reply, and why. `m` is the trace a `spoke` event or a saved result carries;
+// chats from before model routing have none of it, so no line.
+const nf = (n) => Number(n).toLocaleString(state.lang === "vi" ? "vi-VN" : "en-US");
+const tierWord = (tier) => t({ small: "smallModel", strong: "strongModel" }[tier] || "standardModel");
+
+function modelLine(m, agent) {
+  if (!m?.tier) return "";
+  const parts = [];
+  if (agent) parts.push(agentLabel(agent));
+  if (m.difficulty) parts.push(agent ? t(m.difficulty + "Task") : `${t(m.difficulty)} (1v1)`);
+  parts.push(`${t(m.profile + "Profile")} → ${tierWord(m.tier).toLowerCase()}`);
+  const u = m.usage;
+  if (u?.model_calls) {
+    parts.push(t("callsN").replace("{n}", nf(u.model_calls)));
+    parts.push(t("tokensN").replace("{n}", nf((u.input_tokens || 0) + (u.output_tokens || 0))));
+    if (u.cost != null) parts.push(`$${u.cost.toFixed(u.cost < 0.01 ? 6 : 4)}`);
+  }
+  return parts.join(" · ");
+}
+
+function fallbackLine(f, tier) {
+  const who = tier && tier !== "standard" ? tierWord(tier) : f.from_model;
+  const why = t("fb_" + f.category);
+  return t("fallbackLine").replace("{model}", who).replace("{why}", why === "fb_" + f.category ? f.category : why);
+}
+
+// The model line, its reason and any fallback, under a task's badge in the popup.
+function modelBlock(parent, m, agent) {
+  const line = modelLine(m, agent);
+  if (line) parent.append(el("div", "act-meta", line));
+  if (m?.tier && (m.model || m.reason)) parent.append(el("div", "act-meta act-why", [m.model, m.reason].filter(Boolean).join(" — ")));
+  if (m?.fallback) parent.append(el("div", "act-meta act-warn", fallbackLine(m.fallback, m.tier)));
+}
+
 function renderActivity() {
   const act = activityTurn.act;
   const body = $("activityBody");
   body.replaceChildren();
+  if (act.routing || act.fallbacks.length) {
+    const sec = el("section", "act-round");
+    if (act.routing) modelBlock(sec, act.routing);
+    for (const f of act.fallbacks) sec.append(el("div", "act-meta act-warn", fallbackLine(f, act.routing?.tier)));
+    body.append(sec);
+  }
   if (act.plan.length) {
     const sec = el("section", "act-round");
     sec.append(el("h3", "", t("plan")));
@@ -392,6 +433,7 @@ function renderActivity() {
     for (const a of r.answers) {
       const div = el("div", "act-agent");
       div.append(agentBadge(a.agent));
+      modelBlock(div, a.meta, a.agent);
       if (a.text) {
         const text = el("div", "act-text");
         text.innerHTML = renderMarkdown(a.text);
@@ -409,6 +451,7 @@ function renderActivity() {
     for (const d of act.drawn) {
       const div = el("div", "act-agent");
       div.append(agentBadge(d.agent));
+      modelBlock(div, d.meta, d.agent);
       if (d.text) {
         const text = el("div", "act-text");
         text.innerHTML = renderMarkdown(d.text);
@@ -461,7 +504,7 @@ $("activityDialog").addEventListener("close", () => activityTurn?.opener?.focus(
 // A finished team reply's transcript (message.team) as popup data. The task graph's workspace keeps
 // `history` (waves, task results, reviews in order); the older round table kept `rounds` and `boards`.
 function teamActivity(team) {
-  const act = { team: true, plan: [], waves: [], tools: [], drawn: [], asked: [], synthesis: team.synthesis || null, question: null };
+  const act = { team: true, plan: [], waves: [], tools: [], drawn: [], asked: [], synthesis: team.synthesis || null, question: null, routing: null, fallbacks: [] };
   if (!team.history) {
     act.drawn = team.drawn || [];
     act.waves = (team.rounds || []).map((r) => ({
@@ -471,12 +514,13 @@ function teamActivity(team) {
     return act;
   }
   act.plan = (team.tasks || []).map(({ id, agent, goal, depends_on, origin }) => ({ id, agent, goal, depends_on, origin }));
+  const metaOf = (id) => team.results?.[id] || null; // model, tier, reason, usage of a task (older chats have none)
   for (const e of team.history) {
     const last = act.waves.at(-1);
     if (e.type === "wave") act.waves.push({ ...e, answers: [], review: null });
     else if (e.type === "review" && last) last.review = e;
     else if (e.type === "result") {
-      const answer = { task: e.task, agent: e.agent, text: e.text, tools: e.tools || [] };
+      const answer = { task: e.task, agent: e.agent, text: e.text, tools: e.tools || [], meta: metaOf(e.task) };
       (last?.tasks.includes(e.task) ? last.answers : act.drawn).push(answer);
     }
   }
@@ -754,6 +798,13 @@ async function sendMessage(text) {
             state.kinds[event.id] = kind;
             setConversation(event.id);
             break;
+          case "routing":
+            act.routing = event;
+            touch(turn);
+            break;
+          case "model_fallback": // a team task's fallback comes with its `spoke` event
+            if (!act.team) { act.fallbacks.push(event); touch(turn); }
+            break;
           case "agent":
             if (act.team || event.name === "team") break; // the plan names its own agents
             // The orchestrator handed off before showing anything: relabel its badge, as a reload would show it.
@@ -802,6 +853,7 @@ async function sendMessage(text) {
           case "spoke": { // the task's final entry: what a reload shows
             const mine = answerOf(event.agent, event.task);
             mine.text = event.text;
+            mine.meta = event;
             mine.tools = event.tools.map((x, i) => ({ ...x, charts: mine.tools?.[i]?.name === x.name ? mine.tools[i].charts : undefined }));
             touch(turn);
             break;
@@ -1004,7 +1056,14 @@ function setSettingsStatus(text) {
   $("settingsStatus").textContent = text;
 }
 
-let loadedSettings = { base_url: "", model: "" };
+const SLOTS = [["model", "settingsModel", "warnModel"], ["small_model", "settingsSmall", "warnSmall"], ["strong_model", "settingsStrong", "warnStrong"]];
+let loadedSettings = { base_url: "", model: "", small_model: "", strong_model: "", profile: "balanced" };
+
+const chosenProfile = () => document.querySelector('input[name="settingsProfile"]:checked')?.value || "balanced";
+
+function showSlotWarnings(warning, warnings = {}) {
+  for (const [slot, , warnId] of SLOTS) $(warnId).textContent = slot === "model" ? (warning || warnings.model || "") : (warnings[slot] || "");
+}
 
 async function loadSettings() {
   let s = null;
@@ -1016,13 +1075,23 @@ async function loadSettings() {
   $("settingsKey").value = "";
   $("settingsKey").placeholder = s?.key_hint || "";
   $("settingsUrl").value = s?.base_url || "";
-  $("settingsModel").value = s?.model || "";
-  loadedSettings = { base_url: s?.base_url || "", model: s?.model || "" };
+  for (const [slot, id] of SLOTS) $(id).value = s?.[slot] || "";
+  const profile = ["economy", "balanced", "advanced"].includes(s?.profile) ? s.profile : "balanced";
+  document.querySelector(`input[name="settingsProfile"][value="${profile}"]`).checked = true;
+  loadedSettings = { base_url: s?.base_url || "", model: s?.model || "", small_model: s?.small_model || "", strong_model: s?.strong_model || "", profile };
   setSettingsStatus(s ? t("settingsKeySaved") : t("settingsNone"));
 }
 
+// The server's model list fills the three model fields' suggestions; typing a name still works.
+async function loadModelChoices() {
+  const res = await api("/model-settings/models").catch(() => null);
+  $("modelChoices").replaceChildren(...(res?.models || []).map((id) => Object.assign(document.createElement("option"), { value: id })));
+}
+
 function openSettings() {
+  showSlotWarnings("");
   loadSettings();
+  loadModelChoices();
   $("settingsDialog").showModal();
 }
 
@@ -1030,20 +1099,23 @@ function openSettings() {
 async function saveSettings() {
   const key = $("settingsKey").value.trim();
   const base_url = $("settingsUrl").value.trim();
-  const model = $("settingsModel").value.trim();
+  const [model, small_model, strong_model] = SLOTS.map(([, id]) => $(id).value.trim());
+  const profile = chosenProfile();
   const hasKey = key || $("settingsKey").placeholder;
   if (!base_url || !model || !hasKey) return setSettingsStatus(t("settingsFieldsRequired"));
-  if (!key && base_url === loadedSettings.base_url && model === loadedSettings.model) {
+  const next = { base_url, model, small_model, strong_model, profile };
+  if (!key && Object.keys(next).every((k) => next[k] === loadedSettings[k])) {
     return $("settingsDialog").close(); // nothing changed since the last load
   }
   try {
     const res = await api("/model-settings", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ base_url, model, api_key: key || null }),
+      body: JSON.stringify({ ...next, api_key: key || null }), // empty slots go as "": the server clears what is left out
     });
     await loadSettings();
-    if (res.warning) setSettingsStatus(`${t("saved")}. ${res.warning}`);
+    showSlotWarnings(res.warning, res.warnings);
+    if (res.warning || Object.keys(res.warnings || {}).length) setSettingsStatus(`${t("saved")}. ${res.warning || ""}`.trim());
     else $("settingsDialog").close();
   } catch (err) {
     setSettingsStatus(err.message);

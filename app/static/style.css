@@ -279,6 +279,18 @@ dialog {
   background: var(--bg);
   color: var(--text);
 }
+#settingsDialog .settings-group { margin: 18px 0 0; font-size: 15px; }
+#settingsDialog .profile-cards { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+#settingsDialog .profile-card { flex: 1 1 140px; display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 10px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; font-size: 13px; }
+#settingsDialog .profile-card:has(input:checked) { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+#settingsDialog .profile-card input { position: absolute; opacity: 0; width: auto; pointer-events: none; }
+#settingsDialog .profile-card:has(input:focus-visible) { outline: 2px solid var(--accent); }
+#settingsDialog .profile-tag { font-size: 12px; color: var(--muted); }
+#settingsDialog .slot-warning { margin: 4px 0 0; font-size: 12px; color: var(--danger); }
+#settingsDialog .slot-warning:empty { display: none; }
+.act-meta { font-size: 12px; margin: 2px 0 4px; }
+.act-why { color: var(--muted); }
+.act-warn { color: var(--danger); }
 #settingsDialog .provider-table { margin-top: 16px; overflow-x: auto; font-size: 12px; }
 #settingsDialog .provider-table table { border-collapse: collapse; }
 #settingsDialog .provider-table th, #settingsDialog .provider-table td { text-align: left; padding: 3px 8px 3px 0; white-space: nowrap; vertical-align: top; }

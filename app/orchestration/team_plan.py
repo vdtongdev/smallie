@@ -97,12 +97,14 @@ def dead_inputs(task: dict, tasks: Sequence[dict]) -> tuple[list[str], bool]:
 def add_follow_ups(
     tasks: list[dict], follow_ups: Sequence[Task], available: Sequence[str], max_tasks: int
 ) -> tuple[list[dict], list[dict], list[str]]:
-    """Append valid follow-ups; returns (all tasks, added, goals dropped by the cap)."""
+    """Append valid follow-ups; returns (all tasks, added, goals dropped by the cap).
+    Dependencies on tasks that produced nothing are removed, so a follow-up never waits on them."""
     ids = {x["id"] for x in tasks}
+    dead = {x["id"] for x in tasks if x["status"] in DEAD}
     valid = [x for x in follow_ups if x.agent in available and set(x.depends_on) <= ids]
     room = max(max_tasks - len(tasks), 0)
     added = [
-        _item(f"t{len(tasks) + i}", x.agent, x.goal, list(x.depends_on), "follow_up")
+        _item(f"t{len(tasks) + i}", x.agent, x.goal, [d for d in x.depends_on if d not in dead], "follow_up")
         for i, x in enumerate(valid[:room], 1)
     ]
     return tasks + added, added, [x.goal for x in valid[room:]]

@@ -1697,6 +1697,19 @@ async def test_follow_up_runs_with_its_inputs(monkeypatch):
     assert [(t["id"], t["origin"]) for t in final["tasks"]] == [("t1", "plan"), ("t2", "follow_up")]
 
 
+async def test_follow_up_does_not_wait_on_a_failed_task(monkeypatch):
+    log = []
+    plan = Plan(tasks=[Task(id="t1", agent="docs", goal="a"), Task(id="t2", agent="research", goal="b")])
+    _, assistant, agents = _docs_sql(monkeypatch, plan, log, docs=_Failing(), board=False)
+    _board(monkeypatch, _follow(depends_on=("t1", "t2")), then=Board())
+    await _stream(assistant, _ask(THREE))
+
+    assert agents["sql"].calls == 1
+    tasks = (await _thread(assistant))[-1].additional_kwargs["team"]["tasks"]
+    follow = next(t for t in tasks if t["origin"] == "follow_up")
+    assert follow["status"] == "done" and follow["depends_on"] == ["t2"]
+
+
 async def test_follow_ups_past_the_cap_are_named(monkeypatch):
     monkeypatch.setattr(get_settings(), "team_max_tasks", 2)
     log = []

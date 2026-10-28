@@ -113,6 +113,13 @@ def test_follow_ups_get_fresh_ids_and_respect_the_cap():
     assert dropped == ["f2"]
 
 
+def test_follow_up_drops_dependencies_on_dead_tasks_and_keeps_live_ones():
+    tasks = [task("t1", "failed"), task("t2", "withdrew"), task("t3", "skipped"), task("t4", "done")]
+    ups = [t("x", "sql", goal="a", deps=["t1", "t2", "t3", "t4"]), t("y", "sql", goal="b", deps=["t1"])]
+    _, added, _ = add_follow_ups(tasks, ups, ["sql"], 9)
+    assert [x["depends_on"] for x in added] == [["t4"], []]
+
+
 def test_invalid_follow_ups_are_dropped():
     tasks = [task("t1", "done")]
     ups = [t("x", "ghost"), t("y", "sql", deps=["t9"]), t("z", "sql", goal="ok", deps=["t1"])]

@@ -774,7 +774,7 @@ Each place where a check happens (a hand-off, or a point where results meet) get
 
 ### Follow-ups
 
-The same review call can add tasks the results call for: a document reveals a revenue claim and sql checks it, research mentions an internal memo and docs searches for it, sql finds a pattern and the chart agent draws it. A follow-up passes the same checks as the plan, counts toward `TEAM_MAX_TASKS`, and costs no extra call. Follow-ups that do not fit under the cap are dropped and the write-up names them as not done. A repeated task (same agent, same goal) is dropped, and so is a chart follow-up when the plan already has a chart task.
+The same review call can add tasks the results call for: a document reveals a revenue claim and sql checks it, research mentions an internal memo and docs searches for it, sql finds a pattern and the chart agent draws it. A follow-up passes the same checks as the plan, counts toward `TEAM_MAX_TASKS`, and costs no extra call. Follow-ups that do not fit under the cap are dropped and the write-up names them as not done. A follow-up never waits on a task that failed, withdrew or was skipped: that dependency is removed and the follow-up runs on its remaining inputs. A repeated task (same agent, same goal) is dropped, and so is a chart follow-up when the plan already has a chart task.
 
 ### Independent sources
 

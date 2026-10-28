@@ -1,6 +1,6 @@
 # Stop and resume a running reply
 
-Date: 2026-10-28. Status: approved design, not built. Version: 0.5.4 (small feature; branch `0.5.4/stop-resume`).
+Date: 2026-10-28. Status: approved design, not built. Version: 0.6.1 (small feature; branch `0.6.1/stop-resume`).
 
 ## Why
 
@@ -48,7 +48,7 @@ Limit: the registry is in-process. The plan checks the uvicorn worker count in `
 
 ### Team mode
 
-- The note also goes into `workspace["notes"]`.
+- The notes are not stored in `workspace["notes"]`: each node derives them from the thread every time it runs (`_notes(messages)`).
 - `TASK_MESSAGE` shows the notes to every task not yet done.
 - `review` and `synthesize` get the notes too, so the board can add a follow-up when a note asks for more ("also check my files").
 - After a plain resume, tasks that already finished do not rerun. After a note, the tasks of the cut-off wave all rerun with the note; earlier waves do not.
@@ -95,4 +95,4 @@ Plus one manual check in the browser: stop a team reply mid-wave, reload, type a
 
 ## 6. Docs and release
 
-Update `ARCHITECTURE.md`, `.claude/rules/orchestration.md` and `.claude/rules/team-mode.md` in the same branch. The feature ships in patch 0.5.4.
+Update `ARCHITECTURE.md`, `.claude/rules/orchestration.md` and `.claude/rules/team-mode.md` in the same branch. The feature ships in patch 0.6.1.

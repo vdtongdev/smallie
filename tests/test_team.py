@@ -2316,6 +2316,42 @@ async def test_team_note_during_a_challenge_round_reruns_that_round(monkeypatch)
     await _noted_thread(assistant, config)
 
 
+async def test_note_during_a_challenge_round_without_pending_sends_still_answers(monkeypatch, caplog):
+    from app.orchestration import stopping
+    log = []
+    docs = Seeing("docs", "DOCS TEXT", log=log)
+
+    async def board(messages, answers, config, user_id=None, inputs=None, agents=None):
+        if len(_starts(log, "docs")) == 1:
+            docs.delay = 30
+            return _challenge()
+        return Board()
+
+    monkeypatch.setattr(team, "ask_board", board)
+    _plan(monkeypatch, _docs_then_sql())
+    agents = {"docs": docs, "sql": Fake("sql", "SQL TEXT", log=log), "research": Fake("research", "R", log=log)}
+    assistant = _assistant(monkeypatch, per_agent(orchestrator=[AIMessage("Final.")]), documents=("handbook.pdf",), **agents)
+    config = {"configurable": {"thread_id": "stop-challenge-nosends"}}
+
+    await _cancel_once(assistant, _ask(THREE), config, lambda: len(_starts(log, "docs")) == 2)
+    docs.delay = 0
+    monkeypatch.setattr(stopping, "TASKS", "no-such-channel")  # the pending Sends can't be read
+    with caplog.at_level("WARNING"):
+        await add_note(assistant, config, "N-NOTE")
+    await _resume(assistant, config)
+
+    assert "N-NOTE" in docs.inputs[-1] and len(_ends(log, "docs")) >= 2  # the challenged task reran with the note
+    assert any("langgraph" in r.getMessage().lower() for r in caplog.records if r.levelname == "WARNING")
+    await _noted_thread(assistant, config)
+
+
+def test_steer_without_a_wave_entry_does_not_raise():
+    task = {"id": "t1", "agent": "docs", "goal": "g", "depends_on": [], "status": "running"}
+    values = {"workspace": {"tasks": [task], "history": [{"type": "review", "key": "k"}], "wave": 1}}
+    command = team.steer(values, ("speak",), [], [HumanMessage("N")])
+    assert command.goto == "dispatch"
+
+
 async def test_one_named_speaker_and_reply_tasks_are_medium_default(monkeypatch):
     _research_does_not_join(monkeypatch)
     _plan(monkeypatch)

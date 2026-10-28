@@ -12,6 +12,7 @@ on its `additional_kwargs["team"]`. Progress goes out as `custom` stream events:
 
 import asyncio
 import dataclasses
+import importlib.metadata
 import logging
 import re
 import time
@@ -352,14 +353,18 @@ def steer(values: dict, next_nodes: Sequence[str], sends: Sequence[Send], note: 
     so the update's `goto` names the step. Every task of a cut-off wave runs again, the finished ones too: a wave
     from `dispatch` is dispatched again (its tasks pending, its entries in `history` dropped), so the task notes
     are built with the note; a challenge or conflict round from `review` is sent again as it was, the note added
-    to its thread. Any other step (plan, review, synthesize, draw) runs again and reads the note from the state."""
+    to its thread (with no pending Sends to send, its tasks go through `dispatch` like a plan wave). Any other step (plan, review, synthesize, draw) runs again and reads the note from the state."""
     if "speak" not in next_nodes:
         return Command(update={"messages": note}, goto=list(next_nodes))
     workspace = values["workspace"]
     history = workspace["history"]
-    at = max(i for i, e in enumerate(history) if e["type"] == "wave")
-    wave = history[at]
-    again = wave["kind"] == "plan"  # `dispatch` sent it, else a review's challenge or conflict round
+    waves = [i for i, e in enumerate(history) if e["type"] == "wave"]
+    at = waves[-1] if waves else len(history)
+    wave = history[at] if waves else {"kind": "plan", "tasks": [], "wave": workspace["wave"] + 1}
+    again = wave["kind"] == "plan" or not sends  # `dispatch` sent it, else a review's challenge or conflict round
+    if wave["kind"] != "plan" and not sends:  # the pending Sends could not be read: `dispatch` runs the wave's tasks as a plan wave
+        log.warning("No pending Sends found for a cut-off %s wave (langgraph %s); running its tasks again through dispatch",
+                    wave["kind"], importlib.metadata.version("langgraph"))
     tasks = [{**t, "status": "pending" if again else "running"} if t["id"] in wave["tasks"] else t for t in workspace["tasks"]]
     reset = {**workspace, "reset": True, "tasks": tasks, "history": history[:at] if again else history[:at + 1]}
     if again:

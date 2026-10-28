@@ -24,8 +24,8 @@ class Plan(BaseModel):
     tasks: list[Task] = []
 
 
-def _item(id: str, agent: str, goal: str, depends_on: list[str], origin: str, task: Task | None = None) -> dict:
-    """A workspace task. Only a task rated by the plan call has `difficulty_source` "plan"."""
+def _item(id: str, agent: str, goal: str, depends_on: list[str], origin: str, task: Task | None = None, source: str = "plan") -> dict:
+    """A workspace task. A task rated by a model call has `difficulty_source` `source` ("plan" or "review"), else "default"."""
     rated = task.difficulty.strip().lower() if task and "difficulty" in task.model_fields_set else ""
     planned = rated in DIFFICULTIES
     return {
@@ -37,7 +37,7 @@ def _item(id: str, agent: str, goal: str, depends_on: list[str], origin: str, ta
         "origin": origin,
         "difficulty": rated if planned else "medium",
         "difficulty_reason": task.difficulty_reason if planned else "",
-        "difficulty_source": "plan" if planned else "default",
+        "difficulty_source": source if planned else "default",
     }
 
 
@@ -112,7 +112,7 @@ def add_follow_ups(
     valid = [x for x in follow_ups if x.agent in available and set(x.depends_on) <= ids]
     room = max(max_tasks - len(tasks), 0)
     added = [
-        _item(f"t{len(tasks) + i}", x.agent, x.goal, list(x.depends_on), "follow_up")
+        _item(f"t{len(tasks) + i}", x.agent, x.goal, list(x.depends_on), "follow_up", x, "review")
         for i, x in enumerate(valid[:room], 1)
     ]
     return tasks + added, added, [x.goal for x in valid[room:]]

@@ -181,3 +181,20 @@ def test_tasks_outside_the_plan_are_medium_default():
     added = add_follow_ups(base, [t("x", "docs")], ["docs", "sql"], 6)[1]
     for x in fallback_tasks(["sql"]) + added:
         assert (x["difficulty"], x["difficulty_reason"], x["difficulty_source"]) == ("medium", "", "default")
+
+
+def test_follow_up_rating_from_review():
+    ups = [Task(id="x", agent="sql", goal="g", difficulty="Easy ", difficulty_reason="one lookup")]
+    _, added, _ = add_follow_ups([task("t1", "done")], ups, ["sql"], 6)
+    assert (added[0]["difficulty"], added[0]["difficulty_reason"], added[0]["difficulty_source"]) == ("easy", "one lookup", "review")
+
+
+def test_follow_up_without_rating_is_medium_default():
+    _, added, _ = add_follow_ups([task("t1", "done")], [t("x", "sql")], ["sql"], 6)
+    assert (added[0]["difficulty"], added[0]["difficulty_reason"], added[0]["difficulty_source"]) == ("medium", "", "default")
+
+
+def test_follow_up_invalid_rating_is_medium_default():
+    ups = [Task(id="x", agent="sql", goal="g", difficulty="extreme", difficulty_reason="why")]
+    _, added, _ = add_follow_ups([task("t1", "done")], ups, ["sql"], 6)
+    assert (added[0]["difficulty"], added[0]["difficulty_reason"], added[0]["difficulty_source"]) == ("medium", "", "default")

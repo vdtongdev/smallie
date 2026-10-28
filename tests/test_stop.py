@@ -145,3 +145,33 @@ async def test_messages_mark_a_stopped_chat(monkeypatch):
 
     state.next = ()  # a finished chat shows no stopped line
     assert len(await routes_conversations.messages("c1", request, "u1")) == 1
+
+
+class CancelOnRegister(dict):
+    """A Stop that lands the moment the run is registered, before the run's first step."""
+
+    def __setitem__(self, key, task):
+        super().__setitem__(key, task)
+        task.cancel()
+
+
+async def test_stop_before_the_run_took_a_step_still_ends_the_stream(monkeypatch):
+    async def astream(*args, **kwargs):
+        yield (), "custom", {"type": "plan"}
+
+    h = Harness(monkeypatch, astream)
+    monkeypatch.setattr(routes_chat, "RUNNING", CancelOnRegister())
+    _, events, reader = await h.start()
+    await asyncio.wait_for(reader, 5)  # a hang fails here instead of freezing the suite
+
+    assert events[-1] == {"type": "stopped"}
+    assert "c1" not in routes_chat.RUNNING
+
+
+async def test_stop_when_the_run_already_finished_does_not_claim_the_turn(monkeypatch):
+    h = Harness(monkeypatch, slow_run(asyncio.Event()))
+    finished = asyncio.create_task(asyncio.sleep(0))
+    await finished
+    routes_chat.RUNNING["c1"] = finished  # finished, not yet removed by its stream
+
+    assert await stop("c1", "u1") == {"stopped": False}

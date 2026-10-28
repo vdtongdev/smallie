@@ -103,13 +103,12 @@ async def chat(
             queue: asyncio.Queue = asyncio.Queue()
 
             async def pump():
-                try:
-                    async for event in _events_from(stream):
-                        await queue.put(event)
-                finally:
-                    await queue.put(None)
+                async for event in _events_from(stream):
+                    await queue.put(event)
 
-            run = RUNNING[conversation["id"]] = asyncio.create_task(pump())
+            run = asyncio.create_task(pump())
+            run.add_done_callback(lambda _: queue.put_nowait(None))  # also when cancelled before its first step
+            RUNNING[conversation["id"]] = run
             try:
                 while (event := await queue.get()) is not None:
                     yield _sse(event)
@@ -182,7 +181,7 @@ async def stop(conversation_id: str, user_id: str = Depends(get_current_user)):
     if not await asyncio.to_thread(get_conversation, user_id, conversation_id):
         raise HTTPException(404, "Conversation not found")
     run = RUNNING.get(conversation_id)
-    if run is None:
+    if run is None or run.done():  # a finished run's stream sends `done`; it keeps the turn
         return {"stopped": False}
     run.cancel()
     return {"stopped": True}

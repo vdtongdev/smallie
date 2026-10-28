@@ -184,7 +184,7 @@
           <li><strong>Advanced</strong> (best answers): easy tasks go to the standard model, medium and hard to the strong model.</li>
         </ul>
         <p>The standard model is required. The small and strong models are optional: when one is empty, its tasks use the standard model.
-          If a small or strong model fails (for example the name is wrong), the same step is repeated once on the standard model.
+          If a small or strong model fails (for example the name is wrong, or the provider rate-limits it), the same step is repeated once on the standard model.
           The <em>Activity</em> button above a reply shows which model handled each task and why.</p>
 
         <h2>Tips</h2>
@@ -295,7 +295,7 @@
           <li><strong>Nâng cao</strong> (câu trả lời tốt nhất): nhiệm vụ dễ dùng model tiêu chuẩn, vừa và khó dùng model mạnh.</li>
         </ul>
         <p>Model tiêu chuẩn là bắt buộc. Model nhỏ và model mạnh là tuỳ chọn: nếu để trống, các nhiệm vụ đó dùng model tiêu chuẩn.
-          Nếu model nhỏ hoặc mạnh bị lỗi (ví dụ sai tên), bước đó được chạy lại một lần bằng model tiêu chuẩn.
+          Nếu model nhỏ hoặc mạnh bị lỗi (ví dụ sai tên, hoặc nhà cung cấp giới hạn tần suất gọi), bước đó được chạy lại một lần bằng model tiêu chuẩn.
           Nút <em>Hoạt động</em> phía trên câu trả lời cho biết model nào xử lý từng nhiệm vụ và vì sao.</p>
 
         <h2>Mẹo</h2>
@@ -324,6 +324,7 @@
   </dialog>
 
   <dialog id="settingsDialog" aria-labelledby="settingsTitle">
+    <form method="dialog" class="dialog-close"><button class="icon-btn" data-i18n-title="close">×</button></form>
     <h2 id="settingsTitle" data-i18n="settings"></h2>
     <p id="settingsStatus" class="muted" role="status"></p>
     <label for="settingsKey" data-i18n="apiKey"></label>
@@ -339,6 +340,12 @@
       <label class="profile-card"><input type="radio" name="settingsProfile" value="advanced">
         <strong data-i18n="advancedProfile"></strong><span class="profile-tag" data-i18n="advancedTag"></span><span class="muted" data-i18n="advancedLine"></span></label>
     </div>
+    <p class="muted" data-i18n="difficultyIntro"></p>
+    <ul class="difficulty-list muted">
+      <li><strong data-i18n="easy"></strong>: <span data-i18n="easyHelp"></span></li>
+      <li><strong data-i18n="medium"></strong>: <span data-i18n="mediumHelp"></span></li>
+      <li><strong data-i18n="hard"></strong>: <span data-i18n="hardHelp"></span></li>
+    </ul>
     <h3 class="settings-group" data-i18n="modelsGroup"></h3>
     <label for="settingsModel" data-i18n="standardModel"></label>
     <input id="settingsModel" type="text" autocomplete="off">

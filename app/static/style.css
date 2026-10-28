@@ -267,6 +267,8 @@ dialog {
   color: var(--text);
   width: min(560px, calc(100vw - 32px));
 }
+#settingsDialog { width: min(800px, calc(100vw - 32px)); }
+#settingsDialog .dialog-close { position: absolute; top: 8px; right: 8px; padding: 0; background: none; }
 #settingsDialog label { display: block; margin-top: 12px; margin-bottom: 4px; }
 #settingsDialog input {
   display: block;
@@ -281,6 +283,8 @@ dialog {
 }
 #settingsDialog .settings-group { margin: 18px 0 0; font-size: 15px; }
 #settingsDialog .profile-cards { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+#settingsDialog .difficulty-list { margin: 6px 0 0; padding-left: 18px; font-size: 13px; }
+#settingsDialog .profile-cards + p.muted { margin: 10px 0 0; font-size: 13px; }
 #settingsDialog .profile-card { flex: 1 1 140px; display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 10px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; font-size: 13px; }
 #settingsDialog .profile-card:has(input:checked) { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 #settingsDialog .profile-card input { position: absolute; opacity: 0; width: auto; pointer-events: none; }

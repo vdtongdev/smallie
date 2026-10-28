@@ -22,7 +22,7 @@ from app.orchestration.router import ORCHESTRATOR
 from app.core.auth import get_current_user
 from app.core.config import get_settings
 from app.core.conversations import create_conversation, get_conversation, list_conversations, touch_conversation
-from app.core.llm import NoModelSettings
+from app.core.llm import NoModelSettings, pick_model, pick_tier
 from app.core.model_settings import load_settings
 from app.core.graph import extract_facts, recall_facts
 from app.core.memory import TEAM_MODE, AgentContext, load_recent_chats, save_turn, turns
@@ -32,6 +32,7 @@ router = APIRouter(tags=["chat"])
 log = logging.getLogger(__name__)
 
 TEAM_EVENTS = frozenset({"plan", "plan_updated", "wave", "review", "synthesize", "needs_human", "spoke", "charts"})  # custom events of a team turn
+UI_EVENTS = TEAM_EVENTS | {"model_fallback"}  # custom events the UI gets, in a team turn or a 1v1 reply
 
 
 class ChatRequest(BaseModel):
@@ -81,6 +82,12 @@ async def chat(
             settings = await asyncio.to_thread(load_settings, user_id)
             if settings is None:
                 raise NoModelSettings()  # answered by the handler below; no model call is made
+            tier = "standard"  # team mode: each task sets its own tier
+            if kind != TEAM_MODE:  # a 1v1 reply is a medium task
+                tier = pick_tier("medium", settings.profile)
+                model, tier_used, reason = pick_model(settings, tier)
+                yield _sse({"type": "routing", "difficulty": "medium", "profile": settings.profile,
+                            "tier": tier_used, "model": model, "reason": reason})
             memories, recent_chats, user = await asyncio.gather(
                 asyncio.to_thread(recall_facts, user_id),
                 _recent_chats(request, user_id, conversation["id"]) if cross_chat else _empty(),
@@ -90,7 +97,7 @@ async def chat(
                 await _chat_input(assistant, config, kind, body.message),
                 config={**config, "callbacks": [usage], "metadata": {"user_id": user_id}},  # filter traces per user
                 context=AgentContext(user_id=user_id, user=user, memories=memories,
-                                     recent_chats=recent_chats, agent=kind),
+                                     recent_chats=recent_chats, agent=kind, tier=tier),
                 stream_mode=["messages", "updates", "custom"],
                 subgraphs=True,
             )
@@ -208,9 +215,9 @@ async def _events_from(stream) -> AsyncIterator[dict]:
                 current = step
                 yield {"type": "step", "agent": step[0], "name": step[1]}
         for event in _to_events(mode, chunk, namespace, in_round=bool(agent)):
-            if agent and event["type"] in ("token", "tool_call", "tool_result"):
+            if agent and event["type"] in ("token", "tool_call", "tool_result", "model_fallback"):
                 event = {**event, "agent": agent, **({"task": task} if task else {})}
-            elif not agent and event["type"] in ("tool_call", "tool_result") and (route := _asked_route(namespace)) not in (None, routed):
+            elif not agent and event["type"] in ("tool_call", "tool_result", "model_fallback") and (route := _asked_route(namespace)) not in (None, routed):
                 event = {**event, "agent": route}  # a specialist the orchestrator asked: its tool steps in the activity popup
             yield event
 
@@ -255,7 +262,7 @@ def _to_events(mode: str, chunk, namespace: tuple[str, ...] = (), in_round: bool
         return []
 
     if mode == "custom":
-        return [chunk] if isinstance(chunk, dict) and chunk.get("type") in TEAM_EVENTS else []
+        return [chunk] if isinstance(chunk, dict) and chunk.get("type") in UI_EVENTS else []
 
     # mode == "updates": {node_name: state_update}
     events = []

@@ -118,6 +118,19 @@ async def test_team_mode_uses_the_team_budget(monkeypatch):
     assert len(remote.calls) == 1
 
 
+async def test_tier_reaches_the_agent_server():
+    remote = FakeRemote(output={"messages": [HUMAN]})
+    context = AgentContext(user_id="u-7", tier="strong")
+    await agent(remote).node({"messages": [as_message(HUMAN)]}, {}, SimpleNamespace(context=context))
+    assert remote.calls[0]["context"]["tier"] == "strong"
+
+
+def test_remote_keeps_fallback_metadata():
+    fallback = {"from_model": "tiny", "category": "model_not_found"}
+    message = as_message({"type": "ai", "content": "hi", "response_metadata": {"fallback": fallback}})
+    assert message.response_metadata["fallback"] == fallback
+
+
 async def test_sends_context_and_user_header_without_thread_id():
     remote = FakeRemote(output={"messages": [HUMAN]})
     config = {"configurable": {"thread_id": "c-42", "checkpoint_ns": "sql:abc", "__pregel_stream": "hook"}}

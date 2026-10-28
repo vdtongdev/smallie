@@ -173,6 +173,11 @@ PLAN_PROMPT = """You plan how a team of agents answers the user's latest message
 5. List in `depends_on` the ids of the tasks whose output a task needs. A task that needs nothing from another has an empty `depends_on`. Tasks without a dependency between them run at the same time.
 6. A task that draws a chart depends on the task that produces the data to draw.
 7. Return at most {max_tasks} tasks, each with a different `id`.
+8. Rate each task's `difficulty` as `easy`, `medium` or `hard`, judging the task, not the agent.
+   - easy: a clear, bounded task, such as a single lookup, an extraction or a straightforward tool use.
+   - medium: several steps, ordinary research, a non-trivial query, or combining a little evidence.
+   - hard: real ambiguity, conflicting evidence, comparing several sources, or a nuanced synthesis.
+9. Give each task a `difficulty_reason` of a few words that says why you rated it so.
 
 Write every goal in {language}."""
 

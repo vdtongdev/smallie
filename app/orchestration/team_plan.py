@@ -5,6 +5,8 @@ from collections.abc import Collection, Sequence
 
 from pydantic import BaseModel
 
+from app.core.llm import DIFFICULTIES
+
 SETTLED = ("done", "failed", "withdrew", "skipped")
 DEAD = ("failed", "withdrew", "skipped")
 
@@ -14,13 +16,18 @@ class Task(BaseModel):
     agent: str
     goal: str
     depends_on: list[str] = []
+    difficulty: str = "medium"  # defaults: a missing required field would reject the whole plan
+    difficulty_reason: str = ""
 
 
 class Plan(BaseModel):
     tasks: list[Task] = []
 
 
-def _item(id: str, agent: str, goal: str, depends_on: list[str], origin: str) -> dict:
+def _item(id: str, agent: str, goal: str, depends_on: list[str], origin: str, task: Task | None = None) -> dict:
+    """A workspace task. Only a task rated by the plan call has `difficulty_source` "plan"."""
+    rated = task.difficulty.strip().lower() if task and "difficulty" in task.model_fields_set else ""
+    planned = rated in DIFFICULTIES
     return {
         "id": id,
         "agent": agent,
@@ -28,6 +35,9 @@ def _item(id: str, agent: str, goal: str, depends_on: list[str], origin: str) ->
         "depends_on": depends_on,
         "status": "pending",
         "origin": origin,
+        "difficulty": rated if planned else "medium",
+        "difficulty_reason": task.difficulty_reason if planned else "",
+        "difficulty_source": "plan" if planned else "default",
     }
 
 
@@ -56,7 +66,7 @@ def validate_plan(plan: Plan, available: Sequence[str], max_tasks: int) -> list[
     counts = Counter(given)
     new_ids = {g: f"t{i}" for i, g in enumerate(given, 1) if counts[g] == 1}
     tasks = [
-        _item(f"t{i}", x.agent, x.goal, [new_ids[d] for d in x.depends_on if d in new_ids], "plan")
+        _item(f"t{i}", x.agent, x.goal, [new_ids[d] for d in x.depends_on if d in new_ids], "plan", x)
         for i, x in enumerate(kept, 1)
     ]
     return tasks if _acyclic(tasks) else None

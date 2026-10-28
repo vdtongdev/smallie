@@ -158,3 +158,26 @@ def test_a_dead_file_task_never_skips_its_waiters():
 def test_a_dead_planned_input_still_skips():
     tasks = [_t("t1", "docs", status="withdrew"), _t("t2", "research", ["t1"])]
     assert dead_inputs(tasks[1], tasks) == (["t1"], True)
+
+
+def test_plan_without_difficulty_parses():
+    plan = Plan.model_validate({"tasks": [{"agent": "sql", "goal": "g"}]})
+    assert plan.tasks[0].difficulty == "medium" and plan.tasks[0].difficulty_reason == ""
+
+
+def test_difficulty_normalized():
+    def rated(**kw):
+        return Task(id="t1", agent="sql", goal="g", **kw)
+
+    plan = Plan(tasks=[rated(difficulty="Hard ", difficulty_reason="why"), rated(difficulty="extreme"), rated()])
+    out = validate_plan(plan, ["sql"], 6)
+    assert [(x["difficulty"], x["difficulty_source"]) for x in out] == [
+        ("hard", "plan"), ("medium", "default"), ("medium", "default")]
+    assert out[0]["difficulty_reason"] == "why"
+
+
+def test_tasks_outside_the_plan_are_medium_default():
+    base = [{"id": "t1", "agent": "sql", "goal": "g", "depends_on": [], "status": "done"}]
+    added = add_follow_ups(base, [t("x", "docs")], ["docs", "sql"], 6)[1]
+    for x in fallback_tasks(["sql"]) + added:
+        assert (x["difficulty"], x["difficulty_reason"], x["difficulty_source"]) == ("medium", "", "default")

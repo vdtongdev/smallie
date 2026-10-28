@@ -140,7 +140,8 @@ def retry_tasks(messages: Sequence[AnyMessage], available: Sequence[tuple[AgentS
     team = next((m.additional_kwargs["team"] for m in reversed(messages[:-1])
                  if isinstance(m, AIMessage) and m.additional_kwargs.get("team")), None)
     routes = {spec.route for spec, _ in available}
-    tasks = [{**t, "goal": t["goal"] or team["goal"], "status": "pending", "origin": "plan"}
+    tasks = [{"difficulty": "medium", "difficulty_reason": "", "difficulty_source": "default",
+              **t, "goal": t["goal"] or team["goal"], "status": "pending", "origin": "plan"}
              for t in (team or {}).get("tasks", []) if t["agent"] in routes and t["origin"] in ("plan", "fallback")]
     return tasks or None
 
@@ -294,7 +295,8 @@ def with_drawers(tasks: Sequence[dict], drawers: Sequence[str], origin: str) -> 
     tasks = list(tasks)
     for route in drawers:
         tasks.append({"id": f"t{len(tasks) + 1}", "agent": route, "goal": DRAW_GOAL, "depends_on": [ANSWER],
-                      "status": "pending", "origin": origin})
+                      "status": "pending", "origin": origin,
+                      "difficulty": "medium", "difficulty_reason": "", "difficulty_source": "default"})
     return tasks
 
 

@@ -1890,3 +1890,30 @@ async def test_retry_follow_up_reruns_the_previous_team_turn(monkeypatch):
 
     chunks = await _stream(assistant, _ask("thanks"))
     assert not _events(chunks, "wave") and sql.calls == 2
+
+
+async def test_one_named_speaker_and_reply_tasks_are_medium_default(monkeypatch):
+    _research_does_not_join(monkeypatch)
+    _plan(monkeypatch)
+    _board(monkeypatch, Board())
+    assistant = _assistant(monkeypatch, per_agent(sql=[AIMessage("unused")]), sql=Fake("sql", "Cap is 3T.", log=[]))
+    await _stream(assistant, _ask(SQL_QUESTION))
+    tasks = (await _thread(assistant))[-1].additional_kwargs["team"]["tasks"]
+    assert [(x["difficulty"], x["difficulty_source"]) for x in tasks] == [("medium", "default")]
+
+    assistant, _, _ = await _chart_asks(monkeypatch, "check handbook.pdf")
+    tasks = (await _thread(assistant))[-1].additional_kwargs["team"]["tasks"]
+    docs = next(x for x in tasks if x["origin"] == "reply")
+    assert (docs["difficulty"], docs["difficulty_source"]) == ("medium", "default")
+
+
+def test_retry_keeps_old_difficulty():
+    spec, info = SimpleNamespace(route="sql"), RouteInfo()
+    old = {"goal": "g", "tasks": [
+        {"id": "t1", "agent": spec.route, "goal": "x", "depends_on": [], "status": "done", "origin": "plan",
+         "difficulty": "hard", "difficulty_reason": "why", "difficulty_source": "plan"},
+        {"id": "t2", "agent": spec.route, "goal": "y", "depends_on": [], "status": "done", "origin": "plan"}]}
+    messages = [HumanMessage("q"), AIMessage("a", additional_kwargs={"team": old}), HumanMessage("try again")]
+    out = team.retry_tasks(messages, [(spec, info)])
+    assert [(x["difficulty"], x["difficulty_reason"], x["difficulty_source"]) for x in out] == [
+        ("hard", "why", "plan"), ("medium", "", "default")]

@@ -14,6 +14,7 @@ import asyncio
 import dataclasses
 import logging
 import re
+import time
 import uuid
 from collections.abc import Mapping, Sequence
 from typing import Annotated, Literal
@@ -33,8 +34,10 @@ from app.agents.remote import CallBudgetExceeded
 from app.agents.base import MEMORY_TOOL_NAMES, TOOL_RESULT_PREVIEW, AgentSpec, RouteInfo, ToolRecorder, turn_messages
 from app.agents.registry import AGENTS
 from app.core.config import get_settings
-from app.core.llm import get_chat_model
+from app.core.llm import get_chat_model, pick_model, pick_tier
 from app.core.memory import TEAM_MODE, AgentContext
+from app.core.model_settings import load_settings
+from app.core.usage import UsageCounter
 from app.core.prompts import reply_language
 from app.orchestration.prompts import BOARD_PROMPT, CHALLENGE_MESSAGE, CONFLICT_MESSAGE, DRAW_MESSAGE, DRAWING_NOTE, NOTHING_FOUND_MESSAGE, PLAN_PROMPT, ROUND_MESSAGE, TASK_MESSAGE, TEAM_MESSAGE
 from app.orchestration.team_plan import Plan, Task, add_follow_ups, after_user_files, dead_inputs, fallback_tasks, ready, validate_plan
@@ -308,7 +311,7 @@ def _transcript(workspace: dict) -> dict:
 
 
 def _brief(task: dict) -> dict:
-    return {k: task[k] for k in ("id", "agent", "goal", "depends_on")}
+    return {**{k: task[k] for k in ("id", "agent", "goal", "depends_on")}, "difficulty": task.get("difficulty", "medium")}
 
 
 def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
@@ -322,12 +325,14 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
     def drawers_of(tasks: Sequence[dict]) -> list[str]:
         return list(dict.fromkeys(t["agent"] for t in tasks if by_route[t["agent"]].draws))
 
-    def job(task_id: str, route: str, rnd: int, kind: str, note: str, messages) -> Send:
-        return Send("speak", {"task": task_id, "route": route, "round": rnd, "kind": kind, "note": note, "messages": messages})
+    def job(task_id: str, route: str, rnd: int, kind: str, note: str, messages, rated: dict) -> Send:
+        rating = {k: rated.get(k, d) for k, d in (("difficulty", "medium"), ("difficulty_reason", ""), ("difficulty_source", "default"))}
+        return Send("speak", {"task": task_id, "route": route, "round": rnd, "kind": kind, "note": note, "messages": messages, **rating})
 
     async def ask_orchestrator(state: AssistantState, runtime: Runtime[AgentContext], note: str = "", drawn: bool = False):
         """The orchestrator node's Command for this thread (`note` as its hidden team message;
         `drawn`: a chart task charts the answer, so the orchestrator may not)."""
+        runtime = dataclasses.replace(runtime, context=dataclasses.replace(runtime.context, tier="standard"))
         return await orchestrator({**state, "team_note": note, "team_drawn": drawn} if note else state, runtime)
 
     async def handed_off(command: Command, messages, runtime: Runtime[AgentContext], config: RunnableConfig) -> AIMessage:
@@ -412,7 +417,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
                 note = ROUND_MESSAGE.format(language=language, drawing=drawing)
             if notes.get(t["agent"]):
                 note = f"{note}\n{notes[t['agent']]}"
-            sends.append(job(t["id"], t["agent"], 1, "plan", note, messages))
+            sends.append(job(t["id"], t["agent"], 1, "plan", note, messages, t))
         ids, routes = [t["id"] for t in todo], [t["agent"] for t in todo]
         entry = {"type": "wave", "wave": wave, "kind": "plan", "tasks": ids, "agents": routes}
         emit(entry)
@@ -421,19 +426,27 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
     async def speak(task: dict, runtime: Runtime[AgentContext], config: RunnableConfig) -> dict:
         route, spec, tid = task["route"], by_route[task["route"]], task["task"]
         emit({"type": "speaker", "agent": route, "task": tid, "ns": config["configurable"]["checkpoint_ns"]})
-        context = dataclasses.replace(runtime.context, sources=tuple(sorted(spec.sources)))
+        saved = await asyncio.to_thread(load_settings, runtime.context.user_id)  # None cannot happen here: treated as standard
+        profile = saved.profile if saved else "balanced"
+        model, tier, reason = pick_model(saved, pick_tier(task["difficulty"], profile)) if saved else ("", "standard", "standard model")
+        context = dataclasses.replace(runtime.context, sources=tuple(sorted(spec.sources)), tier=tier)
         messages = [*task["messages"], HumanMessage(task["note"], name=TEAM)]
+        counter, started = UsageCounter(), time.monotonic()  # feeds the trace only: the request's counter is the one saved
+        trace = {"difficulty": task["difficulty"], "difficulty_source": task["difficulty_source"],
+                 "difficulty_reason": task["difficulty_reason"], "profile": profile, "tier": tier, "model": model,
+                 "reason": reason, "fallback": None}
         entry = {"agent": route, "round": task["round"], "tools": [], "artifacts": {}}
 
         def done(text: str, status: str, budget: bool = False) -> dict:
-            result = {**entry, "text": text, **({"budget": True} if budget else {})}
+            result = {**entry, **trace, "usage": counter.totals(), "duration_s": round(time.monotonic() - started, 2),
+                      "text": text, **({"budget": True} if budget else {})}
             record = {"type": "result", "task": tid, "kind": task["kind"], "status": status,
                       **{k: result[k] for k in ("agent", "round", "text", "tools")}}
             return {"workspace": {"results": {tid: result}, "status": {tid: status}, "history": [record]}}
 
         recorder = ToolRecorder()
         try:
-            result = await agents[route].ainvoke({"messages": messages}, merge_configs(config, {"callbacks": [recorder]}),
+            result = await agents[route].ainvoke({"messages": messages}, merge_configs(config, {"callbacks": [recorder, counter]}),
                                                  context=context)
         except (openai.RateLimitError, openai.AuthenticationError):
             raise
@@ -452,9 +465,12 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         else:
             withdrew = not result.get("findings")
         entry = {**entry, "tools": tools, "artifacts": collect(turn)}
-        text = spec.result(result)
-        emit({"type": "spoke", "task": tid, "agent": route, "round": task["round"], "text": text, "tools": tools, "withdrew": withdrew})
-        return done(text, "withdrew" if withdrew else "done")
+        trace["fallback"] = next((m.response_metadata["fallback"] for m in turn
+                                  if isinstance(m, AIMessage) and m.response_metadata.get("fallback")), None)
+        outcome = done(spec.result(result), "withdrew" if withdrew else "done")
+        shown = {k: v for k, v in outcome["workspace"]["results"][tid].items() if k not in ("artifacts", "budget")}
+        emit({"type": "spoke", "task": tid, **shown, "withdrew": withdrew})
+        return outcome
 
     async def review(state: TeamState, runtime: Runtime[AgentContext], config: RunnableConfig) -> Command:
         workspace, messages, settings = state["workspace"], state["messages"], get_settings()
@@ -518,6 +534,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         # Challenges: one round for the producer per hand-off, at most `team_max_rounds` of them.
         sends, ids, new_rounds = [], [], {}
         language, wave, by_id = reply_language(messages), workspace["wave"] + 1, {a["task"]: a for a in answers}
+        rated = {t["id"]: t for t in workspace["tasks"]}
         if not asks:
             for c in board.challenges:
                 key = hand_off_key(c.to_task, c.by_task)
@@ -530,7 +547,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
                 if c.to_task not in ids:
                     own = by_id[c.to_task]
                     note = CHALLENGE_MESSAGE.format(question=c.question, evidence=c.evidence, own=own["text"], language=language)
-                    sends.append(job(c.to_task, own["agent"], results[c.to_task]["round"] + 1, "challenge", note, messages))
+                    sends.append(job(c.to_task, own["agent"], results[c.to_task]["round"] + 1, "challenge", note, messages, rated[c.to_task]))
                     ids.append(c.to_task)
         kind = "challenge" if ids else "conflict"
         if again:
@@ -544,7 +561,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
                     conflicts=_bullets([f"{c.claim} ({c.issue})" for c in mine]),
                     others="\n\n".join(f"{o['agent']}:\n{o['text']}" for o in others) or "none",
                     own=a["text"], language=language)
-                sends.append(job(a["task"], a["agent"], done_rounds + 2, "conflict", note, messages))
+                sends.append(job(a["task"], a["agent"], done_rounds + 2, "conflict", note, messages, rated[a["task"]]))
                 ids.append(a["task"])
             new_rounds[meet] = done_rounds + 1
         # Follow-ups: new pending tasks, once per agent and goal; a chart task waits for the answer, nothing waits for it. A turn with a chart task drops chart follow-ups.
@@ -667,7 +684,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
             emit({"type": "speaker", "agent": route, "task": tid, "ns": config["configurable"]["checkpoint_ns"]})
             # With a table on this turn's answer the chart agent charts that table: it may not copy numbers.
             deny = ("chart_data",) if answer.additional_kwargs.get("tables") else ()
-            context = dataclasses.replace(runtime.context, sources=NO_SOURCES, deny_tools=deny)
+            context = dataclasses.replace(runtime.context, sources=NO_SOURCES, deny_tools=deny, tier="standard")
             note = HumanMessage(DRAW_MESSAGE.format(language=reply_language(messages)), name=TEAM)
             recorder = ToolRecorder()
             tools, text, charts = [], "", []

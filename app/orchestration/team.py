@@ -30,7 +30,7 @@ from pydantic import BaseModel
 
 from app.agents.artifacts import KINDS, collect
 from app.agents.remote import CallBudgetExceeded
-from app.agents.base import MEMORY_TOOL_NAMES, TOOL_RESULT_PREVIEW, AgentSpec, RouteInfo, ToolRecorder, turn_messages
+from app.agents.base import MEMORY_TOOL_NAMES, TOOL_RESULT_PREVIEW, AgentSpec, RouteInfo, ToolRecorder, turn_messages, user_request
 from app.agents.registry import AGENTS
 from app.core.config import get_settings
 from app.core.llm import get_chat_model
@@ -135,7 +135,8 @@ def participants(available: list[tuple[AgentSpec, RouteInfo]], message: str) -> 
 def retry_tasks(messages: Sequence[AnyMessage], available: Sequence[tuple[AgentSpec, RouteInfo]]) -> list[dict] | None:
     """A short retry message ("try again") in a chat whose last team turn left a transcript: that turn's tasks, pending
     again, on its goal. Else None."""
-    if not RETRY.search(messages[-1].text) or len(messages[-1].text.split()) > SMALL_TALK_WORDS:
+    latest = user_request(messages)
+    if not RETRY.search(latest) or len(latest.split()) > SMALL_TALK_WORDS:
         return None
     team = next((m.additional_kwargs["team"] for m in reversed(messages[:-1])
                  if isinstance(m, AIMessage) and m.additional_kwargs.get("team")), None)
@@ -173,7 +174,7 @@ def clean(board: Board, speakers: Sequence[str], tasks: Sequence[str] | None = N
 async def ask_board(messages: list[AnyMessage], answers: list[dict], config: RunnableConfig, *,
                     user_id: str, inputs: Mapping[str, list[str]] | None = None, agents: Sequence[AgentSpec] | None = None) -> Review:
     """One model call; `config` carries the usage counter's callbacks. `inputs`: task id -> the task ids it received; `agents`: the available agents, which follow-ups may use."""
-    question = next((m.text for m in reversed(messages) if isinstance(m, HumanMessage)), "")
+    question = user_request(messages)
     # Texts go into the message, not a template: answers may contain braces.
     def head(a: dict) -> str:
         line = f"{a.get('task', a['agent'])} ({a['agent']})"
@@ -197,7 +198,7 @@ async def ask_plan(messages: list[AnyMessage], available: Sequence[tuple[AgentSp
                    user_id: str) -> Plan:
     """The one plan call per message, on the user's model; `config` carries the usage counter's callbacks."""
     settings = get_settings()
-    question = next((m.text for m in reversed(messages) if isinstance(m, HumanMessage)), "")
+    question = user_request(messages)
     lines = []
     for spec, info in available:
         line = f"- {spec.route}: {spec.description}"
@@ -345,7 +346,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
     async def plan(state: TeamState, runtime: Runtime[AgentContext], config: RunnableConfig) -> Command:
         messages = state["messages"]
         available = await available_agents(runtime.context.user_id, specs)
-        everyone = participants(available, messages[-1].text)
+        everyone = participants(available, user_request(messages))
         chosen = [spec.route for spec in everyone if not spec.draws]
         retry = None if chosen else retry_tasks(messages, available)
         if not chosen and not retry:

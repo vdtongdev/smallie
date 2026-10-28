@@ -19,6 +19,7 @@ from app.agents.registry import ROUTES, SILENT_STEPS, STEPS
 from app.agents.remote import RUN_NODE, as_message
 from app.orchestration.orchestrator import HANDOFF
 from app.orchestration.router import ORCHESTRATOR
+from app.orchestration.stopping import add_note, clear_stop, is_resume, is_stopped, load_stop, save_stop
 from app.core.auth import get_current_user
 from app.core.config import get_settings
 from app.core.conversations import create_conversation, get_conversation, list_conversations, touch_conversation
@@ -77,9 +78,11 @@ async def chat(
     finished = False
     stopped = False
     usage = UsageCounter()
+    budget = UsageCounter()  # starts at the calls a stopped run already spent; read by the call cap only
+    started = False
 
     async def events():
-        nonlocal finished, stopped
+        nonlocal finished, stopped, started
         yield _sse({"type": "conversation", "id": conversation["id"], "title": conversation["title"]})
         settings = None
         try:
@@ -91,9 +94,14 @@ async def chat(
                 _recent_chats(request, user_id, conversation["id"]) if cross_chat else _empty(),
                 _user(user_id),
             )
+            try:
+                if earlier := await load_stop(store, user_id, conversation["id"]):
+                    budget.model_calls = earlier["model_calls"]
+            except Exception:  # noqa: BLE001 - the cap is best effort; the chat must still run
+                log.exception("Reading the stop record failed")
             stream = assistant.astream(
                 await _chat_input(assistant, config, kind, body.message),
-                config={**config, "callbacks": [usage], "metadata": {"user_id": user_id}},  # filter traces per user
+                config={**config, "callbacks": [usage, budget], "metadata": {"user_id": user_id}},  # filter traces per user
                 context=AgentContext(user_id=user_id, user=user, memories=memories,
                                      recent_chats=recent_chats, agent=kind),
                 stream_mode=["messages", "updates", "custom"],
@@ -109,6 +117,7 @@ async def chat(
             run = asyncio.create_task(pump())
             run.add_done_callback(lambda _: queue.put_nowait(None))  # also when cancelled before its first step
             RUNNING[conversation["id"]] = run
+            started = True
             try:
                 while (event := await queue.get()) is not None:
                     yield _sse(event)
@@ -134,11 +143,23 @@ async def chat(
             yield _sse({"type": "error", "code": "internal", "message": str(exc)[:500]})
         finally:
             await asyncio.to_thread(touch_conversation, conversation["id"])
+            await _settle_stop()
             try:  # failed and cut-off runs still spent tokens
                 await add_usage(store, user_id, usage)
             except Exception:  # noqa: BLE001 - usage is best effort
                 log.exception("Saving token usage failed")
         yield _sse({"type": "stopped" if stopped else "done"})
+
+    async def _settle_stop():
+        """A finished run drops the stop record; a cut-off one (Stop, or an error with steps left)
+        keeps the calls it spent, so resuming cannot get around the call cap."""
+        try:
+            if finished:
+                await clear_stop(store, user_id, conversation["id"])
+            elif started and (stopped or is_stopped(await assistant.aget_state(config))):
+                await save_stop(store, user_id, conversation["id"], budget.model_calls)
+        except Exception:  # noqa: BLE001 - best effort
+            log.exception("Saving the stop record failed")
 
     async def remember_turn():
         # Runs after the response is sent, so the embedding and extraction calls don't delay "done".
@@ -187,10 +208,16 @@ async def stop(conversation_id: str, user_id: str = Depends(get_current_user)):
     return {"stopped": True}
 
 
-async def _chat_input(assistant, config, kind: str, message: str) -> dict | Command:
-    """A paused team turn takes the message as the answer to its question; else a new user message."""
-    if kind == TEAM_MODE and (await assistant.aget_state(config)).interrupts:
+async def _chat_input(assistant, config, kind: str, message: str) -> dict | Command | None:
+    """A paused team turn takes the message as the answer to its question. A stopped chat resumes
+    (None: `astream(None, ...)`), a resume word as it was, any other message as a note. Else a new user message."""
+    snapshot = await assistant.aget_state(config)
+    if kind == TEAM_MODE and snapshot.interrupts:
         return Command(resume=message)
+    if is_stopped(snapshot):
+        if not is_resume(message):
+            await add_note(assistant, config, message)
+        return None
     return {"messages": [{"role": "user", "content": message}]}
 
 

@@ -1761,6 +1761,40 @@ async def test_follow_up_runs_with_its_inputs(monkeypatch):
     assert [(t["id"], t["origin"]) for t in final["tasks"]] == [("t1", "plan"), ("t2", "follow_up")]
 
 
+async def test_follow_up_does_not_wait_on_a_failed_task(monkeypatch):
+    log = []
+    plan = Plan(tasks=[Task(id="t1", agent="docs", goal="a"), Task(id="t2", agent="research", goal="b")])
+    _, assistant, agents = _docs_sql(monkeypatch, plan, log, docs=_Failing(), board=False)
+    _board(monkeypatch, _follow(depends_on=("t1", "t2")), then=Board())
+    await _stream(assistant, _ask(THREE))
+
+    assert agents["sql"].calls == 1
+    tasks = (await _thread(assistant))[-1].additional_kwargs["team"]["tasks"]
+    follow = next(t for t in tasks if t["origin"] == "follow_up")
+    assert follow["status"] == "done" and follow["depends_on"] == ["t2"]
+
+
+async def test_follow_up_whose_only_input_failed_still_runs(monkeypatch):
+    class FailsOnce(Fake):
+        async def ainvoke(self, input, config=None, **kwargs):
+            if self.calls == 0:
+                self.calls += 1
+                raise RuntimeError("boom")
+            return await super().ainvoke(input, config, **kwargs)
+
+    log = []
+    plan = Plan(tasks=[Task(id="t1", agent="sql", goal="a"), Task(id="t2", agent="research", goal="b"),
+                       Task(id="t3", agent="research", goal="c", depends_on=["t1", "t2"])])
+    _, assistant, agents = _docs_sql(monkeypatch, plan, log, sql=FailsOnce("sql", "SQL TEXT", log=log), board=False)
+    _board(monkeypatch, _follow(depends_on=("t1",)), then=Board())
+    await _stream(assistant, _ask(THREE))
+
+    assert agents["sql"].calls == 2
+    tasks = (await _thread(assistant))[-1].additional_kwargs["team"]["tasks"]
+    follow = next(t for t in tasks if t["origin"] == "follow_up")
+    assert follow["status"] == "done" and follow["depends_on"] == []
+
+
 async def test_follow_ups_past_the_cap_are_named(monkeypatch):
     monkeypatch.setattr(get_settings(), "team_max_tasks", 2)
     log = []

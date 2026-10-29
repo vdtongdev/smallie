@@ -653,6 +653,7 @@ async function loadConversations() {
 
 async function openConversation(id) {
   if (state.busy) return;
+  renderUsage(null);
   setConversation(id);
   setAwaiting(false);
   $("messages").innerHTML = "";

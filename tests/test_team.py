@@ -582,6 +582,17 @@ async def _paused(monkeypatch):
     return assistant, sql, chunks
 
 
+async def test_review_question_that_repeats_the_users_message_does_not_pause(monkeypatch):
+    """A review whose `question` is the user's own message asks the user nothing new: the turn must not pause on it."""
+    _board(monkeypatch, Board(question=QUESTION), Board())
+    assistant = _assistant(monkeypatch, per_agent(orchestrator=[AIMessage("Final.")]),
+                           sql=Fake("sql", "draft", log=[]), research=Fake("research", "notes", log=[]))
+    chunks = await _stream(assistant, _ask())
+
+    assert not _events(chunks, "needs_human")
+    assert not (await assistant.aget_state(CONFIG)).interrupts
+
+
 async def test_needs_human_pauses_and_resume_continues(monkeypatch):
     assistant, sql, first = await _paused(monkeypatch)
 

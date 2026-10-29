@@ -64,8 +64,14 @@ def reply_language(messages: list[AnyMessage]) -> str:
     """The language the answer must be in, from the user's latest message. Named outright (the
     app speaks English and Vietnamese only): "the user's language" left weak models to guess, and
     Vietnamese sources or chats around the question made them answer English questions in Vietnamese."""
-    question = next((m.text for m in reversed(messages) if isinstance(m, HumanMessage)), "")
+    # Named messages are hidden notes to the model (findings, steer), never the user's words.
+    question = next((m.text for m in reversed(messages) if isinstance(m, HumanMessage) and m.name is None), "")
     return "Vietnamese" if _VIETNAMESE.search(question) else "English"
+
+
+STEER_MESSAGE = """STEER (not visible to the user). The user stopped the run that was answering their request, then sent the message just above.
+Treat that message as a correction or addition to the request, not as a new question.
+Finish the request with it."""
 
 
 LAST_CALL_NOTE = """LAST STEP FOR THIS MESSAGE. You have no tool calls left, so call no tool.

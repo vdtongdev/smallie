@@ -69,6 +69,24 @@ def turn_messages(messages: Sequence[AnyMessage]) -> list[AnyMessage]:
     return list(messages[start + 1:])
 
 
+STEER = "steer"  # HumanMessage.name of the hidden message that follows a note added to a stopped run
+
+
+def request_parts(messages: Sequence[AnyMessage]) -> list[str]:
+    """The user's latest visible message that is not a note, then every note after it. A note is a
+    visible user message directly followed by a `STEER` message (app/orchestration/stopping.py)."""
+    visible = [(i, m) for i, m in enumerate(messages) if isinstance(m, HumanMessage) and m.name is None]
+    is_note = [i + 1 < len(messages) and isinstance(messages[i + 1], HumanMessage) and messages[i + 1].name == STEER
+               for i, _ in visible]
+    start = next((n for n in range(len(visible) - 1, -1, -1) if not is_note[n]), 0)
+    return [m.text for _, m in visible[start:]]
+
+
+def user_request(messages: Sequence[AnyMessage]) -> str:
+    """What the user asked this turn: the request, then every note after it, joined by a blank line."""
+    return "\n\n".join(request_parts(messages))
+
+
 def is_error(text: str) -> bool:
     return text.startswith("Error")
 

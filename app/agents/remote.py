@@ -139,8 +139,12 @@ class RemoteAgent:
         if any(counter.model_calls >= budget for counter in counters):
             raise CallBudgetExceeded(f"This message used its {budget} model calls ({name}); "
                                      f"the {self.spec.route} agent was not called.")
-        # checkpoint_ns stays: RemoteGraph drops it from the request and prefixes streamed chunks with it.
-        config["configurable"] = {k: v for k, v in config.get("configurable", {}).items() if k != "thread_id"}
+        # Only the keys RemoteGraph itself reads go on: checkpoint_ns (it drops it from the request and prefixes
+        # streamed chunks with it) and the stream hook (it pushes the remote agent's chunks into the parent's stream;
+        # it never reaches the request, being no primitive). LangGraph's other keys (thread_id, __pregel_resuming on a
+        # resumed run) would make the server reject "configurable" sent together with "context".
+        configurable = config.get("configurable", {})
+        config["configurable"] = {k: configurable[k] for k in ("checkpoint_ns", "__pregel_stream") if k in configurable}
         headers = {"x-smallie-user-id": context.user_id}
         if token := await id_token(self.url):
             headers["Authorization"] = f"Bearer {token}"

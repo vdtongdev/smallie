@@ -12,6 +12,7 @@ on its `additional_kwargs["team"]`. Progress goes out as `custom` stream events:
 
 import asyncio
 import dataclasses
+import importlib.metadata
 import logging
 import re
 import time
@@ -31,7 +32,7 @@ from pydantic import BaseModel
 
 from app.agents.artifacts import KINDS, collect
 from app.agents.remote import CallBudgetExceeded
-from app.agents.base import MEMORY_TOOL_NAMES, TOOL_RESULT_PREVIEW, AgentSpec, RouteInfo, ToolRecorder, turn_messages
+from app.agents.base import MEMORY_TOOL_NAMES, STEER, TOOL_RESULT_PREVIEW, AgentSpec, RouteInfo, ToolRecorder, request_parts, turn_messages, user_request
 from app.agents.registry import AGENTS
 from app.core.config import get_settings
 from app.core.llm import get_chat_model, pick_model, pick_tier
@@ -39,7 +40,7 @@ from app.core.memory import TEAM_MODE, AgentContext
 from app.core.model_settings import load_settings
 from app.core.usage import UsageCounter
 from app.core.prompts import reply_language
-from app.orchestration.prompts import BOARD_PROMPT, CHALLENGE_MESSAGE, CONFLICT_MESSAGE, DRAW_MESSAGE, DRAWING_NOTE, NOTHING_FOUND_MESSAGE, PLAN_PROMPT, ROUND_MESSAGE, TASK_MESSAGE, TEAM_MESSAGE
+from app.orchestration.prompts import BOARD_PROMPT, CHALLENGE_MESSAGE, CONFLICT_MESSAGE, DRAW_MESSAGE, DRAWING_NOTE, NOTE_HEADING, NOTHING_FOUND_MESSAGE, PLAN_PROMPT, ROUND_MESSAGE, TASK_MESSAGE, TEAM_MESSAGE
 from app.orchestration.team_plan import Plan, Task, add_follow_ups, after_user_files, dead_inputs, fallback_tasks, ready, validate_plan
 from app.orchestration.orchestrator import HIDDEN
 from app.orchestration.router import ORCHESTRATOR, AssistantState, available_agents
@@ -141,7 +142,8 @@ def participants(available: list[tuple[AgentSpec, RouteInfo]], message: str) -> 
 def retry_tasks(messages: Sequence[AnyMessage], available: Sequence[tuple[AgentSpec, RouteInfo]]) -> list[dict] | None:
     """A short retry message ("try again") in a chat whose last team turn left a transcript: that turn's tasks, pending
     again, on its goal. Else None."""
-    if not RETRY.search(messages[-1].text) or len(messages[-1].text.split()) > SMALL_TALK_WORDS:
+    latest = user_request(messages)
+    if not RETRY.search(latest) or len(latest.split()) > SMALL_TALK_WORDS:
         return None
     team = next((m.additional_kwargs["team"] for m in reversed(messages[:-1])
                  if isinstance(m, AIMessage) and m.additional_kwargs.get("team")), None)
@@ -180,7 +182,7 @@ def clean(board: Board, speakers: Sequence[str], tasks: Sequence[str] | None = N
 async def ask_board(messages: list[AnyMessage], answers: list[dict], config: RunnableConfig, *,
                     user_id: str, inputs: Mapping[str, list[str]] | None = None, agents: Sequence[AgentSpec] | None = None) -> Review:
     """One model call; `config` carries the usage counter's callbacks. `inputs`: task id -> the task ids it received; `agents`: the available agents, which follow-ups may use."""
-    question = next((m.text for m in reversed(messages) if isinstance(m, HumanMessage)), "")
+    question, notes = request_parts(messages)[0], _notes(messages)
     # Texts go into the message, not a template: answers may contain braces.
     def head(a: dict) -> str:
         line = f"{a.get('task', a['agent'])} ({a['agent']})"
@@ -190,7 +192,7 @@ async def ask_board(messages: list[AnyMessage], answers: list[dict], config: Run
             line += f"\nPREVIOUSLY CHALLENGED, report its outcome: {a['challenge']}"
         return line
 
-    human = f"USER MESSAGE:\n{question}\n\nANSWERS:\n" + "\n\n".join(f"{head(a)}:\n{a['text']}" for a in answers)
+    human = f"USER MESSAGE:\n{question}\n\n{notes + chr(10) * 2 if notes else ''}ANSWERS:\n" + "\n\n".join(f"{head(a)}:\n{a['text']}" for a in answers)
     board = (await asyncio.to_thread(get_chat_model, user_id)).with_structured_output(
         Review, method="function_calling")
     if agents:  # texts go into the message, not a template
@@ -221,8 +223,9 @@ async def ask_plan(messages: list[AnyMessage], available: Sequence[tuple[AgentSp
                    user_id: str) -> Plan:
     """The one plan call per message, on the user's model; `config` carries the usage counter's callbacks."""
     settings = get_settings()
-    last = next((i for i in range(len(messages) - 1, -1, -1) if isinstance(messages[i], HumanMessage)), None)
-    question = "" if last is None else messages[last].text
+    question = user_request(messages)
+    last = next((i for i in range(len(messages) - 1, -1, -1) if isinstance(messages[i], HumanMessage) and messages[i].name is None
+                 and not (i + 1 < len(messages) and getattr(messages[i + 1], "name", None) == STEER)), None)  # the request's first message
     lines = []
     for spec, info in available:
         line = f"- {spec.route}: {spec.description}"
@@ -311,6 +314,12 @@ def _bullets(lines: Sequence[str]) -> str:
     return "\n".join(f"- {line}" for line in lines) or "none"
 
 
+def _notes(messages: Sequence[AnyMessage]) -> str:
+    """The user's notes added after a stop as a block under `NOTE_HEADING`, or "" with none."""
+    notes = request_parts(messages)[1:]
+    return f"{NOTE_HEADING}\n{_bullets(notes)}" if notes else ""
+
+
 def _drawing(drawers: Sequence[str]) -> str:
     return DRAWING_NOTE.format(agent=" and ".join(drawers)) if drawers else ""
 
@@ -334,6 +343,34 @@ def _transcript(workspace: dict) -> dict:
 
 def _brief(task: dict) -> dict:
     return {**{k: task[k] for k in ("id", "agent", "goal", "depends_on")}, "difficulty": task.get("difficulty", "medium")}
+
+
+def steer(values: dict, next_nodes: Sequence[str], sends: Sequence[Send], note: list[AnyMessage]) -> Command:
+    """The update (`aupdate_state` with no `as_node`) that adds a steer note to a stopped team run and runs the
+    cut-off step again with it; earlier steps stay. `values`: the stopped team's state as `aget_state` shows it
+    (finished tasks of the cut-off step applied); `sends`: the step's pending Sends. An update drops the pending
+    Sends and schedules only the static edges of the node it is written as, and the team routes with `Command`,
+    so the update's `goto` names the step. Every task of a cut-off wave runs again, the finished ones too: a wave
+    from `dispatch` is dispatched again (its tasks pending, its entries in `history` dropped), so the task notes
+    are built with the note; a challenge or conflict round from `review` is sent again as it was, the note added
+    to its thread (with no pending Sends to send, its tasks go through `dispatch` like a plan wave). Any other step (plan, review, synthesize, draw) runs again and reads the note from the state."""
+    if "speak" not in next_nodes:
+        return Command(update={"messages": note}, goto=list(next_nodes))
+    workspace = values["workspace"]
+    history = workspace["history"]
+    waves = [i for i, e in enumerate(history) if e["type"] == "wave"]
+    at = waves[-1] if waves else len(history)
+    wave = history[at] if waves else {"kind": "plan", "tasks": [], "wave": workspace["wave"] + 1}
+    again = wave["kind"] == "plan" or not sends  # `dispatch` sent it, else a review's challenge or conflict round
+    if wave["kind"] != "plan" and not sends:  # the pending Sends could not be read: `dispatch` runs the wave's tasks as a plan wave
+        log.warning("No pending Sends found for a cut-off %s wave (langgraph %s); running its tasks again through dispatch",
+                    wave["kind"], importlib.metadata.version("langgraph"))
+    tasks = [{**t, "status": "pending" if again else "running"} if t["id"] in wave["tasks"] else t for t in workspace["tasks"]]
+    reset = {**workspace, "reset": True, "tasks": tasks, "history": history[:at] if again else history[:at + 1]}
+    if again:
+        return Command(update={"messages": note, "workspace": {**reset, "wave": wave["wave"] - 1}}, goto="dispatch")
+    return Command(update={"messages": note, "workspace": reset},
+                   goto=[Send(s.node, {**s.arg, "messages": [*s.arg["messages"], *note]}) for s in sends])
 
 
 def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
@@ -374,7 +411,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
     async def plan(state: TeamState, runtime: Runtime[AgentContext], config: RunnableConfig) -> Command:
         messages = state["messages"]
         available = await available_agents(runtime.context.user_id, specs)
-        everyone = participants(available, messages[-1].text)
+        everyone = participants(available, user_request(messages))
         chosen = [spec.route for spec in everyone if not spec.draws]
         retry = None if chosen else retry_tasks(messages, available)
         if not chosen and not retry:
@@ -405,7 +442,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
                 # inputless planned tasks wait for the tasks that read the user's files (the fallback runs everyone at once)
                 tasks = after_user_files(tasks, {s.route for s, _ in available if "user_files" in s.sources})
         emit({"type": "plan", "tasks": [_brief(t) for t in tasks], "fallback": fallback})
-        workspace = {"reset": True, "goal": messages[-1].text, "tasks": tasks, "results": {}, "evidence": [], "artifacts": {},
+        workspace = {"reset": True, "goal": user_request(messages), "tasks": tasks, "results": {}, "evidence": [], "artifacts": {},
                      "history": [], "rounds_at": {}, "wave": 0, "question": "",
                      "synthesis": {"forced": False, "open_points": [], "not_done": []}, "challenged": {}}
         return Command(update={"workspace": workspace}, goto="dispatch")
@@ -426,19 +463,20 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
             return Command(update={"workspace": {"tasks": tasks}}, goto="synthesize")
         for t in todo:
             t["status"] = "running"
-        wave, language = workspace["wave"] + 1, reply_language(messages)
+        wave, language, notes = workspace["wave"] + 1, reply_language(messages), _notes(messages)
         available = await available_agents(runtime.context.user_id, specs)
-        notes = {spec.route: info.prompt_note for spec, info in available}
+        prompt_notes = {spec.route: info.prompt_note for spec, info in available}
         sends = []
         drawing = _drawing(drawers_of(tasks))
         for t in todo:
             if t["goal"]:
                 inputs, missing = _inputs(t, {**workspace, "tasks": tasks})
-                note = TASK_MESSAGE.format(goal=t["goal"], inputs=inputs, missing=missing, language=language, drawing=drawing)
+                note = TASK_MESSAGE.format(goal=t["goal"], inputs=inputs, missing=missing, language=language, drawing=drawing,
+                                          notes=f"{notes}\n\n" if notes else "")
             else:  # fallback and reply tasks: the plain round note
-                note = ROUND_MESSAGE.format(language=language, drawing=drawing)
-            if notes.get(t["agent"]):
-                note = f"{note}\n{notes[t['agent']]}"
+                note = ROUND_MESSAGE.format(language=language, drawing=drawing, notes=f"\n\n{notes}" if notes else "")
+            if prompt_notes.get(t["agent"]):
+                note = f"{note}\n{prompt_notes[t['agent']]}"
             sends.append(job(t["id"], t["agent"], 1, "plan", note, messages, t))
         ids, routes = [t["id"] for t in todo], [t["agent"] for t in todo]
         entry = {"type": "wave", "wave": wave, "kind": "plan", "tasks": ids, "agents": routes}
@@ -686,7 +724,8 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
                                    for d in board.differences]),
                 conflicts=_bullets([f"{c.claim} ({', '.join(c.routes)}): {c.issue}, cause: {c.cause}" for c in board.conflicts]),
                 open_points=_bullets(open_points), not_done=_bullets(not_done),
-                language=reply_language(messages), drawing=_drawing(drawers))
+                language=reply_language(messages), drawing=_drawing(drawers),
+                notes=f"{_notes(messages)}\n\n" if _notes(messages) else "")
             command = await ask_orchestrator(state, runtime, note, bool(drawers))
             did_handoff = command.goto in by_route  # it handed off: the answers stand
             answer = AIMessage("\n\n".join(a["text"] for a in answers), name=ORCHESTRATOR) if did_handoff \

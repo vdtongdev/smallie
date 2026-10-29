@@ -259,14 +259,14 @@ const stepCount = (act) => act.waves.reduce((n, r) => n + r.answers.reduce((m, a
 
 const waveTitle = (w) => `${t("waveN").replace("{n}", w.wave)} · ${t({ conflict: "kindConflict", challenge: "kindChallenge" }[w.kind] || "kindAnswer")}`;
 
-// Waves the plan needs so far: its longest dependency chain, at least the waves already run.
+// Waves the plan needs so far: its longest dependency chain, at least the waves already run (also before a resume).
 function waveTotal(act) {
   const depth = {};
   const of = (task, seen = []) => depth[task.id] ??= 1 + Math.max(0, ...task.depends_on.map((d) => {
     const dep = act.plan.find((x) => x.id === d);
     return dep && !seen.includes(d) ? of(dep, [...seen, task.id]) : 0;
   }));
-  return Math.max(act.waves.length, ...act.plan.filter((x) => !x.depends_on.includes("answer")).map((x) => of(x)));
+  return Math.max(act.waves.length, act.planWave || 0, ...act.waves.map((w) => w.wave), ...act.plan.filter((x) => !x.depends_on.includes("answer")).map((x) => of(x)));
 }
 
 const planAgent = (act, id) => agentLabel(act.plan.find((x) => x.id === id)?.agent ?? id);
@@ -585,8 +585,27 @@ function setConversation(id) {
 
 function setBusy(busy) {
   state.busy = busy;
-  $("sendBtn").disabled = busy;
+  const label = busy ? "stop" : "send"; // while a reply runs the Send button stops it
+  $("sendBtn").dataset.i18n = label;
+  $("sendBtn").textContent = t(label);
   $("newChatBtn").disabled = busy;
+}
+
+// Stops the running reply. The server stops it and the stream ends with a `stopped` event; the fetch is
+// aborted only when the stream does not end by itself in time (a run the server has not registered yet,
+// or a lost request), so a reply that just finished is never marked stopped.
+async function stopReply() {
+  const { abort, ended } = state;
+  let stopped = false;
+  let failed = false;
+  if (state.conversationId) {
+    try {
+      const res = await fetch(`/api/chat/${state.conversationId}/stop`, { method: "POST" });
+      stopped = !!(await res.json().catch(() => ({}))).stopped;
+    } catch { failed = true; }
+  }
+  if (!failed) await Promise.race([ended, new Promise((r) => setTimeout(r, stopped ? 5000 : 1000))]);
+  abort?.abort();
 }
 
 // ---------- conversations ----------
@@ -665,6 +684,7 @@ async function openConversation(id) {
         msg.update(m.content);
         if (m.pending) { markPending(msg.el); turn.act.question = m.content; }
       }
+      if (m.stopped) markStopped(addAssistantMessage().el);
     } else if (m.role === "tool") {
       closeTool(turn.act.tools, m.name, m.content);
       addCharts(m.charts);
@@ -742,6 +762,16 @@ function addError(message, code) {
   scrollToBottom();
 }
 
+// A reply the user stopped: greyed, with the hint on how to resume.
+function markStopped(el) {
+  el.classList.add("stopped");
+  const note = document.createElement("div");
+  note.className = "stopped-note";
+  note.dataset.i18n = "stoppedHint";
+  note.textContent = t("stoppedHint");
+  el.append(note);
+}
+
 // Removes the assistant's text replies since the latest user message.
 function dropReplies() {
   let el = [...$("messages").querySelectorAll(".msg.user")].pop()?.nextElementSibling;
@@ -765,6 +795,10 @@ async function sendMessage(text) {
   let started = false;
   let finished = false;
   let waiting = false; // showing "thinking" after a fallback
+  let stopped = false; // the user stopped the reply
+  let endStream;
+  const abort = (state.abort = new AbortController());
+  state.ended = new Promise((resolve) => (endStream = resolve)); // settles when this stream is over
   let synthesized = false; // the team's write-up started
   // A task's answer: in the latest wave that ran it, else (a chart task after the write-up) in `drawn`.
   const answerOf = (agent, task) => {
@@ -781,6 +815,7 @@ async function sendMessage(text) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message: text, conversation_id: state.conversationId }),
+      signal: abort.signal,
     });
     if (res.status === 401) return showLogin();
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.statusText);
@@ -832,6 +867,7 @@ async function sendMessage(text) {
             break;
           case "plan":
             act.plan = event.tasks;
+            act.planWave = event.wave || 0; // a resumed turn: the waves announced before the stop
             addBadges(event.tasks.map((x) => x.agent));
             touch(turn);
             break;
@@ -922,6 +958,9 @@ async function sendMessage(text) {
             addCharts(event.charts);
             current = addAssistantMessage();
             break;
+          case "stopped":
+            finished = stopped = true;
+            break;
           case "error":
             addError(event.message, event.code);
             break;
@@ -931,18 +970,28 @@ async function sendMessage(text) {
         }
       }
     }
-    if (!finished) addError(t("streamCut"));
+    if (!finished) addError(`${t("streamCut")} ${t("resumeHint")}`);
   } catch (err) {
-    addError(err.message);
+    if (err.name === "AbortError") stopped = true;
+    else addError(err.message);
   } finally {
     if (!started || waiting) current.remove();
+    if (stopped) markStopped(started && !waiting ? current.el : addAssistantMessage().el);
     finishTurn(turn);
     document.querySelectorAll(".msg.assistant:empty").forEach((el) => el.remove());
     setBusy(false);
+    endStream();
     loadConversations();
     loadUsage();
   }
 }
+
+// Stop must not go through form submission: an empty required box would block it.
+$("sendBtn").addEventListener("click", (e) => {
+  if (!state.busy) return;
+  e.preventDefault();
+  stopReply();
+});
 
 $("chatForm").onsubmit = (e) => {
   e.preventDefault();

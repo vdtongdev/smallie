@@ -14,11 +14,13 @@ from starlette.background import BackgroundTask
 
 from app.core.accounts import get_profile
 from app.agents.artifacts import artifacts_from
-from app.agents.base import TOOL_RESULT_PREVIEW
+from app.agents.base import TOOL_RESULT_PREVIEW, user_request
 from app.agents.registry import ROUTES, SILENT_STEPS, STEPS
 from app.agents.remote import RUN_NODE, as_message
 from app.orchestration.orchestrator import HANDOFF
 from app.orchestration.router import ORCHESTRATOR
+from app.orchestration.team import _brief
+from app.orchestration.stopping import add_note, clear_stop, is_resume, is_stopped, load_stop, save_stop
 from app.core.auth import get_current_user
 from app.core.config import get_settings
 from app.core.conversations import create_conversation, get_conversation, list_conversations, touch_conversation
@@ -30,6 +32,8 @@ from app.core.usage import UsageCounter, add_usage
 
 router = APIRouter(tags=["chat"])
 log = logging.getLogger(__name__)
+
+RUNNING: dict[str, asyncio.Task] = {}  # conversation id -> the task running its reply (one process, one worker)
 
 TEAM_EVENTS = frozenset({"plan", "plan_updated", "wave", "review", "synthesize", "needs_human", "task_started", "spoke", "charts"})  # custom events of a team turn
 UI_EVENTS = TEAM_EVENTS | {"model_fallback"}  # custom events the UI gets, in a team turn or a 1v1 reply
@@ -64,6 +68,8 @@ async def chat(
         conversation = await asyncio.to_thread(get_conversation, user_id, body.conversation_id)
         if not conversation:
             raise HTTPException(404, "Conversation not found")
+        if conversation["id"] in RUNNING:
+            raise HTTPException(409, "This chat is still answering")
     else:
         conversation = await asyncio.to_thread(create_conversation, user_id, kind, body.message)
 
@@ -72,10 +78,13 @@ async def chat(
     config = {"configurable": {"thread_id": conversation["id"]}}
     cross_chat = get_settings().cross_chat_history
     finished = False
+    stopped = False
     usage = UsageCounter()
+    budget = UsageCounter()  # starts at the calls a stopped run already spent; read by the call cap only
+    started = False
 
     async def events():
-        nonlocal finished
+        nonlocal finished, stopped, started
         yield _sse({"type": "conversation", "id": conversation["id"], "title": conversation["title"]})
         settings = None
         try:
@@ -93,17 +102,45 @@ async def chat(
                 _recent_chats(request, user_id, conversation["id"]) if cross_chat else _empty(),
                 _user(user_id),
             )
+            try:
+                if earlier := await load_stop(store, user_id, conversation["id"]):
+                    budget.model_calls = earlier["model_calls"]
+            except Exception:  # noqa: BLE001 - the cap is best effort; the chat must still run
+                log.exception("Reading the stop record failed")
+            chat_input = await _chat_input(assistant, config, kind, body.message)
+            if chat_input is None and (plan := await _resumed_plan(assistant, config)):
+                yield _sse(plan)  # the resumed run does not plan again; the UI needs the plan for its wave count
             stream = assistant.astream(
-                await _chat_input(assistant, config, kind, body.message),
-                config={**config, "callbacks": [usage], "metadata": {"user_id": user_id}},  # filter traces per user
+                chat_input,
+                config={**config, "callbacks": [usage, budget], "metadata": {"user_id": user_id}},  # filter traces per user
                 context=AgentContext(user_id=user_id, user=user, memories=memories,
                                      recent_chats=recent_chats, agent=kind, tier=tier),
                 stream_mode=["messages", "updates", "custom"],
                 subgraphs=True,
             )
-            async for event in _events_from(stream):
-                yield _sse(event)
-            finished = True
+            # The run is its own task, so Stop can cancel it and this generator still sends `stopped`.
+            queue: asyncio.Queue = asyncio.Queue()
+
+            async def pump():
+                async for event in _events_from(stream):
+                    await queue.put(event)
+
+            run = asyncio.create_task(pump())
+            run.add_done_callback(lambda _: queue.put_nowait(None))  # also when cancelled before its first step
+            RUNNING[conversation["id"]] = run
+            started = True
+            try:
+                while (event := await queue.get()) is not None:
+                    yield _sse(event)
+                if run.cancelled():
+                    stopped = True
+                else:
+                    run.result()  # an error of the run is handled below
+                    finished = True
+            finally:
+                run.cancel()  # the client left
+                if RUNNING.get(conversation["id"]) is run:
+                    del RUNNING[conversation["id"]]
         except NoModelSettings:
             yield _sse(_NO_MODEL)
         except openai.RateLimitError:
@@ -117,11 +154,23 @@ async def chat(
             yield _sse({"type": "error", "code": "internal", "message": str(exc)[:500]})
         finally:
             await asyncio.to_thread(touch_conversation, conversation["id"])
+            await _settle_stop()
             try:  # failed and cut-off runs still spent tokens
                 await add_usage(store, user_id, usage)
             except Exception:  # noqa: BLE001 - usage is best effort
                 log.exception("Saving token usage failed")
-        yield _sse({"type": "done"})
+        yield _sse({"type": "stopped" if stopped else "done"})
+
+    async def _settle_stop():
+        """A finished run drops the stop record; a cut-off one (Stop, or an error with steps left)
+        keeps the calls it spent, so resuming cannot get around the call cap."""
+        try:
+            if finished:
+                await clear_stop(store, user_id, conversation["id"])
+            elif started and (stopped or is_stopped(await assistant.aget_state(config))):
+                await save_stop(store, user_id, conversation["id"], budget.model_calls)
+        except Exception:  # noqa: BLE001 - best effort
+            log.exception("Saving the stop record failed")
 
     async def remember_turn():
         # Runs after the response is sent, so the embedding and extraction calls don't delay "done".
@@ -137,9 +186,10 @@ async def chat(
             return
         pairs = turns(messages)
         answer = pairs[-1][1] if pairs else ""
+        question = user_request(messages)  # a resumed run's message is "continue" or a note, not the question
         if cross_chat:
             try:
-                await save_turn(store, user_id, conversation, body.message, answer)
+                await save_turn(store, user_id, conversation, question, answer)
             except Exception:  # noqa: BLE001
                 log.exception("Saving chat history failed")
         # Only the orchestrator's turns: plain data lookups (sql, chart, docs) rarely say anything
@@ -147,7 +197,7 @@ async def chat(
         if answer and _answered_by(messages) == ORCHESTRATOR:
             extraction = UsageCounter()
             try:
-                await extract_facts(user_id, body.message, answer, [extraction], conversation_id=conversation["id"])
+                await extract_facts(user_id, question, answer, [extraction], conversation_id=conversation["id"])
             except Exception:  # noqa: BLE001
                 log.exception("Extracting facts failed")
             try:
@@ -159,11 +209,45 @@ async def chat(
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
-async def _chat_input(assistant, config, kind: str, message: str) -> dict | Command:
-    """A paused team turn takes the message as the answer to its question; else a new user message."""
-    if kind == TEAM_MODE and (await assistant.aget_state(config)).interrupts:
+@router.post("/chat/{conversation_id}/stop")
+async def stop(conversation_id: str, user_id: str = Depends(get_current_user)):
+    if not await asyncio.to_thread(get_conversation, user_id, conversation_id):
+        raise HTTPException(404, "Conversation not found")
+    run = RUNNING.get(conversation_id)
+    if run is None or run.done():  # a finished run's stream sends `done`; it keeps the turn
+        return {"stopped": False}
+    run.cancel()
+    return {"stopped": True}
+
+
+async def _chat_input(assistant, config, kind: str, message: str) -> dict | Command | None:
+    """A paused team turn takes the message as the answer to its question. A stopped chat resumes
+    (None: `astream(None, ...)`), a resume word as it was, any other message as a note. Else a new user message."""
+    snapshot = await assistant.aget_state(config)
+    if kind == TEAM_MODE and snapshot.interrupts:
         return Command(resume=message)
+    if is_stopped(snapshot):
+        if not is_resume(message):
+            await add_note(assistant, config, message)
+        return None
     return {"messages": [{"role": "user", "content": message}]}
+
+
+async def _resumed_plan(assistant, config) -> dict | None:
+    """The `plan` event of a stopped team turn, from its checkpointed tasks (follow-ups included), or None
+    for any other chat. Best effort: a failing read sends nothing."""
+    try:
+        snapshot = await assistant.aget_state(config, subgraphs=True)
+        sub = next((t.state for t in snapshot.tasks if t.name == TEAM_MODE and hasattr(t.state, "values")), None)
+        workspace = (sub.values.get("workspace") or {}) if sub else {}
+        if not workspace.get("tasks"):
+            return None
+        # `origin` keeps the popup's follow-up and reply marks; `wave`: the waves announced before the stop
+        return {"type": "plan", "tasks": [{**_brief(t), "origin": t.get("origin")} for t in workspace["tasks"]],
+                "fallback": False, "resumed": True, "wave": workspace.get("wave", 0)}
+    except Exception:  # noqa: BLE001
+        log.exception("Reading the stopped team's plan failed")
+        return None
 
 
 def _answered_by(messages: list) -> str | None:

@@ -148,6 +148,10 @@ This file describes `main` plus the 0.4.0 remote agents (section 10) and the 0.5
    - `model_fallback` tells the UI that a model call was repeated once on the standard model (section 14); it comes in team and 1v1 turns
    - The UI renders as events arrive
 
+### Stop and resume
+
+The user can stop a reply while it streams: the Send button becomes Stop, and `POST /api/chat/{conversation_id}/stop` cancels the reply's run. The run is a task of its own, held in an in-process registry (one app process), so the stream still ends, now with a `stopped` event instead of `done`. A second message to a chat that is still answering gets a 409. A stopped run is not saved as finished. Its graph state keeps the steps it has not run, and the only extra record is the count of model calls it spent, so resuming cannot get past the call cap. The next message continues it: a short resume word ("continue", "tiếp tục") runs the unfinished steps as they were, and any other message is added as a note that the cut-off step runs again with. A network drop leaves the same state, so a reload shows the reply greyed out with a resume hint. Text streamed before the stop is not saved.
+
 ### Completion Phase
 
 9. **Turn completes**

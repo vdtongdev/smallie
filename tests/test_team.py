@@ -2544,3 +2544,83 @@ async def test_task_usage_not_saved_twice(monkeypatch):
     assert (await get_usage(store, "u1"))["input_tokens"] == 120
     spoke = {e["agent"]: e["usage"] for e in _events(chunks, "spoke")}
     assert spoke["sql"]["model_calls"] == 3 and spoke["research"]["model_calls"] == 2
+
+
+# --- a resumed team turn resends the plan (the UI's wave count) ---
+
+def _chain():
+    return Plan(tasks=[Task(id="t1", agent="docs", goal="extract"),
+                       Task(id="t2", agent="sql", goal="check", depends_on=["t1"]),
+                       Task(id="t3", agent="research", goal="look", depends_on=["t2"])])
+
+
+def _depth(tasks):
+    by_id = {t["id"]: t for t in tasks}
+
+    def of(t):
+        return 1 + max([of(by_id[d]) for d in t["depends_on"] if d in by_id], default=0)
+
+    return max(of(t) for t in tasks)
+
+
+async def _resumed_events(monkeypatch, message):
+    """A 3-wave chain team turn in chat c1, stopped in wave 1, then resumed through the chat route with `message`.
+    Returns (the resumed request's SSE events, the stopped workspace's tasks)."""
+    from app.api import routes_chat
+    from tests.test_stop import Harness
+
+    log = []
+    docs = Fake("docs", "DOCS TEXT", log=log, delay=30)
+    _plan(monkeypatch, _chain())
+    _board(monkeypatch, then=Board())
+    agents = {"docs": docs, "sql": Fake("sql", "SQL TEXT", log=log), "research": Fake("research", "R TEXT", log=log)}
+    assistant = _assistant(monkeypatch, per_agent(orchestrator=[AIMessage("Final.")]), documents=("handbook.pdf",), **agents)
+    config = {"configurable": {"thread_id": "c1"}}
+    await _cancel_when(assistant, _ask(THREE), "docs", log, config)
+    docs.delay = 0
+    sub = next(t.state for t in (await assistant.aget_state(config, subgraphs=True)).tasks if t.name == "team")
+    tasks = sub.values["workspace"]["tasks"]
+
+    h = Harness(monkeypatch, assistant.astream)
+    h.request.app.state.assistant = assistant
+    monkeypatch.setattr(routes_chat, "_chat_input", _real_chat_input)
+    response = await routes_chat.chat("team", routes_chat.ChatRequest(message=message, conversation_id="c1"), h.request, "u1")
+    events = [json.loads(chunk.removeprefix("data: ")) async for chunk in response.body_iterator]
+    return events, tasks
+
+
+from app.api.routes_chat import _chat_input as _real_chat_input
+
+
+def _plan_before_waves(events, tasks, waves):
+    kinds = [e["type"] for e in events]
+    assert "plan" in kinds and "wave" in kinds and kinds.index("plan") < kinds.index("wave")
+    plan = next(e for e in events if e["type"] == "plan")
+    assert plan["resumed"] is True
+    assert [(t["id"], t["agent"], t["depends_on"]) for t in plan["tasks"]] == [(t["id"], t["agent"], t["depends_on"]) for t in tasks]
+    assert _depth(plan["tasks"]) == 3
+    assert [e["wave"] for e in events if e["type"] == "wave"] == waves
+
+
+async def test_resumed_team_turn_resends_the_plan(monkeypatch):
+    events, tasks = await _resumed_events(monkeypatch, "continue")
+    _plan_before_waves(events, tasks, [2, 3])  # wave 1 was cut off after it was announced
+
+
+async def test_resumed_team_turn_with_a_note_resends_the_plan(monkeypatch):
+    events, tasks = await _resumed_events(monkeypatch, "also compare it with last year")
+    _plan_before_waves(events, tasks, [1, 2, 3])  # a note reruns the cut-off wave, announcing it again
+
+
+async def test_resumed_normal_chat_sends_no_plan(monkeypatch):
+    from app.api import routes_chat
+    from tests.test_stop import Harness, stopped_chat
+
+    graph, config, _ = await stopped_chat()
+    h = Harness(monkeypatch, graph.astream)
+    h.request.app.state.assistant = graph
+    h.owners["t"] = "u1"
+    monkeypatch.setattr(routes_chat, "_chat_input", _real_chat_input)
+    response = await routes_chat.chat("auto", routes_chat.ChatRequest(message="continue", conversation_id="t"), h.request, "u1")
+    events = [json.loads(chunk.removeprefix("data: ")) async for chunk in response.body_iterator]
+    assert not [e for e in events if e["type"] == "plan"]

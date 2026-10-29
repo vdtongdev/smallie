@@ -19,6 +19,7 @@ from app.agents.registry import ROUTES, SILENT_STEPS, STEPS
 from app.agents.remote import RUN_NODE, as_message
 from app.orchestration.orchestrator import HANDOFF
 from app.orchestration.router import ORCHESTRATOR
+from app.orchestration.team import _brief
 from app.orchestration.stopping import add_note, clear_stop, is_resume, is_stopped, load_stop, save_stop
 from app.core.auth import get_current_user
 from app.core.config import get_settings
@@ -106,8 +107,11 @@ async def chat(
                     budget.model_calls = earlier["model_calls"]
             except Exception:  # noqa: BLE001 - the cap is best effort; the chat must still run
                 log.exception("Reading the stop record failed")
+            chat_input = await _chat_input(assistant, config, kind, body.message)
+            if chat_input is None and (plan := await _resumed_plan(assistant, config)):
+                yield _sse(plan)  # the resumed run does not plan again; the UI needs the plan for its wave count
             stream = assistant.astream(
-                await _chat_input(assistant, config, kind, body.message),
+                chat_input,
                 config={**config, "callbacks": [usage, budget], "metadata": {"user_id": user_id}},  # filter traces per user
                 context=AgentContext(user_id=user_id, user=user, memories=memories,
                                      recent_chats=recent_chats, agent=kind, tier=tier),
@@ -227,6 +231,21 @@ async def _chat_input(assistant, config, kind: str, message: str) -> dict | Comm
             await add_note(assistant, config, message)
         return None
     return {"messages": [{"role": "user", "content": message}]}
+
+
+async def _resumed_plan(assistant, config) -> dict | None:
+    """The `plan` event of a stopped team turn, from its checkpointed tasks (follow-ups included), or None
+    for any other chat. Best effort: a failing read sends nothing."""
+    try:
+        snapshot = await assistant.aget_state(config, subgraphs=True)
+        sub = next((t.state for t in snapshot.tasks if t.name == TEAM_MODE and hasattr(t.state, "values")), None)
+        tasks = (sub.values.get("workspace") or {}).get("tasks") if sub else None
+        if not tasks:
+            return None
+        return {"type": "plan", "tasks": [_brief(t) for t in tasks], "fallback": False, "resumed": True}
+    except Exception:  # noqa: BLE001
+        log.exception("Reading the stopped team's plan failed")
+        return None
 
 
 def _answered_by(messages: list) -> str | None:

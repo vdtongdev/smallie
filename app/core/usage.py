@@ -3,12 +3,22 @@
 Embedding calls (memories, chat history, documents) are not counted.
 """
 
+import re
+
 from langchain_core.callbacks import AsyncCallbackHandler
 from langchain_core.messages import BaseMessage
 from langchain_core.outputs import LLMResult
 from langgraph.store.base import BaseStore
 
 TOTAL = "total"
+
+
+def _model_name(metadata: dict) -> str:
+    """The reply's model name. A streamed reply is its chunks merged, and merging joins their
+    `model_name` strings ("a/onea/one"), so a name repeated whole is cut back to one copy."""
+    name = metadata.get("model_name") or "unknown"
+    repeated = re.fullmatch(r"(.+?)\1+", name)
+    return repeated.group(1) if repeated else name
 
 
 def usage_namespace(user_id: str) -> tuple[str, ...]:
@@ -46,7 +56,7 @@ class UsageCounter(AsyncCallbackHandler):
         details = usage.get("input_token_details") or {}
         if "cache_read" in details:
             self.add_cached(details["cache_read"])
-        self.add_model(message.response_metadata.get("model_name") or "unknown", {
+        self.add_model(_model_name(message.response_metadata), {
             "model_calls": 1, "input_tokens": usage.get("input_tokens", 0),
             "output_tokens": usage.get("output_tokens", 0), "cached_tokens": details.get("cache_read")})
 

@@ -121,3 +121,13 @@ def test_add_merges_by_model_and_accepts_totals_without_it():
 
 def test_totals_have_no_by_model_when_nothing_was_counted_per_model():
     assert "by_model" not in UsageCounter().totals()
+
+
+def test_streamed_reply_keeps_one_model_name():
+    # Streaming merges the chunks' response_metadata, which joins their model_name strings.
+    first = AIMessageChunk(content="a", response_metadata={"model_name": "a/one"})
+    last = AIMessageChunk(content="b", response_metadata={"model_name": "a/one"},
+                          usage_metadata={"input_tokens": 10, "output_tokens": 1, "total_tokens": 11})
+    counter = UsageCounter()
+    counter.count(first + last)
+    assert list(counter.totals()["by_model"]) == ["a/one"]

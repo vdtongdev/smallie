@@ -552,36 +552,45 @@ async function loadUsage() {
   $("usageCost").textContent = t("usageCost").replace("{cost}", usage.cost.toFixed(usage.cost < 0.01 ? 6 : 4)); // one call costs ~$0.000005
 }
 
-// Tokens of the open chat under the input box: {reply: part | null, chat: part}, part = {input_tokens, output_tokens, cached_tokens | null}.
-// cached_tokens null means the provider did not say (shown as n/a, not 0).
+// Tokens of the open chat: {reply: part | null, chat: part}, part = {input_tokens, output_tokens, cached_tokens | null}.
+// The button under the input box opens a popup with all of it. cached_tokens null means the provider did not say (shown as n/a, not 0).
 function renderUsage(usage) {
   state.usage = usage;
-  const box = $("chatUsage");
   const chat = usage?.chat;
-  if (!usage || (!usage.reply && !chat.input_tokens && !chat.output_tokens)) { box.textContent = ""; return; }
+  const empty = !usage || (!usage.reply && !chat.input_tokens && !chat.output_tokens);
+  $("usageBtn").hidden = empty;
+  if (empty) { if ($("usageDialog").open) $("usageDialog").close(); $("usageBody").textContent = ""; return; }
   const n = (x) => x.toLocaleString(state.lang === "vi" ? "vi-VN" : "en-US");
   // One row per model, most input first: name, calls, input, cached (n/a when never reported), hit rate.
   const modelRows = (byModel) => Object.entries(byModel || {}).sort((a, b) => b[1].input_tokens - a[1].input_tokens)
-    .map(([name, m]) => t(m.cached_tokens == null ? "usageModelUnknown" : "usageModelRow")
-      .replace("{model}", name).replace("{calls}", n(m.model_calls)).replace("{in}", n(m.input_tokens))
-      .replace("{cached}", n(m.cached_tokens ?? 0)).replace("{rate}", m.input_tokens ? Math.round(100 * (m.cached_tokens ?? 0) / m.input_tokens) : 0))
-    .join("\n");
-  const line = (label, p, byModel) => {
+    .map(([name, m]) => {
+      const div = document.createElement("div");
+      div.className = "usage-model";
+      div.textContent = t(m.cached_tokens == null ? "usageModelUnknown" : "usageModelRow")
+        .replace("{model}", name).replace("{calls}", t(m.model_calls === 1 ? "usageCall" : "usageCalls").replace("{n}", n(m.model_calls)))
+        .replace("{in}", n(m.input_tokens)).replace("{cached}", n(m.cached_tokens ?? 0))
+        .replace("{rate}", m.input_tokens ? Math.round(100 * (m.cached_tokens ?? 0) / m.input_tokens) : 0);
+      return div;
+    });
+  const section = (label, p, byModel) => {
     const key = p.cached_tokens == null ? "usageLineUnknown" : p.input_tokens ? "usageLine" : "usageLineNoRate";
-    const text = t(key).replace("{in}", n(p.input_tokens)).replace("{out}", n(p.output_tokens))
+    const head = document.createElement("h3");
+    head.textContent = t(label);
+    const line = document.createElement("div");
+    line.textContent = t(key).replace("{in}", n(p.input_tokens)).replace("{out}", n(p.output_tokens))
       .replace("{cached}", n(p.cached_tokens ?? 0)).replace("{rate}", p.input_tokens ? Math.round(100 * p.cached_tokens / p.input_tokens) : 0);
-    const div = document.createElement("div");
-    div.textContent = `${t(label)}: ${text}`;
-    const rows = modelRows(byModel);
-    if (rows) div.title = rows;
-    return div;
+    return [head, line, ...modelRows(byModel)];
   };
   const note = document.createElement("div");
   note.className = "usage-note";
   note.textContent = t("usageCacheNote");
   const noCache = chat.cached_tokens === 0 && chat.input_tokens > 0;
-  box.replaceChildren(...(usage.reply ? [line("usageReply", usage.reply, usage.reply_by_model)] : []), line("usageChat", chat, usage.chat_by_model), ...(noCache ? [note] : []));
+  $("usageBody").replaceChildren(...(usage.reply ? section("usageReply", usage.reply, usage.reply_by_model) : []),
+    ...section("usageChat", chat, usage.chat_by_model), ...(noCache ? [note] : []));
 }
+$("usageBtn").onclick = () => $("usageDialog").showModal();
+$("usageDialog").addEventListener("close", () => $("usageBtn").focus());
+$("usageDialog").addEventListener("click", (e) => { if (e.target === $("usageDialog")) $("usageDialog").close(); }); // the backdrop
 
 // Readme examples go into the message box, ready to send or edit.
 $("readmeDialog").addEventListener("click", (e) => {

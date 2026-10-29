@@ -78,7 +78,7 @@
           <textarea id="input" rows="1" required></textarea>
           <button id="sendBtn" class="primary" type="submit" data-i18n="send"></button>
         </form>
-        <div id="chatUsage" class="chat-usage"></div>
+        <div class="chat-usage"><button id="usageBtn" class="ghost usage-btn" data-i18n="usage" hidden></button></div>
       </div>
     </main>
   </div>
@@ -314,6 +314,14 @@
     <article class="activity">
       <h2 id="activityTitle" data-i18n="activity"></h2>
       <div id="activityBody"></div>
+    </article>
+  </dialog>
+
+  <dialog id="usageDialog" class="readme-dialog" aria-labelledby="usageTitle">
+    <form method="dialog" class="dialog-close"><button class="icon-btn" data-i18n-title="close">×</button></form>
+    <article class="usage-popup">
+      <h2 id="usageTitle" data-i18n="usage"></h2>
+      <div id="usageBody"></div>
     </article>
   </dialog>
 

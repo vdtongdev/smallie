@@ -68,6 +68,9 @@ def reply_language(messages: list[AnyMessage]) -> str:
     return "Vietnamese" if _VIETNAMESE.search(question) else "English"
 
 
+# HumanMessage.name of the tail note: the per-call text at the end of every model request.
+CALL_NOTE = "call_note"
+
 LAST_CALL_NOTE = """LAST STEP FOR THIS MESSAGE. You have no tool calls left, so call no tool.
 Write the answer now, from what you found so far.
 Say briefly what you could not check.

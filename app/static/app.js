@@ -558,7 +558,8 @@ function renderUsage(usage) {
   state.usage = usage;
   const box = $("chatUsage");
   const chat = usage?.chat;
-  if (!usage || (!usage.reply && !chat.input_tokens && !chat.output_tokens)) { box.textContent = ""; return; }
+  if (!usage || (!usage.reply && !chat.input_tokens && !chat.output_tokens)) { box.textContent = ""; box.title = ""; return; }
+  box.title = t("usageCacheNote");
   const n = (x) => x.toLocaleString(state.lang === "vi" ? "vi-VN" : "en-US");
   const line = (label, p) => {
     const key = p.cached_tokens == null ? "usageLineUnknown" : p.input_tokens ? "usageLine" : "usageLineNoRate";

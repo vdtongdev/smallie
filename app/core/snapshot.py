@@ -5,7 +5,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
-from sqlalchemy import update
+from sqlalchemy import or_, update
 
 from app.core.accounts import get_profile
 from app.core.config import get_settings
@@ -51,19 +51,24 @@ async def chat_snapshot(checkpointer: BaseCheckpointSaver | None, user_id: str, 
     window = timedelta(minutes=get_settings().memory_snapshot_minutes)
     if saved and active and active > datetime.now(timezone.utc) - window:
         return saved
+    built_at = datetime.now(timezone.utc)
     snapshot = await build_snapshot(checkpointer, user_id, conversation["id"])
-    await asyncio.to_thread(save_snapshot, user_id, conversation["id"], snapshot)
+    await asyncio.to_thread(save_snapshot, user_id, conversation["id"], snapshot, built_at)
     return snapshot
 
 
-def save_snapshot(user_id: str, conversation_id: str, snapshot: dict) -> None:
+def save_snapshot(user_id: str, conversation_id: str, snapshot: dict, built_at: datetime | None = None) -> None:
+    """Not saved when a deletion cleared the chat after `built_at` (when the build started): it may hold deleted data."""
+    now = datetime.now(timezone.utc)
     with get_engine().begin() as conn:
         conn.execute(update(conversations).where(
-            conversations.c.id == conversation_id, conversations.c.user_id == user_id
-        ).values(memory_snapshot=snapshot, snapshot_at=datetime.now(timezone.utc)))
+            conversations.c.id == conversation_id, conversations.c.user_id == user_id,
+            or_(conversations.c.snapshot_at.is_(None), conversations.c.snapshot_at <= (built_at or now)),
+        ).values(memory_snapshot=snapshot, snapshot_at=now))
 
 
 def clear_snapshots(user_id: str) -> None:
     """After a fact, file or chat is deleted: the next turn of every chat of the user rebuilds its snapshot."""
     with get_engine().begin() as conn:
-        conn.execute(update(conversations).where(conversations.c.user_id == user_id).values(memory_snapshot=None))
+        conn.execute(update(conversations).where(conversations.c.user_id == user_id).values(
+            memory_snapshot=None, snapshot_at=datetime.now(timezone.utc)))  # the time marks the clear for save_snapshot

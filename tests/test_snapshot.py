@@ -1,6 +1,7 @@
 """The memory part of the prompt is frozen per chat, so the cached prompt prefix survives between turns."""
 
 import json
+from datetime import datetime, timezone
 import uuid
 from types import SimpleNamespace
 
@@ -158,3 +159,15 @@ def test_two_turns_send_the_same_system_prompt(env, monkeypatch):
     assert len(model.prompts) == 2
     assert "coffee" in model.prompts[0][0].content
     assert model.prompts[0][0].content == model.prompts[1][0].content
+
+
+def test_snapshot_built_before_a_clear_is_not_saved(env):
+    user = env.user()
+    chat = create_conversation(user, "auto", "hi")["id"]
+    snapshot = {"user": "", "memories": "x", "recent_chats": ""}
+    started = datetime.now(timezone.utc)
+    clear_snapshots(user)
+    save_snapshot(user, chat, snapshot, built_at=started)
+    assert stored(chat) is None
+    save_snapshot(user, chat, snapshot, built_at=datetime.now(timezone.utc))
+    assert stored(chat) == snapshot

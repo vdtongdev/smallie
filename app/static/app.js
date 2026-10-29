@@ -9,6 +9,7 @@ const state = {
   docsPoll: null,
   awaiting: false, // the open chat is paused on a question to the user
   kinds: {}, // conversation id -> kind ("auto" | "team"), from /api/conversations
+  usage: null, // last {reply, chat} token usage of the open chat, shown under the input box
   agents: {}, // route -> {labels: {en, vi}, steps: {step: {en, vi}}}, from /api/agents
 };
 
@@ -176,6 +177,7 @@ $("langBtn").onclick = () => {
   loadConversations();
   loadDocuments();
   loadUsage();
+  renderUsage(state.usage);
   if ($("readmeDialog").open) loadMarketStatus();
   if ($("adminDialog").open) loadAccounts();
   if ($("activityDialog").open) renderActivity();
@@ -550,6 +552,25 @@ async function loadUsage() {
   $("usageCost").textContent = t("usageCost").replace("{cost}", usage.cost.toFixed(usage.cost < 0.01 ? 6 : 4)); // one call costs ~$0.000005
 }
 
+// Tokens of the open chat under the input box: {reply: part | null, chat: part}, part = {input_tokens, output_tokens, cached_tokens | null}.
+// cached_tokens null means the provider did not say (shown as n/a, not 0).
+function renderUsage(usage) {
+  state.usage = usage;
+  const box = $("chatUsage");
+  const chat = usage?.chat;
+  if (!usage || (!usage.reply && !chat.input_tokens && !chat.output_tokens)) { box.textContent = ""; return; }
+  const n = (x) => x.toLocaleString(state.lang === "vi" ? "vi-VN" : "en-US");
+  const line = (label, p) => {
+    const key = p.cached_tokens == null ? "usageLineUnknown" : p.input_tokens ? "usageLine" : "usageLineNoRate";
+    const text = t(key).replace("{in}", n(p.input_tokens)).replace("{out}", n(p.output_tokens))
+      .replace("{cached}", n(p.cached_tokens ?? 0)).replace("{rate}", p.input_tokens ? Math.round(100 * p.cached_tokens / p.input_tokens) : 0);
+    const div = document.createElement("div");
+    div.textContent = `${t(label)}: ${text}`;
+    return div;
+  };
+  box.replaceChildren(...(usage.reply ? [line("usageReply", usage.reply)] : []), line("usageChat", chat));
+}
+
 // Readme examples go into the message box, ready to send or edit.
 $("readmeDialog").addEventListener("click", (e) => {
   const example = e.target.closest(".example");
@@ -672,10 +693,13 @@ async function openConversation(id) {
   }
   end();
   loadConversations();
+  const usage = await api(`/conversations/${id}/usage`).catch(() => null);
+  if (state.conversationId === id) renderUsage(usage);
 }
 
 function newChat() {
   setConversation(null);
+  renderUsage(null);
   setAwaiting(false);
   showWelcome();
   loadConversations();
@@ -881,6 +905,9 @@ async function sendMessage(text) {
             markPending(current.el);
             act.question = event.question;
             touch(turn);
+            break;
+          case "usage":
+            renderUsage({ reply: event.reply, chat: event.chat });
             break;
           case "done":
             finished = true;

@@ -35,10 +35,12 @@ Each model request is laid out from the most stable part to the least stable:
 |---|---|---|
 | 1 | tools (unchanged; fixed order per agent, filtered per source set in team mode) | per agent / source set |
 | 2 | the agent's static `system_prompt` | on deploy |
-| 3 | the mode-stable extra: `research_prompt_extra` (source list, skills, schema; depends only on `context.sources`) | per mode |
-| 4 | the chat's snapshot: `USER_SECTION`, `MEMORIES_SECTION`, `RECENT_CHATS_SECTION` (section 2) | per snapshot |
+| 3 | the chat's snapshot: `USER_SECTION`, `MEMORIES_SECTION`, `RECENT_CHATS_SECTION` (section 2) | per snapshot |
+| 4 | the mode-stable extra: `research_prompt_extra` (source list, skills, schema; depends only on `context.sources`) | per mode |
 | 5 | the thread's messages | grows; earlier messages never change |
 | 6 | the tail note | every call |
+
+The snapshot comes before the mode-stable extra, as `build_agent` appends them; both stay fixed for a chat, so every call within a chat reuses them either way.
 
 Parts 2 to 4 form the system prompt (`build_agent`'s dynamic prompt). Nothing in them may depend on the current message or call.
 

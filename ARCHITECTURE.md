@@ -482,7 +482,7 @@ The memory part of a chat's prompt (profile, facts, other chats) is frozen per c
 - Saved on the conversation row: `memory_snapshot` (jsonb) and `snapshot_at`
 - `chat_snapshot` reuses the saved snapshot while the chat's last turn is within `MEMORY_SNAPSHOT_MINUTES` (default 60); otherwise it builds one (`build_snapshot`) and saves it
 - Deleting a fact, a file or a conversation calls `clear_snapshots(user_id)`: every chat of that user rebuilds its snapshot on the next turn
-- Race rule: a snapshot whose build started before a clear is not saved, because it may hold the deleted data
+- Race rule: a snapshot whose build started before or at a clear is not saved, because it may hold the deleted data
 - Facts learned during a chat are already in its history, so the snapshot does not need them until it is rebuilt
 
 ### Cross-Chat Memory

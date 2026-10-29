@@ -560,19 +560,27 @@ function renderUsage(usage) {
   const chat = usage?.chat;
   if (!usage || (!usage.reply && !chat.input_tokens && !chat.output_tokens)) { box.textContent = ""; return; }
   const n = (x) => x.toLocaleString(state.lang === "vi" ? "vi-VN" : "en-US");
-  const line = (label, p) => {
+  // One row per model, most input first: name, calls, input, cached (n/a when never reported), hit rate.
+  const modelRows = (byModel) => Object.entries(byModel || {}).sort((a, b) => b[1].input_tokens - a[1].input_tokens)
+    .map(([name, m]) => t(m.cached_tokens == null ? "usageModelUnknown" : "usageModelRow")
+      .replace("{model}", name).replace("{calls}", n(m.model_calls)).replace("{in}", n(m.input_tokens))
+      .replace("{cached}", n(m.cached_tokens ?? 0)).replace("{rate}", m.input_tokens ? Math.round(100 * (m.cached_tokens ?? 0) / m.input_tokens) : 0))
+    .join("\n");
+  const line = (label, p, byModel) => {
     const key = p.cached_tokens == null ? "usageLineUnknown" : p.input_tokens ? "usageLine" : "usageLineNoRate";
     const text = t(key).replace("{in}", n(p.input_tokens)).replace("{out}", n(p.output_tokens))
       .replace("{cached}", n(p.cached_tokens ?? 0)).replace("{rate}", p.input_tokens ? Math.round(100 * p.cached_tokens / p.input_tokens) : 0);
     const div = document.createElement("div");
     div.textContent = `${t(label)}: ${text}`;
+    const rows = modelRows(byModel);
+    if (rows) div.title = rows;
     return div;
   };
   const note = document.createElement("div");
   note.className = "usage-note";
   note.textContent = t("usageCacheNote");
   const noCache = chat.cached_tokens === 0 && chat.input_tokens > 0;
-  box.replaceChildren(...(usage.reply ? [line("usageReply", usage.reply)] : []), line("usageChat", chat), ...(noCache ? [note] : []));
+  box.replaceChildren(...(usage.reply ? [line("usageReply", usage.reply, usage.reply_by_model)] : []), line("usageChat", chat, usage.chat_by_model), ...(noCache ? [note] : []));
 }
 
 // Readme examples go into the message box, ready to send or edit.
@@ -912,7 +920,7 @@ async function sendMessage(text) {
             touch(turn);
             break;
           case "usage":
-            renderUsage({ reply: event.reply, chat: event.chat });
+            renderUsage(event);
             break;
           case "done":
             finished = true;

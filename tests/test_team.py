@@ -593,6 +593,55 @@ async def test_review_question_that_repeats_the_users_message_does_not_pause(mon
     assert not (await assistant.aget_state(CONFIG)).interrupts
 
 
+@pytest.mark.parametrize("echo", [
+    "what is the aapl market cap",
+    "WHAT IS THE AAPL MARKET CAP?",
+    "  What   is the AAPL market cap??  ",
+    "So, what is the AAPL market cap?",
+])
+async def test_review_question_that_nearly_copies_the_users_message_does_not_pause(monkeypatch, echo):
+    _board(monkeypatch, Board(question=echo), Board())
+    assistant = _assistant(monkeypatch, per_agent(orchestrator=[AIMessage("Final.")]),
+                           sql=Fake("sql", "draft", log=[]), research=Fake("research", "notes", log=[]))
+    chunks = await _stream(assistant, _ask())
+
+    assert not _events(chunks, "needs_human")
+    assert not (await assistant.aget_state(CONFIG)).interrupts
+
+
+async def test_review_question_that_repeats_an_earlier_user_message_does_not_pause(monkeypatch):
+    _board(monkeypatch, Board(question=QUESTION), Board())
+    assistant = _assistant(monkeypatch, per_agent(orchestrator=[AIMessage("Final.")]),
+                           sql=Fake("sql", "draft", log=[]), research=Fake("research", "notes", log=[]))
+    thread = {"messages": [HumanMessage(QUESTION), AIMessage("Earlier answer."), HumanMessage("And what about its revenue?")]}
+    chunks = await _stream(assistant, thread)
+
+    assert not _events(chunks, "needs_human")
+    assert not (await assistant.aget_state(CONFIG)).interrupts
+
+
+async def test_dropped_echo_goes_on_to_the_write_up(monkeypatch):
+    _board(monkeypatch, Board(question=QUESTION), Board())
+    assistant = _assistant(monkeypatch, per_agent(orchestrator=[AIMessage("Final.")]),
+                           sql=Fake("sql", "draft", log=[]), research=Fake("research", "notes", log=[]))
+    chunks = await _stream(assistant, _ask())
+
+    assert not _events(chunks, "needs_human") and not (await assistant.aget_state(CONFIG)).interrupts
+    messages = await _thread(assistant)
+    assert messages[-1].text == "Final."
+    assert [m.text for m in messages if isinstance(m, AIMessage)] == ["Final."]  # nothing equal to the dropped question
+
+
+async def test_genuine_question_sharing_words_with_the_users_message_still_pauses(monkeypatch):
+    _board(monkeypatch, Board(question="Which year should the AAPL figure be for?"), Board())
+    assistant = _assistant(monkeypatch, per_agent(orchestrator=[AIMessage("Final.")]),
+                           sql=Fake("sql", "draft", log=[]), research=Fake("research", "notes", log=[]))
+    chunks = await _stream(assistant, _ask())
+
+    assert _events(chunks, "needs_human") == [{"type": "needs_human", "question": "Which year should the AAPL figure be for?"}]
+    assert (await assistant.aget_state(CONFIG)).interrupts
+
+
 async def test_needs_human_pauses_and_resume_continues(monkeypatch):
     assistant, sql, first = await _paused(monkeypatch)
 

@@ -147,7 +147,7 @@ Fill in these lists:
 
 Never decide that a source is right because of its kind (database, file, web page, model). Any source can be wrong.
 
-Set `question` only when the answers can't go on without information only the user has (for example, which of several files they mean). Write it as one short question in {language}. Leave it empty when an agent or a search could fill the gap.
+Set `question` only when the answers can't go on without information only the user has (for example, which of several files they mean). Write it as one short question in {language}. Never repeat or rephrase the user's message as `question`. Leave it empty when an agent or a search could fill the gap.
 
 Write every text field in {language}. Leave a list empty when it has no entry."""
 

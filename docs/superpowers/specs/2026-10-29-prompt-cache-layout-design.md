@@ -74,7 +74,8 @@ All DB work runs through `asyncio.to_thread` and is keyed by `user_id` and conve
 Clearing: deleted data must never reach a prompt again. These routes set `memory_snapshot = NULL` on every conversation of that user (and of no other user):
 
 - deleting a fact (`/api/memories`, `delete_fact`);
-- deleting a document (the snapshot can name the file).
+- deleting a document (the snapshot can name the file);
+- deleting a conversation (the other chats' `recent_chats` can quote its turns). Its facts stay in the graph, as today, so this is only about the quoted turns.
 
 The next turn of each chat then builds a new snapshot. Deleting a conversation or an account removes its row and with it the snapshot.
 
@@ -85,20 +86,20 @@ The next turn of each chat then builds a new snapshot. Deleting a conversation o
 Counting (`app/core/usage.py`, `UsageCounter`):
 
 - `cached_tokens` sums `usage_metadata["input_token_details"]["cache_read"]` (filled by `langchain_openai` from `prompt_tokens_details.cached_tokens`).
-- `cache_known` is set when any reply carried `input_token_details.cache_read`, like `cost_known` for cost. When no reply did, cached tokens are unknown, not zero.
-- Both are part of `totals()` and `add()`, so agent servers report them back through `RemoteAgent` like the other totals.
+- `cache_known` is set when any reply carried `input_token_details.cache_read`, like `cost_known` for cost. When no reply did, cached tokens are unknown, not zero. Unknown happens when the provider sends no `prompt_tokens_details` (local servers such as Ollama or llama.cpp, some hosts behind OpenRouter), when a call fails before its usage arrives, and when an agent server still runs an image without this change. A reported 0 is known: the provider caches but reused nothing.
+- `totals()` includes `cached_tokens` only when `cache_known`; an absent key means unknown. `add()` sums `cached_tokens` when the key is present and then sets `cache_known`. So agent servers report it back through `RemoteAgent` like the other totals, and an old agent server's totals still add up.
 - The hit rate is `cached_tokens / input_tokens` (LangChain's `input_tokens` includes the cached ones). It is computed for display and never stored.
 
 Saving:
 
-- Per user: `add_usage` also sums `cached_tokens`. The sidebar usage box does not change.
-- Per conversation: new `conversations` columns `input_tokens`, `output_tokens`, `cached_tokens` (bigint, not null, default 0) and `last_usage jsonb` (`input_tokens`, `output_tokens`, `cached_tokens`, `cache_known` of the latest reply), added with `ADD COLUMN IF NOT EXISTS`. `routes_chat`'s `finally` block updates them in one statement, `SET input_tokens = input_tokens + :input, ...` keyed by conversation id and `user_id`, so failed and cut-off replies count, as they do in the user's totals today.
+- Per user: unchanged. `add_usage` keeps input, output and cost; cached tokens are kept per conversation only, since nothing shows a per-user cached total. The sidebar usage box does not change.
+- Per conversation: new `conversations` columns `input_tokens`, `output_tokens`, `cached_tokens` (bigint, not null, default 0), `cache_known` (boolean, not null, default false; true once any reply of the chat reported cached tokens) and `last_usage jsonb` (`input_tokens`, `output_tokens`, `cached_tokens`, `cache_known` of the latest reply), added with `ADD COLUMN IF NOT EXISTS`. `routes_chat`'s `finally` block updates them in one statement, `SET input_tokens = input_tokens + :input, ...` keyed by conversation id and `user_id`, so failed and cut-off replies count, as they do in the user's totals today.
 - "Reply" means the whole message: every model call it caused, specialists and agent servers included. Existing conversations start at 0; nothing is backfilled.
 
 Reaching the UI:
 
-- A new SSE event `usage`, `{"reply": {...}, "chat": {...}}`, sent after the numbers are saved. `app.js` updates the footer when it arrives, also when it comes after `done`.
-- `GET .../messages` returns the same `usage` object, so a reload shows the footer.
+- A new SSE event `usage`, `{"reply": {...}, "chat": {...}}`, sent after the numbers are saved and before `done`.
+- A new `GET /api/conversations/{id}/usage` returns the same object (404 for another user's or a missing chat), so a reload shows the footer. `GET .../messages` stays a list.
 
 Footer: two small muted lines under the chat box (`app.js`, `style.css`, English and Vietnamese strings in `i18n.js`), hidden while the open chat has no usage:
 
@@ -126,9 +127,10 @@ Tests, written from this spec:
 - The tail note never appears in the saved thread, in the SSE stream or in the input of fact extraction.
 - `RESEARCHER_SYSTEM` holds no date; the researcher's tail does.
 - `make_last_call` adds no second hidden message.
-- Snapshot (`requires_db`): reused within `MEMORY_SNAPSHOT_MINUTES`; rebuilt after the gap and when missing; cleared for that user's chats only when a fact or a document is deleted; another user's snapshots stay.
-- `UsageCounter`: counts `cache_read`; `cache_known` stays false when no reply carried cache details; totals survive `add()`.
-- The per-conversation usage update adds to the totals, replaces `last_usage`, and touches only that user's conversation; `GET .../messages` returns the usage.
+- Snapshot (`requires_db`): reused within `MEMORY_SNAPSHOT_MINUTES`; rebuilt after the gap and when missing; cleared for that user's chats only when a fact, a document or a conversation is deleted; another user's snapshots stay.
+- `UsageCounter`: counts `cache_read`; `totals()` has no `cached_tokens` when no reply carried cache details; a reported 0 is kept as 0; totals survive `add()`, also from a server that sends no cached key.
+- The per-conversation usage update adds to the totals, replaces `last_usage`, and touches only that user's conversation; `GET /api/conversations/{id}/usage` returns it.
+- `tests/test_orchestrator.py` checks that read the notes, `REPLY LANGUAGE`, `CITATIONS` or the tables note from the system prompt read them from the tail message instead (same content); each changed test is named in its commit message.
 - Footer: checked in the running app in English and Vietnamese, before and after a reload.
 
 ## Docs updated in this branch

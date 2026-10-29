@@ -2563,21 +2563,21 @@ def _depth(tasks):
     return max(of(t) for t in tasks)
 
 
-async def _resumed_events(monkeypatch, message):
+async def _resumed_events(monkeypatch, message, plan=None, boards=(), slow="docs"):
     """A 3-wave chain team turn in chat c1, stopped in wave 1, then resumed through the chat route with `message`.
     Returns (the resumed request's SSE events, the stopped workspace's tasks)."""
     from app.api import routes_chat
     from tests.test_stop import Harness
 
     log = []
-    docs = Fake("docs", "DOCS TEXT", log=log, delay=30)
-    _plan(monkeypatch, _chain())
-    _board(monkeypatch, then=Board())
-    agents = {"docs": docs, "sql": Fake("sql", "SQL TEXT", log=log), "research": Fake("research", "R TEXT", log=log)}
+    agents = {"docs": Fake("docs", "DOCS TEXT", log=log), "sql": Fake("sql", "SQL TEXT", log=log), "research": Fake("research", "R TEXT", log=log)}
+    agents[slow].delay = 30
+    _plan(monkeypatch, plan or _chain())
+    _board(monkeypatch, *boards, then=Board())
     assistant = _assistant(monkeypatch, per_agent(orchestrator=[AIMessage("Final.")]), documents=("handbook.pdf",), **agents)
     config = {"configurable": {"thread_id": "c1"}}
-    await _cancel_when(assistant, _ask(THREE), "docs", log, config)
-    docs.delay = 0
+    await _cancel_when(assistant, _ask(THREE), slow, log, config)
+    agents[slow].delay = 0
     sub = next(t.state for t in (await assistant.aget_state(config, subgraphs=True)).tasks if t.name == "team")
     tasks = sub.values["workspace"]["tasks"]
 
@@ -2624,3 +2624,17 @@ async def test_resumed_normal_chat_sends_no_plan(monkeypatch):
     response = await routes_chat.chat("auto", routes_chat.ChatRequest(message="continue", conversation_id="t"), h.request, "u1")
     events = [json.loads(chunk.removeprefix("data: ")) async for chunk in response.body_iterator]
     assert not [e for e in events if e["type"] == "plan"]
+
+
+async def test_resumed_plan_counts_an_independent_follow_up_wave(monkeypatch):
+    plan = Plan(tasks=[Task(id="t1", agent="docs", goal="extract"), Task(id="t2", agent="sql", goal="check", depends_on=["t1"])])
+    follow = Review(follow_ups=[Task(id="x", agent="research", goal="look", depends_on=[])])
+    events, tasks = await _resumed_events(monkeypatch, "continue", plan=plan, boards=(follow,), slow="research")
+    sent = next(e for e in events if e["type"] == "plan")
+    kinds = [e["type"] for e in events]
+    assert kinds.index("plan") < kinds.index("wave") if "wave" in kinds else True
+    assert [(t["id"], t["origin"]) for t in sent["tasks"]] == [("t1", "plan"), ("t2", "plan"), ("t3", "follow_up")]
+    assert sent["wave"] >= 2
+    for e in events:
+        if e["type"] == "wave":
+            assert e["wave"] <= max(_depth(sent["tasks"]), sent["wave"] + 1)

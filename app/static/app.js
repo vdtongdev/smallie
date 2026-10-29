@@ -259,14 +259,14 @@ const stepCount = (act) => act.waves.reduce((n, r) => n + r.answers.reduce((m, a
 
 const waveTitle = (w) => `${t("waveN").replace("{n}", w.wave)} · ${t({ conflict: "kindConflict", challenge: "kindChallenge" }[w.kind] || "kindAnswer")}`;
 
-// Waves the plan needs so far: its longest dependency chain, at least the waves already run.
+// Waves the plan needs so far: its longest dependency chain, at least the waves already run (also before a resume).
 function waveTotal(act) {
   const depth = {};
   const of = (task, seen = []) => depth[task.id] ??= 1 + Math.max(0, ...task.depends_on.map((d) => {
     const dep = act.plan.find((x) => x.id === d);
     return dep && !seen.includes(d) ? of(dep, [...seen, task.id]) : 0;
   }));
-  return Math.max(act.waves.length, ...act.plan.filter((x) => !x.depends_on.includes("answer")).map((x) => of(x)));
+  return Math.max(act.waves.length, act.planWave || 0, ...act.waves.map((w) => w.wave), ...act.plan.filter((x) => !x.depends_on.includes("answer")).map((x) => of(x)));
 }
 
 const planAgent = (act, id) => agentLabel(act.plan.find((x) => x.id === id)?.agent ?? id);
@@ -867,6 +867,7 @@ async function sendMessage(text) {
             break;
           case "plan":
             act.plan = event.tasks;
+            act.planWave = event.wave || 0; // a resumed turn: the waves announced before the stop
             addBadges(event.tasks.map((x) => x.agent));
             touch(turn);
             break;

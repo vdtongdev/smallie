@@ -239,10 +239,12 @@ async def _resumed_plan(assistant, config) -> dict | None:
     try:
         snapshot = await assistant.aget_state(config, subgraphs=True)
         sub = next((t.state for t in snapshot.tasks if t.name == TEAM_MODE and hasattr(t.state, "values")), None)
-        tasks = (sub.values.get("workspace") or {}).get("tasks") if sub else None
-        if not tasks:
+        workspace = (sub.values.get("workspace") or {}) if sub else {}
+        if not workspace.get("tasks"):
             return None
-        return {"type": "plan", "tasks": [_brief(t) for t in tasks], "fallback": False, "resumed": True}
+        # `origin` keeps the popup's follow-up and reply marks; `wave`: the waves announced before the stop
+        return {"type": "plan", "tasks": [{**_brief(t), "origin": t.get("origin")} for t in workspace["tasks"]],
+                "fallback": False, "resumed": True, "wave": workspace.get("wave", 0)}
     except Exception:  # noqa: BLE001
         log.exception("Reading the stopped team's plan failed")
         return None

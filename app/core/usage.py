@@ -27,6 +27,7 @@ class UsageCounter(AsyncCallbackHandler):
         self.cost_known = False  # a reply reported a cost (0.0 is a cost; a missing field is not)
         self.cached_tokens = 0
         self.cache_known = False  # a reply reported cached input tokens (0 is a count; a missing field is not)
+        self.by_model: dict[str, dict] = {}  # model name -> its calls and tokens; `cached_tokens` only once reported
 
     async def on_llm_end(self, response: LLMResult, **kwargs) -> None:
         for generations in response.generations:
@@ -45,6 +46,16 @@ class UsageCounter(AsyncCallbackHandler):
         details = usage.get("input_token_details") or {}
         if "cache_read" in details:
             self.add_cached(details["cache_read"])
+        self.add_model(message.response_metadata.get("model_name") or "unknown", {
+            "model_calls": 1, "input_tokens": usage.get("input_tokens", 0),
+            "output_tokens": usage.get("output_tokens", 0), "cached_tokens": details.get("cache_read")})
+
+    def add_model(self, model: str, part: dict) -> None:
+        entry = self.by_model.setdefault(model, {"model_calls": 0, "input_tokens": 0, "output_tokens": 0})
+        for key in ("model_calls", "input_tokens", "output_tokens"):
+            entry[key] += part.get(key) or 0
+        if part.get("cached_tokens") is not None:
+            entry["cached_tokens"] = entry.get("cached_tokens", 0) + part["cached_tokens"]
 
     def add_cached(self, tokens: int | None) -> None:
         if tokens is not None:
@@ -59,6 +70,8 @@ class UsageCounter(AsyncCallbackHandler):
                   "output_tokens": self.output_tokens, "cost": self.cost if self.cost_known else None}
         if self.cache_known:
             totals["cached_tokens"] = self.cached_tokens
+        if self.by_model:
+            totals["by_model"] = {model: dict(part) for model, part in self.by_model.items()}
         return totals
 
     def add(self, totals: dict) -> None:
@@ -68,6 +81,8 @@ class UsageCounter(AsyncCallbackHandler):
             setattr(self, key, getattr(self, key) + (totals.get(key) or 0))
         self.add_cost(totals.get("cost"))
         self.add_cached(totals.get("cached_tokens"))
+        for model, part in (totals.get("by_model") or {}).items():
+            self.add_model(model, part)
 
 
 async def get_usage(store: BaseStore, user_id: str) -> dict:

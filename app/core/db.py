@@ -50,7 +50,8 @@ conversations = Table(
     Column("output_tokens", BigInteger, nullable=False, server_default="0"),
     Column("cached_tokens", BigInteger, nullable=False, server_default="0"),
     Column("cache_known", Boolean, nullable=False, server_default="false"),  # some reply reported cached tokens
-    Column("last_usage", JSONB),  # the latest reply's usage part
+    Column("last_usage", JSONB),  # the latest reply's usage part, plus its `by_model`
+    Column("usage_by_model", JSONB, nullable=False, server_default="{}"),  # model name -> calls and tokens, whole chat
     Column("memory_snapshot", JSONB),  # profile, facts and other chats as the prompt shows them (app/core/snapshot.py)
     Column("snapshot_at", DateTime(timezone=True)),
     Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
@@ -183,7 +184,8 @@ def init_db() -> None:
             "ADD COLUMN IF NOT EXISTS output_tokens bigint NOT NULL DEFAULT 0, "
             "ADD COLUMN IF NOT EXISTS cached_tokens bigint NOT NULL DEFAULT 0, "
             "ADD COLUMN IF NOT EXISTS cache_known boolean NOT NULL DEFAULT false, "
-            "ADD COLUMN IF NOT EXISTS last_usage jsonb"
+            "ADD COLUMN IF NOT EXISTS last_usage jsonb, "
+            "ADD COLUMN IF NOT EXISTS usage_by_model jsonb NOT NULL DEFAULT '{}'"
         ))
         # These came with the frozen memory snapshot.
         conn.execute(text(

@@ -82,3 +82,42 @@ def test_streamed_usage_chunk_keeps_cached_tokens():
                                       "prompt_tokens_details": {"cached_tokens": 6}}}
     generation = OpenRouterChat(model="m", api_key="k")._convert_chunk_to_generation_chunk(chunk, AIMessageChunk, None)
     assert generation.message.usage_metadata["input_token_details"]["cache_read"] == 6
+
+
+def _named(model, inp, out, cache_read=None):
+    message = _reply(inp, out, cache_read)
+    message.response_metadata = {"model_name": model}
+    return message
+
+
+def test_counter_keeps_numbers_per_model():
+    counter = UsageCounter()
+    counter.count(_named("a/one", 100, 5, cache_read=80))
+    counter.count(_named("a/one", 50, 5, cache_read=0))
+    counter.count(_named("b/two", 30, 2))
+    by_model = counter.totals()["by_model"]
+    assert by_model["a/one"] == {"model_calls": 2, "input_tokens": 150, "output_tokens": 10, "cached_tokens": 80}
+    assert by_model["b/two"] == {"model_calls": 1, "input_tokens": 30, "output_tokens": 2}  # never reported cache: unknown
+
+
+def test_reply_without_model_name_counts_as_unknown():
+    counter = UsageCounter()
+    counter.count(_reply(10, 1))
+    assert counter.totals()["by_model"]["unknown"]["model_calls"] == 1
+
+
+def test_add_merges_by_model_and_accepts_totals_without_it():
+    counter = UsageCounter()
+    counter.count(_named("a/one", 10, 1, cache_read=4))
+    counter.add({"model_calls": 1, "input_tokens": 5, "output_tokens": 1})  # old agent server
+    counter.add({"model_calls": 2, "input_tokens": 20, "output_tokens": 2, "by_model": {
+        "a/one": {"model_calls": 1, "input_tokens": 12, "output_tokens": 1, "cached_tokens": 6},
+        "c/three": {"model_calls": 1, "input_tokens": 8, "output_tokens": 1}}})
+    by_model = counter.totals()["by_model"]
+    assert by_model["a/one"] == {"model_calls": 2, "input_tokens": 22, "output_tokens": 2, "cached_tokens": 10}
+    assert by_model["c/three"] == {"model_calls": 1, "input_tokens": 8, "output_tokens": 1}
+    assert counter.totals()["input_tokens"] == 35
+
+
+def test_totals_have_no_by_model_when_nothing_was_counted_per_model():
+    assert "by_model" not in UsageCounter().totals()

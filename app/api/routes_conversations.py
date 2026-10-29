@@ -6,7 +6,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from app.agents.artifacts import artifacts_from
 from app.orchestration.orchestrator import MESSAGE_ROUTES
 from app.core.auth import get_current_user
-from app.core.conversations import delete_conversation, get_conversation, list_conversations
+from app.core.conversations import delete_conversation, get_conversation, get_conversation_usage, list_conversations
 from app.core.memory import forget_conversation
 
 router = APIRouter(tags=["conversations"])
@@ -28,6 +28,14 @@ async def messages(conversation_id: str, request: Request, user_id: str = Depend
         shown.append({"role": "assistant", "agent": "orchestrator", "content": state.interrupts[0].value["question"],
                       "pending": True, "team": None, "tool_calls": [], "charts": []})
     return shown
+
+
+@router.get("/conversations/{conversation_id}/usage")
+async def usage(conversation_id: str, user_id: str = Depends(get_current_user)):
+    result = await asyncio.to_thread(get_conversation_usage, user_id, conversation_id)
+    if not result:
+        raise HTTPException(404, "Conversation not found")
+    return result
 
 
 @router.delete("/conversations/{conversation_id}", status_code=204)

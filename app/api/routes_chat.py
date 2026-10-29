@@ -21,7 +21,7 @@ from app.orchestration.orchestrator import HANDOFF
 from app.orchestration.router import ORCHESTRATOR
 from app.core.auth import get_current_user
 from app.core.config import get_settings
-from app.core.conversations import create_conversation, get_conversation, list_conversations, touch_conversation
+from app.core.conversations import add_conversation_usage, create_conversation, get_conversation, list_conversations, touch_conversation
 from app.core.llm import NoModelSettings, pick_model, pick_tier
 from app.core.model_settings import load_settings
 from app.core.graph import extract_facts, recall_facts
@@ -121,6 +121,14 @@ async def chat(
                 await add_usage(store, user_id, usage)
             except Exception:  # noqa: BLE001 - usage is best effort
                 log.exception("Saving token usage failed")
+            saved = None
+            if usage.model_calls:
+                try:
+                    saved = await asyncio.to_thread(add_conversation_usage, user_id, conversation["id"], usage.totals())
+                except Exception:  # noqa: BLE001 - usage is best effort
+                    log.exception("Saving the chat's token usage failed")
+        if saved:
+            yield _sse({"type": "usage", **saved})
         yield _sse({"type": "done"})
 
     async def remember_turn():

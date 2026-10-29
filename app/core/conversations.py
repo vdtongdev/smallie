@@ -50,3 +50,44 @@ def delete_conversation(user_id: str, conversation_id: str) -> None:
                 conversations.c.id == conversation_id, conversations.c.user_id == user_id
             )
         )
+
+
+def _usage_part(input_tokens: int, output_tokens: int, cached_tokens: int | None) -> dict:
+    return {"input_tokens": input_tokens, "output_tokens": output_tokens, "cached_tokens": cached_tokens}
+
+
+def _usage_of(row) -> dict:
+    """`{"reply", "chat"}` from a conversation row; cached tokens are None while no reply reported them."""
+    chat = _usage_part(row.input_tokens, row.output_tokens, row.cached_tokens if row.cache_known else None)
+    return {"reply": row.last_usage, "chat": chat}
+
+
+def add_conversation_usage(user_id: str, conversation_id: str, totals: dict) -> dict | None:
+    """Add one reply's `UsageCounter.totals()` to the chat's numbers. None when the chat is not this user's."""
+    cached = totals.get("cached_tokens")
+    reply = _usage_part(totals.get("input_tokens", 0), totals.get("output_tokens", 0), cached)
+    with get_engine().begin() as conn:
+        row = conn.execute(
+            update(conversations)
+            .where(conversations.c.id == conversation_id, conversations.c.user_id == user_id)
+            .values(
+                input_tokens=conversations.c.input_tokens + reply["input_tokens"],
+                output_tokens=conversations.c.output_tokens + reply["output_tokens"],
+                cached_tokens=conversations.c.cached_tokens + (cached or 0),
+                cache_known=conversations.c.cache_known | (cached is not None),
+                last_usage=reply,
+            )
+            .returning(conversations.c.input_tokens, conversations.c.output_tokens, conversations.c.cached_tokens,
+                       conversations.c.cache_known, conversations.c.last_usage)
+        ).first()
+    return _usage_of(row) if row else None
+
+
+def get_conversation_usage(user_id: str, conversation_id: str) -> dict | None:
+    with get_engine().connect() as conn:
+        row = conn.execute(
+            select(conversations.c.input_tokens, conversations.c.output_tokens, conversations.c.cached_tokens,
+                   conversations.c.cache_known, conversations.c.last_usage)
+            .where(conversations.c.id == conversation_id, conversations.c.user_id == user_id)
+        ).first()
+    return _usage_of(row) if row else None

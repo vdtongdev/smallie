@@ -3,7 +3,10 @@
 from functools import lru_cache
 
 from pgvector.sqlalchemy import Vector
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy import (
+    BigInteger,
+    Boolean,
     Column,
     DateTime,
     Engine,
@@ -43,6 +46,11 @@ conversations = Table(
     Column("kind", String(16), nullable=False),  # mode it was started with: "auto" or an agent route
     Column("title", Text, nullable=False),
     Column("mined_turns", Integer, nullable=False, server_default="0"),  # turns scripts.build_graph read so far
+    Column("input_tokens", BigInteger, nullable=False, server_default="0"),  # token totals of the chat's replies
+    Column("output_tokens", BigInteger, nullable=False, server_default="0"),
+    Column("cached_tokens", BigInteger, nullable=False, server_default="0"),
+    Column("cache_known", Boolean, nullable=False, server_default="false"),  # some reply reported cached tokens
+    Column("last_usage", JSONB),  # the latest reply's usage part
     Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
     Column("updated_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
 )
@@ -167,6 +175,14 @@ def init_db() -> None:
         conn.execute(text(f"ALTER TABLE documents ADD COLUMN IF NOT EXISTS card_embedding vector({get_settings().embed_dim})"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS graph_built_at timestamptz"))
         conn.execute(text("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS mined_turns integer NOT NULL DEFAULT 0"))
+        # These came with per-chat token usage.
+        conn.execute(text(
+            "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS input_tokens bigint NOT NULL DEFAULT 0, "
+            "ADD COLUMN IF NOT EXISTS output_tokens bigint NOT NULL DEFAULT 0, "
+            "ADD COLUMN IF NOT EXISTS cached_tokens bigint NOT NULL DEFAULT 0, "
+            "ADD COLUMN IF NOT EXISTS cache_known boolean NOT NULL DEFAULT false, "
+            "ADD COLUMN IF NOT EXISTS last_usage jsonb"
+        ))
         # These came with task model routing.
         conn.execute(text(
             "ALTER TABLE model_settings ADD COLUMN IF NOT EXISTS small_model text, "

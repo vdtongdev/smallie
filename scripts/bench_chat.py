@@ -390,6 +390,13 @@ def fmt(value: float | None) -> str:
     return "-" if value is None else f"{value:.1f}"
 
 
+def overall_cache(results: list[Result]) -> tuple[int, int | None, int | None]:
+    """Total input, cached total and hit rate; cached and the rate count only results whose replies reported it."""
+    known = [r for r in results if r.cached_tokens is not None]
+    cached = sum(r.cached_tokens for r in known) if known else None
+    return sum(r.input_tokens for r in results), cached, hit_rate(sum(r.input_tokens for r in known), cached)
+
+
 def na(value) -> str:
     return "n/a" if value is None else str(value)
 
@@ -414,9 +421,7 @@ def report(results: list[Result]) -> None:
         for agent, v in r.ablation.items():
             print(f"{'':<16} without {agent}: {v['better']} - {v['why']}")
     print(f"\nmodel calls: {sum(r.model_calls for r in results)}")
-    known = [r.cached_tokens for r in results if r.cached_tokens is not None]
-    total_in, total_cached = sum(r.input_tokens for r in results), sum(known) if known else None
-    rate = hit_rate(total_in, total_cached)
+    total_in, total_cached, rate = overall_cache(results)
     print(f"input tokens: {total_in}, cached: {na(total_cached)}, hit rate: {na(rate) if rate is None else f'{rate}%'}")
     seconds = [c.seconds for r in results for c in r.calls if not c.error]
     if seconds:

@@ -63,7 +63,7 @@ def save_snapshot(user_id: str, conversation_id: str, snapshot: dict, built_at: 
     with get_engine().begin() as conn:
         conn.execute(update(conversations).where(
             conversations.c.id == conversation_id, conversations.c.user_id == user_id,
-            or_(conversations.c.snapshot_at.is_(None), conversations.c.snapshot_at <= (built_at or now)),
+            or_(conversations.c.snapshot_at.is_(None), conversations.c.snapshot_at < (built_at or now)),
         ).values(memory_snapshot=snapshot, snapshot_at=now))
 
 

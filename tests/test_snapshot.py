@@ -171,3 +171,13 @@ def test_snapshot_built_before_a_clear_is_not_saved(env):
     assert stored(chat) is None
     save_snapshot(user, chat, snapshot, built_at=datetime.now(timezone.utc))
     assert stored(chat) == snapshot
+
+
+def test_snapshot_built_at_the_clear_instant_is_not_saved(env):
+    user = env.user()
+    chat = create_conversation(user, "auto", "hi")["id"]
+    clear_snapshots(user)
+    with get_engine().connect() as conn:
+        cleared = conn.execute(select(conversations.c.snapshot_at).where(conversations.c.id == chat)).scalar()
+    save_snapshot(user, chat, {"user": "", "memories": "x", "recent_chats": ""}, built_at=cleared)
+    assert stored(chat) is None

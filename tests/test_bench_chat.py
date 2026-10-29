@@ -82,3 +82,9 @@ def test_contribution_evidence_claim_in_answer_is_used():
     t = {"tasks": [{"id": "t1", "agent": "sql", "status": "done"}], "results": {"t1": {"text": "no links"}},
          "evidence": [{"task": "t1", "claim": "market cap 3.1T", "source": "db", "as_of": "2025"}]}
     assert bench_chat.contribution(t, "Its market cap 3.1T today.")["sql"]["used"] is True
+
+
+def test_hit_rate():
+    assert bench_chat.hit_rate(200, 50) == 25
+    assert bench_chat.hit_rate(0, 0) is None
+    assert bench_chat.hit_rate(100, None) is None

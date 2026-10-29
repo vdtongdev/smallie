@@ -558,8 +558,7 @@ function renderUsage(usage) {
   state.usage = usage;
   const box = $("chatUsage");
   const chat = usage?.chat;
-  if (!usage || (!usage.reply && !chat.input_tokens && !chat.output_tokens)) { box.textContent = ""; box.title = ""; return; }
-  box.title = t("usageCacheNote");
+  if (!usage || (!usage.reply && !chat.input_tokens && !chat.output_tokens)) { box.textContent = ""; return; }
   const n = (x) => x.toLocaleString(state.lang === "vi" ? "vi-VN" : "en-US");
   const line = (label, p) => {
     const key = p.cached_tokens == null ? "usageLineUnknown" : p.input_tokens ? "usageLine" : "usageLineNoRate";
@@ -569,7 +568,11 @@ function renderUsage(usage) {
     div.textContent = `${t(label)}: ${text}`;
     return div;
   };
-  box.replaceChildren(...(usage.reply ? [line("usageReply", usage.reply)] : []), line("usageChat", chat));
+  const note = document.createElement("div");
+  note.className = "usage-note";
+  note.textContent = t("usageCacheNote");
+  const noCache = chat.cached_tokens === 0 && chat.input_tokens > 0;
+  box.replaceChildren(...(usage.reply ? [line("usageReply", usage.reply)] : []), line("usageChat", chat), ...(noCache ? [note] : []));
 }
 
 // Readme examples go into the message box, ready to send or edit.

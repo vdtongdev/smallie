@@ -1,6 +1,7 @@
 """The memory part of the prompt is frozen per chat, so the cached prompt prefix survives between turns."""
 
 import json
+import time
 from datetime import datetime, timezone
 import uuid
 from types import SimpleNamespace
@@ -125,6 +126,7 @@ def test_deleting_a_fact_document_or_chat_clears_snapshots(env, monkeypatch, tmp
     app.state.checkpointer, app.state.store = Checkpointer(), InMemoryStore()
 
     def freeze():
+        time.sleep(0.05)  # the Windows clock ticks coarsely: build strictly after the last clear
         save_snapshot(user, keep, {"user": "", "memories": "x", "recent_chats": ""})
         assert stored(keep) is not None
 
@@ -169,6 +171,7 @@ def test_snapshot_built_before_a_clear_is_not_saved(env):
     clear_snapshots(user)
     save_snapshot(user, chat, snapshot, built_at=started)
     assert stored(chat) is None
+    time.sleep(0.05)  # the Windows clock ticks coarsely
     save_snapshot(user, chat, snapshot, built_at=datetime.now(timezone.utc))
     assert stored(chat) == snapshot
 

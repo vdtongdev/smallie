@@ -19,7 +19,10 @@ class FakeAssistant:
 
 
 async def test_remote_model_calls_are_counted(monkeypatch):
-    monkeypatch.setattr(bench_chat, "recall_facts", lambda user_id: [])
+    async def snapshot(*args):
+        return {"user": "", "memories": "", "recent_chats": ""}
+
+    monkeypatch.setattr(bench_chat, "build_snapshot", snapshot)
     result = await bench_chat.run_scenario(FakeAssistant(), None, "u", "generic", 1)
     assert result.error == "" and result.model_calls == 2
 

@@ -43,9 +43,9 @@ from sqlalchemy import text
 
 from app.core.accounts import ADMIN_USER_ID
 from app.core.db import get_engine, init_db
-from app.core.graph import recall_facts
 from app.core.llm import get_chat_model
 from app.core.memory import AgentContext, open_persistence
+from app.core.snapshot import build_snapshot
 from app.core.usage import UsageCounter
 from app.orchestration import team as team_module
 from app.orchestration.graph import build_assistant
@@ -262,8 +262,8 @@ async def run_scenario(assistant, store, user_id: str, name: str, run: int) -> R
     result, timing, usage = Result(scenario=name, run=run), Timing(), UsageCounter()
     config = {"configurable": {"thread_id": f"bench-{uuid.uuid4()}"}, "callbacks": [timing, usage]}
     try:
-        memories = await asyncio.to_thread(recall_facts, user_id)
-        context = AgentContext(user_id=user_id, memories=memories, agent="team" if name.startswith("team") else "auto")
+        snapshot = await build_snapshot(None, user_id, config["configurable"]["thread_id"])
+        context = AgentContext(user_id=user_id, **snapshot, agent="team" if name.startswith("team") else "auto")
         for earlier in before:  # setup turns, not measured; same context so the measured turn can reuse their prefix
             await assistant.ainvoke({"messages": [{"role": "user", "content": earlier}]},
                                     config={"configurable": config["configurable"]}, context=context)

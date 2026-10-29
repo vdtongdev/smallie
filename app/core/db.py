@@ -51,6 +51,8 @@ conversations = Table(
     Column("cached_tokens", BigInteger, nullable=False, server_default="0"),
     Column("cache_known", Boolean, nullable=False, server_default="false"),  # some reply reported cached tokens
     Column("last_usage", JSONB),  # the latest reply's usage part
+    Column("memory_snapshot", JSONB),  # profile, facts and other chats as the prompt shows them (app/core/snapshot.py)
+    Column("snapshot_at", DateTime(timezone=True)),
     Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
     Column("updated_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
 )
@@ -182,6 +184,11 @@ def init_db() -> None:
             "ADD COLUMN IF NOT EXISTS cached_tokens bigint NOT NULL DEFAULT 0, "
             "ADD COLUMN IF NOT EXISTS cache_known boolean NOT NULL DEFAULT false, "
             "ADD COLUMN IF NOT EXISTS last_usage jsonb"
+        ))
+        # These came with the frozen memory snapshot.
+        conn.execute(text(
+            "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS memory_snapshot jsonb, "
+            "ADD COLUMN IF NOT EXISTS snapshot_at timestamptz"
         ))
         # These came with task model routing.
         conn.execute(text(

@@ -12,7 +12,6 @@ from pydantic import BaseModel, Field
 from langgraph.types import Command
 from starlette.background import BackgroundTask
 
-from app.core.accounts import get_profile
 from app.agents.artifacts import artifacts_from
 from app.agents.base import TOOL_RESULT_PREVIEW
 from app.agents.registry import ROUTES, SILENT_STEPS, STEPS
@@ -21,11 +20,12 @@ from app.orchestration.orchestrator import HANDOFF
 from app.orchestration.router import ORCHESTRATOR
 from app.core.auth import get_current_user
 from app.core.config import get_settings
-from app.core.conversations import add_conversation_usage, create_conversation, get_conversation, list_conversations, touch_conversation
+from app.core.conversations import add_conversation_usage, create_conversation, get_conversation, touch_conversation
 from app.core.llm import NoModelSettings, pick_model, pick_tier
 from app.core.model_settings import load_settings
-from app.core.graph import extract_facts, recall_facts
-from app.core.memory import TEAM_MODE, AgentContext, load_recent_chats, save_turn, turns
+from app.core.graph import extract_facts
+from app.core.memory import TEAM_MODE, AgentContext, save_turn, turns
+from app.core.snapshot import chat_snapshot
 from app.core.usage import UsageCounter, add_usage
 
 router = APIRouter(tags=["chat"])
@@ -88,16 +88,11 @@ async def chat(
                 model, tier_used, reason = pick_model(settings, tier)
                 yield _sse({"type": "routing", "difficulty": "medium", "profile": settings.profile,
                             "tier": tier_used, "model": model, "reason": reason})
-            memories, recent_chats, user = await asyncio.gather(
-                asyncio.to_thread(recall_facts, user_id),
-                _recent_chats(request, user_id, conversation["id"]) if cross_chat else _empty(),
-                _user(user_id),
-            )
+            snapshot = await chat_snapshot(request.app.state.checkpointer, user_id, conversation)
             stream = assistant.astream(
                 await _chat_input(assistant, config, kind, body.message),
                 config={**config, "callbacks": [usage], "metadata": {"user_id": user_id}},  # filter traces per user
-                context=AgentContext(user_id=user_id, user=user, memories=memories,
-                                     recent_chats=recent_chats, agent=kind, tier=tier),
+                context=AgentContext(user_id=user_id, **snapshot, agent=kind, tier=tier),
                 stream_mode=["messages", "updates", "custom"],
                 subgraphs=True,
             )
@@ -177,27 +172,6 @@ async def _chat_input(assistant, config, kind: str, message: str) -> dict | Comm
 def _answered_by(messages: list) -> str | None:
     """Name of the AIMessage that holds the turn's final text."""
     return next((m.name for m in reversed(messages) if isinstance(m, AIMessage) and m.text), None)
-
-
-async def _empty() -> str:
-    return ""
-
-
-async def _user(user_id: str) -> str:
-    profile = await asyncio.to_thread(get_profile, user_id)
-    if not profile or not profile["username"]:
-        return ""
-    return f"{profile['name'] or profile['username']} (username: {profile['username']})"
-
-
-async def _recent_chats(request: Request, user_id: str, current_id: str) -> str:
-    """Latest turns of the user's other chats; a failure here must not break the chat."""
-    try:
-        others = [c for c in await asyncio.to_thread(list_conversations, user_id) if c["id"] != current_id]
-        return await load_recent_chats(request.app.state.checkpointer, others)
-    except Exception:  # noqa: BLE001
-        log.exception("Loading recent chats failed")
-        return ""
 
 
 async def _events_from(stream) -> AsyncIterator[dict]:

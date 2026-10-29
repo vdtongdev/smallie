@@ -8,6 +8,7 @@ from app.orchestration.orchestrator import MESSAGE_ROUTES
 from app.core.auth import get_current_user
 from app.core.conversations import delete_conversation, get_conversation, get_conversation_usage, list_conversations
 from app.core.memory import forget_conversation
+from app.core.snapshot import clear_snapshots
 
 router = APIRouter(tags=["conversations"])
 
@@ -45,6 +46,7 @@ async def remove(conversation_id: str, request: Request, user_id: str = Depends(
     await request.app.state.checkpointer.adelete_thread(conversation_id)
     await forget_conversation(request.app.state.store, user_id, conversation_id)
     await asyncio.to_thread(delete_conversation, user_id, conversation_id)
+    await asyncio.to_thread(clear_snapshots, user_id)
 
 
 def _serialize(message) -> dict | None:

@@ -44,7 +44,7 @@ from app.agents.research.agent import mcp_tools
 from app.agents.skills import load_skills, skills_inline
 from app.core.config import get_settings
 from app.core.memory import TEAM_MODE, AgentContext
-from app.core.prompts import LANGUAGE_RULE, MEMORY_RULE, reply_language
+from app.core.prompts import CALL_NOTE, LANGUAGE_RULE, MEMORY_RULE, reply_language
 from app.orchestration.prompts import (
     ALREADY_ASKED,
     ATTEMPT_MESSAGE,
@@ -64,7 +64,7 @@ FORMATS = skills_inline(load_skills(Path(__file__).resolve().parent / "formats")
 HANDOFF = "handoff"
 FINDINGS = "research_findings"  # HumanMessage.name of the hidden findings message
 ATTEMPT = "failed_attempt"  # HumanMessage.name of the hidden note on a specialist that gave up
-HIDDEN = frozenset({FINDINGS, ATTEMPT, TEAM_MODE})
+HIDDEN = frozenset({FINDINGS, ATTEMPT, TEAM_MODE, CALL_NOTE})
 MAX_ASKS = 2  # `ask_<route>` calls per specialist and message, a fallen-back direct attempt included
 WEB_SEARCH_TOOLS = ("tavily_tavily_search", "knowledge_wikipedia_search")
 SORRY = "Sorry, I couldn't finish this answer. Please try again or rephrase the question."
@@ -257,7 +257,7 @@ def build_orchestrator(specs: Sequence[AgentSpec], agents: Mapping[str, Runnable
         ),
         tools=tools,
         max_model_calls=settings.orchestrator_max_model_calls,
-        prompt_extra=compose_section,
+        tail=compose_section,
         last_call_writes=False,
         middleware=[make_prefer_handoff(targets, frozenset(
             ask_tool_name(spec) for spec in specs if spec.tool_description and not spec.answers_directly)),

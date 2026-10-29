@@ -33,7 +33,7 @@ def build_chart_agent():
         schema=sql_agent.describe_schema(),  # the sql agent's schema description, read the same way
     )
     return build_agent(name="chart_agent", system_prompt=system_prompt,
-                       tools=[chart_sql, chart_table, chart_data], prompt_extra=tables_section)
+                       tools=[chart_sql, chart_table, chart_data], tail=tables_section)
 
 
 SPEC = AgentSpec(

@@ -261,20 +261,25 @@ def build_orchestrator(specs: Sequence[AgentSpec], agents: Mapping[str, Runnable
     if targets:
         tools.append(make_handoff_tool(targets))
     web_search = web_search_rule([t.name for t in web])
-    agent = build_agent(
-        name=ORCHESTRATOR,
-        system_prompt=ORCHESTRATOR_SYSTEM.format(
-            today=date.today().isoformat(), agents=agent_lines(specs), web_search=web_search,
-            language_rule=LANGUAGE_RULE, memory_rule=MEMORY_RULE,
-        ),
-        tools=tools,
-        max_model_calls=settings.orchestrator_max_model_calls,
-        tail=compose_section,
-        last_call_writes=False,
-        middleware=[make_prefer_handoff(targets, frozenset(
-            ask_tool_name(spec) for spec in specs if spec.tool_description and not spec.answers_directly)),
-            no_repeats],
-    )
+
+    def make_agent(tools):
+        return build_agent(
+            name=ORCHESTRATOR,
+            system_prompt=ORCHESTRATOR_SYSTEM.format(
+                today=date.today().isoformat(), agents=agent_lines(specs), web_search=web_search,
+                language_rule=LANGUAGE_RULE, memory_rule=MEMORY_RULE,
+            ),
+            tools=tools,
+            max_model_calls=settings.orchestrator_max_model_calls,
+            tail=compose_section,
+            last_call_writes=False,
+            middleware=[make_prefer_handoff(targets, frozenset(
+                ask_tool_name(spec) for spec in specs if spec.tool_description and not spec.answers_directly)),
+                no_repeats],
+        )
+
+    writer = make_agent([t for t in tools if t.name != HANDOFF and not t.name.startswith("ask_")])
+    agent = make_agent(tools)
 
     async def orchestrator(state: AssistantState, runtime: Runtime[AgentContext]) -> Command:
         messages = state["messages"]
@@ -287,10 +292,10 @@ def build_orchestrator(specs: Sequence[AgentSpec], agents: Mapping[str, Runnable
             hidden.append(HumanMessage(note, name=TEAM_MODE))
         notes, mentioned = await request_notes(runtime.context.user_id, specs, messages)
         context = dataclasses.replace(runtime.context, notes=notes, mentioned=mentioned, failed=failed,
-                                      deny_tools=CHART_TOOLS if state.get("team_drawn") else ())
-        result = await agent.ainvoke({"messages": [*messages, *hidden]}, context=context)
+                                      deny_tools=(*runtime.context.deny_tools, *(CHART_TOOLS if state.get("team_drawn") else ())))
+        result = await (writer if HANDOFF in runtime.context.deny_tools else agent).ainvoke({"messages": [*messages, *hidden]}, context=context)
         new = result["messages"][len(messages) + len(hidden):]
-        if target := handoff_target(new, targets):
+        if HANDOFF not in runtime.context.deny_tools and (target := handoff_target(new, targets)):
             return Command(goto=target, update={"route": target, "direct": False, "findings": ""})
         answer = next((m for m in reversed(new) if isinstance(m, AIMessage) and m.text and not m.tool_calls), None)
         if answer is None or answer.text.startswith(LIMIT_MESSAGE):

@@ -204,8 +204,8 @@ def clean(board: Board, speakers: Sequence[str], tasks: Sequence[str] | None = N
 
 
 async def ask_board(messages: list[AnyMessage], answers: list[dict], config: RunnableConfig, *,
-                    user_id: str, inputs: Mapping[str, list[str]] | None = None, agents: Sequence[AgentSpec] | None = None) -> Review:
-    """One model call; `config` carries the usage counter's callbacks. `inputs`: task id -> the task ids it received; `agents`: the available agents, which follow-ups may use."""
+                    user_id: str, inputs: Mapping[str, list[str]] | None = None, agents: Sequence[AgentSpec] | None = None) -> Review | None:
+    """One model call (None: the model made no tool call); `config` carries the usage counter's callbacks. `inputs`: task id -> the task ids it received; `agents`: the available agents, which follow-ups may use."""
     question = next((m.text for m in reversed(messages) if isinstance(m, HumanMessage)), "")
     # Texts go into the message, not a template: answers may contain braces.
     def head(a: dict) -> str:
@@ -217,13 +217,12 @@ async def ask_board(messages: list[AnyMessage], answers: list[dict], config: Run
         return line
 
     human = f"USER MESSAGE:\n{question}\n\nANSWERS:\n" + "\n\n".join(f"{head(a)}:\n{a['text']}" for a in answers)
-    board = (await asyncio.to_thread(get_chat_model, user_id)).with_structured_output(
-        Review, method="function_calling")
+    board = await asyncio.to_thread(get_chat_model, user_id)
     if agents:  # texts go into the message, not a template
         human += "\n\nAVAILABLE AGENTS:\n" + "\n".join(
             f"- {a.route}: {a.description} Reads: {', '.join(sorted(a.sources)) or 'nothing'}." for a in agents)
     system = BOARD_PROMPT.format(language=reply_language(messages))
-    return await board.ainvoke([SystemMessage(system), HumanMessage(human)], config=config)
+    return await ask_structured(board, Review, [SystemMessage(system), HumanMessage(human)], config)
 
 
 def chat_so_far(earlier: Sequence[AnyMessage]) -> str:
@@ -568,10 +567,13 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
             inputs = {a["task"]: got for a in answers if (got := [d for d in task_of[a["task"]]["depends_on"] if d in results])}
             available = await available_agents(runtime.context.user_id, specs)
             try:
-                board = await ask_board(messages, answers, config, user_id=runtime.context.user_id, inputs=inputs, agents=[spec for spec, _ in available])
-                if not isinstance(board, Review):
-                    board = Review(**board.model_dump())
-                board = clean(board, live, [a["task"] for a in answers])
+                asked = await ask_board(messages, answers, config, user_id=runtime.context.user_id, inputs=inputs, agents=[spec for spec, _ in available])
+                if asked is None:
+                    log.info("Team board missing: no review findings")
+                else:
+                    if not isinstance(asked, Review):
+                        asked = Review(**asked.model_dump())
+                    board = clean(asked, live, [a["task"] for a in answers])
             except (openai.RateLimitError, openai.AuthenticationError):
                 raise
             except Exception:  # noqa: BLE001 - the user still gets a write-up of the answers so far

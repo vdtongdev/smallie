@@ -31,6 +31,7 @@ from pydantic import BaseModel
 
 from app.agents.artifacts import KINDS, collect
 from app.agents.remote import CallBudgetExceeded
+from app.agents.delegation import ask_tool_name
 from app.agents.base import MEMORY_TOOL_NAMES, TOOL_RESULT_PREVIEW, AgentSpec, RouteInfo, ToolRecorder, turn_messages
 from app.agents.registry import AGENTS
 from app.core.config import get_settings
@@ -41,7 +42,7 @@ from app.core.usage import UsageCounter
 from app.core.prompts import reply_language
 from app.orchestration.prompts import BOARD_PROMPT, CHALLENGE_MESSAGE, CONFLICT_MESSAGE, DRAW_MESSAGE, DRAWING_NOTE, NOTHING_FOUND_MESSAGE, PLAN_PROMPT, ROUND_MESSAGE, TASK_MESSAGE, TEAM_MESSAGE
 from app.orchestration.team_plan import Plan, Task, add_follow_ups, after_user_files, dead_inputs, fallback_tasks, ready, validate_plan
-from app.orchestration.orchestrator import HIDDEN
+from app.orchestration.orchestrator import HANDOFF, HIDDEN
 from app.orchestration.router import ORCHESTRATOR, AssistantState, available_agents
 
 log = logging.getLogger(__name__)
@@ -352,10 +353,13 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         return Send("speak", {"task": task_id, "route": route, "round": rnd, "kind": kind, "note": note, "messages": messages,
                           "earlier": earlier or {}, **rating})
 
-    async def ask_orchestrator(state: AssistantState, runtime: Runtime[AgentContext], note: str = "", drawn: bool = False):
+    async def ask_orchestrator(state: AssistantState, runtime: Runtime[AgentContext], note: str = "", drawn: bool = False,
+                               write_up: bool = False):
         """The orchestrator node's Command for this thread (`note` as its hidden team message;
-        `drawn`: a chart task charts the answer, so the orchestrator may not)."""
-        runtime = dataclasses.replace(runtime, context=dataclasses.replace(runtime.context, tier="standard"))
+        `drawn`: a chart task charts the answer, so the orchestrator may not; `write_up`: it writes the
+        analysis itself, with no hand-off and no specialist to ask)."""
+        deny = (HANDOFF, *(ask_tool_name(s) for s in specs if s.tool_description)) if write_up else ()
+        runtime = dataclasses.replace(runtime, context=dataclasses.replace(runtime.context, tier="standard", deny_tools=deny))
         return await orchestrator({**state, "team_note": note, "team_drawn": drawn} if note else state, runtime)
 
     async def handed_off(command: Command, messages, runtime: Runtime[AgentContext], config: RunnableConfig) -> AIMessage:
@@ -690,10 +694,8 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
                 conflicts=_bullets([f"{c.claim} ({', '.join(c.routes)}): {c.issue}, cause: {c.cause}" for c in board.conflicts]),
                 open_points=_bullets(open_points), not_done=_bullets(not_done),
                 language=reply_language(messages), drawing=_drawing(drawers))
-            command = await ask_orchestrator(state, runtime, note, bool(drawers))
-            did_handoff = command.goto in by_route  # it handed off: the answers stand
-            answer = AIMessage("\n\n".join(a["text"] for a in answers), name=ORCHESTRATOR) if did_handoff \
-                else command.update["messages"][0]
+            command = await ask_orchestrator(state, runtime, note, bool(drawers), write_up=True)
+            answer = command.update["messages"][0]
         artifacts = _merge([r["artifacts"] for r in workspace["results"].values()])
         kwargs = {**answer.additional_kwargs, **_merge([artifacts, collect([answer])]), "team": _transcript(workspace)}
         if kwargs.get("charts") and not drawers:

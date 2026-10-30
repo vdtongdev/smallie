@@ -216,7 +216,7 @@ The "front door" agent. Answers general questions itself, asks specialists as to
 ### System Prompt Includes
 
 - Today's date
-- The team voice (`SOUL`, first in the prompt) and the "we" rule; while the snapshot asks for it, the onboarding question (`BOOTSTRAP_SECTION`, after the memory sections; see Onboarding in section 8)
+- The team voice (`SOUL`, first in the prompt) and the "we" rule; on a chat's first turn while the snapshot asks for it, the onboarding question (`BOOTSTRAP_SECTION`, at the end of the tail note, not the system prompt; see Onboarding in section 8)
 - The available specialists and how to use them (`ask_docs`, `handoff`, ...)
 - Web search availability (Wikipedia alongside every web search)
 - Per-request notes, in the tail note of every call (not the system prompt):
@@ -493,7 +493,7 @@ While the profile lacks a role (`has_role` or `works_at`) or a goal (`has_goal`)
 
 - `bootstrap_due` (`app/core/snapshot.py`) decides it once per snapshot, in `build_snapshot`: on while the profile is missing and either this chat already ran it (`conversations.bootstrap_ran`) or fewer than `BOOTSTRAP_CHATS` of the user's chats ran it (default 3; 0 turns it off)
 - `save_snapshot` sets `bootstrap_ran` when it saves a snapshot with `bootstrap` on. `clear_snapshots` leaves it alone, so deleting a fact, file or chat does not restart onboarding; deleting a chat frees one of the slots
-- The orchestrator gets `BOOTSTRAP_SECTION` after the memory sections (`prompt_extra`); specialists never do
+- The orchestrator's tail note ends with `BOOTSTRAP_SECTION` on every call of a chat's first turn while `context.bootstrap` is set (`compose_section`, `is_first_turn`: no `AIMessage` before the latest visible user message). The question is asked at most once per chat by code, since later turns never get the text. The system prompt is the same with and without onboarding. A chat whose first turn a specialist answered is not asked, but it still counts toward `BOOTSTRAP_CHATS`. Specialists never get it. `bench_chat` runs onboarding only in its `bootstrap` scenario
 - Known gap: facts are extracted only from turns the orchestrator answered, so an answer given in a turn that a specialist answers is not saved
 
 ### Cross-Chat Memory
@@ -555,11 +555,11 @@ Each model request is laid out from the most stable part to the least stable, so
 3. the rest of the agent's static prompt, ending with `LANGUAGE_RULE` and `MEMORY_RULE`
 4. USER: the account name (`USER_SECTION`) and the profile (`PROFILE_SECTION`, when there is one)
 5. MEMORY: other facts (`MEMORIES_SECTION`) and recent chats (`RECENT_CHATS_SECTION`), from the chat's memory snapshot (section 8)
-6. BOOTSTRAP: `BOOTSTRAP_SECTION` (orchestrator only, while the snapshot asks for it), then the mode-stable extra (`prompt_extra`, e.g. the researcher's sources, skills and schema)
+6. the mode-stable extra (`prompt_extra`, e.g. the researcher's sources, skills and schema)
 7. the thread's messages
-8. the tail note: per-call text added as the last message (`build_agent(tail=...)`, `make_call_note`), never saved
+8. the tail note: per-call text added as the last message (`build_agent(tail=...)`, `make_call_note`), never saved; on the orchestrator's first turn of an onboarding chat it ends with `BOOTSTRAP_SECTION`
 
-Items 2 to 6 are the system prompt. While the snapshot is fresh they stay the same across a chat's turns, so the provider's cache can reuse them. The tail note holds what changes per call or per day: the orchestrator's notes, reply language and (while composing) the format rules (`compose_section`), the chart agent's tables (`tables_section`), and the researcher's date (`TODAY_NOTE`). The `prompt_extra` in item 6 comes after the memory sections in the code, so a new snapshot changes what follows it too.
+Items 2 to 6 are the system prompt. While the snapshot is fresh they stay the same across a chat's turns, so the provider's cache can reuse them. The tail note holds what changes per call or per day: the orchestrator's notes, reply language and (while composing) the format rules (`compose_section`), the chart agent's tables (`tables_section`), the researcher's date (`TODAY_NOTE`), and on a chat's first turn with onboarding the question (`BOOTSTRAP_SECTION`, last). The `prompt_extra` in item 6 comes after the memory sections in the code, so a new snapshot changes what follows it too.
 
 ### Hidden Messages
 

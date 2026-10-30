@@ -38,6 +38,7 @@ from app.agents.research.prompts import (
     SCHEMA_HEADING,
     SOURCE_LINES,
     SOURCES_HEADING,
+    TODAY_NOTE,
     REVIEW,
     TOOL_DESCRIPTION,
     WEB_ALONGSIDE_WIKI,
@@ -441,11 +442,11 @@ def build_research_workflow():
     researcher = build_agent(
         name="research_agent",
         system_prompt=RESEARCHER_SYSTEM.format(
-            today=date.today().isoformat(),
             web_rule=WEB_ALONGSIDE_WIKI if "tavily" in _mcp_servers else "",
             memory_rule=MEMORY_RULE,
         ),
         prompt_extra=research_prompt_extra(describe_schema()),
+        tail=lambda request: TODAY_NOTE.format(today=date.today().isoformat()),
         tools=[*mcp_tools, search_documents, run_sql, make_load_skill_tool(RESEARCHER_SKILLS)],
         middleware=[cite_by_id],
         max_model_calls=get_settings().research_max_model_calls,

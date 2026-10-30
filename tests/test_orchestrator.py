@@ -9,8 +9,10 @@ from app.agents.docs import agent as docs_agent
 from app.agents.research import agent as research_agent
 from app.agents.sql import agent as sql_agent
 from app.api.routes_chat import _events_from
-from app.core.memory import AgentContext
+from app.core.memory import TEAM_MODE, AgentContext
+from app.core.prompts import CALL_NOTE
 from app.orchestration import orchestrator as orchestrator_module
+from app.orchestration.prompts import BOOTSTRAP_SECTION
 from app.orchestration.graph import build_assistant
 from tests.conftest import local_agents
 from tests.scripted import per_agent
@@ -43,6 +45,12 @@ def _streamed(events: list[dict]) -> str:
     return "".join(e["text"] for e in events if e["type"] == "token")
 
 
+def tail_of(prompt) -> str:
+    """The per-call note at the end of a model request ('' when there is none)."""
+    last = prompt[-1]
+    return last.content if last.name == CALL_NOTE else ""
+
+
 async def _thread(assistant) -> list:
     return (await assistant.aget_state(CONFIG)).values["messages"]
 
@@ -55,7 +63,7 @@ async def test_generic_questions_are_answered_by_the_orchestrator_in_one_call(mo
     assert events[0] == {"type": "agent", "name": "orchestrator"}
     assert _streamed(events) == "Roses are red."
     assert len(model.prompts) == 1
-    system = model.prompts[0][0].content
+    system = tail_of(model.prompts[0])
     assert "CITATIONS" not in system  # writing rules only once there are results
     assert "The user's uploaded documents: handbook.pdf" in system
     messages = await _thread(assistant)
@@ -134,12 +142,12 @@ async def test_delegations_run_in_parallel_and_only_the_write_up_streams(monkeyp
     assert _streamed(events) == "The handbook says $1B [handbook.pdf, p. 2]; the database says $400B."
 
     # The specialists only saw the orchestrator's self-contained question.
-    questions = {p[-1].content for p in model.prompts if "orchestrator" not in p[0].content and "smallie" not in p[0].content}
+    questions = {p[-1].content for p in model.prompts if "orchestrator" not in p[0].content and "You coordinate the team." not in p[0].content}
     assert questions == {"What revenue does the handbook state?", "What is AAPL's revenue?"}
     # The write-up call got the writing rules; the deciding call didn't.
-    orchestrator_prompts = [p for p in model.prompts if "You are smallie" in p[0].content]
-    assert "CITATIONS" not in orchestrator_prompts[0][0].content
-    assert "CITATIONS" in orchestrator_prompts[1][0].content
+    orchestrator_prompts = [p for p in model.prompts if "You coordinate the team." in p[0].content]
+    assert "CITATIONS" not in tail_of(orchestrator_prompts[0])
+    assert "CITATIONS" in tail_of(orchestrator_prompts[1])
     # Only the final answer is kept in the thread.
     messages = await _thread(assistant)
     assert [type(m) for m in messages] == [HumanMessage, AIMessage]
@@ -151,7 +159,7 @@ async def test_unavailable_specialists_and_the_previous_answer_are_noted(monkeyp
     assistant = _assistant(monkeypatch, model, documents=())
     await _run(assistant, "hello")
     await _run(assistant, "and you?")
-    first, second = (p[0].content for p in model.prompts)
+    first, second = (tail_of(p) for p in model.prompts)
     assert "- docs: not available for this user right now" in first
     assert "previous answer in this chat came from: orchestrator" in second
 
@@ -198,7 +206,7 @@ async def test_a_message_for_two_specialists_is_asked_of_both_and_combined(monke
     assert [e["name"] for e in events if e["type"] == "agent"] == ["orchestrator"]
     assert [e["name"] for e in events if e["type"] == "tool_call"] == ["ask_docs", "ask_sql"]
     assert _streamed(events).startswith("The handbook mentions Apple")
-    first_prompt = next(p for p in model.prompts if "You are smallie" in p[0].content)[0].content
+    first_prompt = tail_of(next(p for p in model.prompts if "You coordinate the team." in p[0].content))
     assert "touches the data of several specialists: docs, sql" in first_prompt
     messages = await _thread(assistant)
     assert [(type(m), m.name) for m in messages] == [(HumanMessage, None), (AIMessage, "orchestrator")]
@@ -256,7 +264,7 @@ async def test_a_chart_request_draws_once_and_plot_that_reuses_the_table(monkeyp
     events = await _run(assistant, "plot that as a line")
     assert [c["type"] for c in _charts(events)] == ["line"]
     assert len(queries) == 1  # the second chart reused the first result
-    tables_note = model.prompts[-2][0].content  # TABLES IN THIS CHAT, with how each was charted
+    tables_note = tail_of(model.prompts[-2])  # TABLES IN THIS CHAT, with how each was charted
     assert "tabcdef: 2 rows, columns ticker, close" in tables_note
     assert 'already charted as bar "Close"' in tables_note
     # Both charts stay in the thread with their tool results, for the history view.
@@ -285,7 +293,7 @@ async def test_the_orchestrator_charts_a_specialist_table_and_keeps_it_on_its_an
     assert [e["name"] for e in events if e["type"] == "tool_call"].count("chart_table") == 1
     assert len(_charts(events)) == 1
     # The write-up call listed the sql table so it could chart it by id.
-    writer_prompts = [p[0].content for p in model.prompts if "You are smallie" in p[0].content]
+    writer_prompts = [tail_of(p) for p in model.prompts if "You coordinate the team." in p[0].content]
     assert "tabcdef: 2 rows" in writer_prompts[1]
     # Only the answer enters the thread, carrying the chart (for reload) and the table (for "plot that").
     messages = await _thread(assistant)
@@ -330,6 +338,107 @@ async def test_orchestrator_names_reply_language_every_call(monkeypatch):
         stream_mode=["messages", "updates"], subgraphs=True,
     )
     [event async for event in _events_from(stream)]
-    system = model.prompts[0][0].content
+    system = tail_of(model.prompts[0])
     assert "REPLY LANGUAGE for this message: English" in system
     assert "CITATIONS" not in system  # still the short, non-composing call
+
+
+async def test_composing_call_shares_the_system_prompt(monkeypatch):
+    model = per_agent(
+        orchestrator=[
+            AIMessage("", tool_calls=[
+                {"name": "ask_docs", "args": {"question": "What revenue does the handbook state?"}, "id": "d"},
+                {"name": "ask_sql", "args": {"question": "What is AAPL's revenue?"}, "id": "s"},
+            ]),
+            AIMessage("The handbook says $1B; the database says $400B."),
+        ],
+        docs=[AIMessage("Revenue was $1B [handbook.pdf, p. 2].")],
+        sql=[AIMessage("AAPL revenue: $400B (2026-10-10).")],
+    )
+    assistant = _assistant(monkeypatch, model)
+    await _run(assistant, "what is Apple's revenue?")
+    orchestrator_prompts = [p for p in model.prompts if "You coordinate the team." in p[0].content]
+    assert len(orchestrator_prompts) == 2
+    assert orchestrator_prompts[0][0].content == orchestrator_prompts[1][0].content
+
+
+async def test_team_write_up_gets_compose_rules_in_the_tail(monkeypatch):
+    model = per_agent(orchestrator=[AIMessage("Done.")])
+    assistant = _assistant(monkeypatch, model)
+    stream = assistant.astream(
+        {"messages": [HumanMessage("summarise the findings"), HumanMessage("team note", name=TEAM_MODE)]},
+        CONFIG, context=AgentContext(user_id="u1"), stream_mode=["messages", "updates"], subgraphs=True,
+    )
+    [event async for event in _events_from(stream)]
+    assert "CITATIONS" in tail_of(model.prompts[0])
+    assert "CITATIONS" not in model.prompts[0][0].content
+
+
+async def _run_bootstrap(assistant, message: str, bootstrap: bool, earlier: tuple = ()) -> None:
+    stream = assistant.astream(
+        {"messages": [*earlier, HumanMessage(message)]}, CONFIG,
+        context=AgentContext(user_id="u1", bootstrap=bootstrap),
+        stream_mode=["messages", "updates"], subgraphs=True,
+    )
+    [event async for event in _events_from(stream)]
+
+
+def _asks_sql():
+    return per_agent(orchestrator=[
+        AIMessage("", tool_calls=[{"name": "ask_sql", "args": {"question": "AAPL cap?"}, "id": "s"}]),
+        AIMessage("3T."),
+    ], sql=[AIMessage("Cap 3T.")])
+
+
+async def test_bootstrap_ends_the_tail_on_the_first_turn(monkeypatch):
+    model = _asks_sql()
+    await _run_bootstrap(_assistant(monkeypatch, model), "What is the AAPL market cap and what does handbook.pdf say?", True)
+    calls = [p for p in model.prompts if "You coordinate the team." in p[0].content]
+    assert len(calls) == 2
+    for prompt in calls:
+        tail = tail_of(prompt)
+        assert tail.endswith(BOOTSTRAP_SECTION)
+        assert "REPLY LANGUAGE" in tail
+
+
+async def test_no_bootstrap_on_a_later_turn(monkeypatch):
+    model = per_agent(orchestrator=[AIMessage("Roses are red.")])
+    earlier = (HumanMessage("hello"), AIMessage("Hi there."))
+    await _run_bootstrap(_assistant(monkeypatch, model), "write a short poem", True, earlier)
+    assert BOOTSTRAP_SECTION not in tail_of(model.prompts[0])
+
+
+async def test_no_bootstrap_when_context_says_no(monkeypatch):
+    model = per_agent(orchestrator=[AIMessage("Roses are red.")])
+    await _run_bootstrap(_assistant(monkeypatch, model), "write a short poem", False)
+    assert BOOTSTRAP_SECTION not in tail_of(model.prompts[0])
+
+
+async def test_system_prompt_same_with_and_without_bootstrap(monkeypatch):
+    systems = []
+    for bootstrap in (True, False):
+        model = per_agent(orchestrator=[AIMessage("Roses are red.")])
+        await _run_bootstrap(_assistant(monkeypatch, model), "write a short poem", bootstrap)
+        systems.append(model.prompts[0][0].content)
+    assert systems[0] == systems[1]
+    assert BOOTSTRAP_SECTION not in systems[0]
+
+
+async def test_specialists_never_get_bootstrap(monkeypatch):
+    model = per_agent(orchestrator=[_call("handoff", {"agent": "sql"})], sql=[AIMessage("Apple's market cap is $3T.")])
+    await _run_bootstrap(_assistant(monkeypatch, model), "how big is the most valuable tech company?", True)
+    specialist = [p[0].content for p in model.prompts if "the team's data analyst" in p[0].content]
+    assert specialist
+    assert all(BOOTSTRAP_SECTION not in system for system in specialist)
+
+
+async def test_bootstrap_adds_no_model_call(monkeypatch):
+    counts = []
+    for bootstrap in (True, False):
+        model = per_agent(orchestrator=[
+            AIMessage("", tool_calls=[{"name": "ask_sql", "args": {"question": "AAPL cap?"}, "id": "s"}]),
+            AIMessage("3T."),
+        ], sql=[AIMessage("Cap 3T.")])
+        await _run_bootstrap(_assistant(monkeypatch, model), "What is the AAPL market cap and what does handbook.pdf say?", bootstrap)
+        counts.append(len(model.prompts))
+    assert counts[0] == counts[1]

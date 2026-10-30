@@ -1,6 +1,7 @@
 """The research workflow inside the real assistant graph, with a scripted model instead of OpenRouter."""
 
 import json
+from datetime import date
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
@@ -60,9 +61,9 @@ async def test_findings_flow_to_the_orchestrator_and_only_the_answer_is_kept(mon
     prompt = model.prompts[-1]
     offered = [t["function"]["name"] for t in model.tools[-1]]
     assert "ask_research" not in offered and "ask_sql" in offered
-    assert "RESEARCH FINDINGS" in prompt[-1].content and NOTES in prompt[-1].content
-    assert "Write it in Vietnamese" in prompt[-1].content
-    assert "CITATIONS" in prompt[0].content and "Write the whole answer in Vietnamese" in prompt[0].content
+    assert "RESEARCH FINDINGS" in prompt[-2].content and NOTES in prompt[-2].content
+    assert "Write it in Vietnamese" in prompt[-2].content
+    assert "CITATIONS" in prompt[-1].content and "Write the whole answer in Vietnamese" in prompt[-1].content
 
     # The thread keeps only the question and the orchestrator's answer.
     messages = (await assistant.aget_state({"configurable": {"thread_id": "t1"}})).values["messages"]
@@ -78,10 +79,10 @@ async def test_researcher_does_not_carry_old_tool_output_into_the_next_turn(monk
     await _run(assistant, "and B?")
     # An English question names English outright, next to the findings and in the writing rules.
     first_write_up = model.prompts[1]
-    assert "Write it in English" in first_write_up[-1].content
-    assert "Write the whole answer in English" in first_write_up[0].content
+    assert "Write it in English" in first_write_up[-2].content
+    assert "Write the whole answer in English" in first_write_up[-1].content
     second_research_prompt = model.prompts[2]  # [system prompt, *conversation]
-    assert [m.content for m in second_research_prompt[1:]] == ["research A", "First answer.", "and B?"]
+    assert [m.content for m in second_research_prompt[1:-1]] == ["research A", "First answer.", "and B?"]
     # The first turn's findings were used up: the second write-up only sees the new ones.
     assert sum("RESEARCH FINDINGS" in m.content for m in model.prompts[3]) == 1
 
@@ -292,6 +293,17 @@ async def test_research_prompt_omits_sources_outside_scope(monkeypatch):
     everything = await _research_system_prompt(monkeypatch, ())
     for kept in ("run_sql", "MARKET_SCHEMA_TEXT", "search_documents", "uploaded PDF", "tavily_*"):
         assert kept in everything
+
+
+async def test_researcher_prompt_has_no_date(monkeypatch):
+    model = _turn(AIMessage("FINDINGS:\n- none\nGAPS: none"))
+    monkeypatch.setattr(factory, "get_chat_model", lambda *a, **k: model)
+    monkeypatch.setattr(research_agent, "describe_schema", lambda: "")
+    workflow = research_agent.build_research_workflow()
+    await workflow.ainvoke({"messages": [HumanMessage("hi")]}, context=AgentContext(user_id="u"))
+    today = date.today().isoformat()
+    assert today not in model.prompts[0][0].content
+    assert today in model.prompts[0][-1].content
 
 
 # --- ids of any shape (fix plan 2026-10-26-citation-ids-and-drawer-table, goal A) ---

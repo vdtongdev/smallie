@@ -73,9 +73,9 @@ def per_agent(**scripts: list[AIMessage]) -> PerAgentModel:
 
 
 PROMPT_PHRASES = {
-    "orchestrator": "You are smallie, the user's assistant.",
-    "sql": "You are a data analyst assistant.",
-    "docs": "answers questions using the user's uploaded documents",
+    "orchestrator": "You coordinate the team.",
+    "sql": "the team's data analyst",
+    "docs": "the team's documents specialist",
     "research": "You are a research assistant.",
-    "chart": "You are a chart assistant.",
+    "chart": "the team's chart specialist",
 }

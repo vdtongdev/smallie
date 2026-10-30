@@ -220,16 +220,17 @@ async def test_paused_turn_is_not_remembered(monkeypatch):
 
     monkeypatch.setattr(routes_chat, "create_conversation", lambda u, k, m: {"id": "c1", "title": "t"})
     monkeypatch.setattr(routes_chat, "touch_conversation", lambda cid: None)
-    monkeypatch.setattr(routes_chat, "recall_facts", lambda u: "")
+    async def snapshot(*args):
+        return {"user": "", "memories": "", "recent_chats": ""}
+
+    monkeypatch.setattr(routes_chat, "chat_snapshot", snapshot)
     monkeypatch.setattr(routes_chat, "load_settings", lambda u: object())  # setup for the new settings check
-    monkeypatch.setattr(routes_chat, "_recent_chats", none)
-    monkeypatch.setattr(routes_chat, "_user", none)
     monkeypatch.setattr(routes_chat, "add_usage", spy)
     monkeypatch.setattr(routes_chat, "save_turn", spy)
     monkeypatch.setattr(routes_chat, "extract_facts", spy)
     monkeypatch.setattr(routes_chat, "_chat_input", lambda *a: none())
     assistant = SimpleNamespace(aget_state=aget_state, astream=astream)
-    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(assistant=assistant, store=None)))
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(assistant=assistant, store=None, checkpointer=None)))
 
     response = await chat("team", ChatRequest(message="compare"), request, "u1")
     async for _ in response.body_iterator:
@@ -412,14 +413,15 @@ async def _run_chat(monkeypatch, settings, astream):
 
     monkeypatch.setattr(routes_chat, "create_conversation", lambda u, k, m: {"id": "c1", "title": "t"})
     monkeypatch.setattr(routes_chat, "touch_conversation", lambda cid: None)
-    monkeypatch.setattr(routes_chat, "recall_facts", lambda u: "")
+    async def snapshot(*args):
+        return {"user": "", "memories": "", "recent_chats": ""}
+
+    monkeypatch.setattr(routes_chat, "chat_snapshot", snapshot)
     monkeypatch.setattr(routes_chat, "load_settings", lambda u: settings)
-    monkeypatch.setattr(routes_chat, "_recent_chats", none)
-    monkeypatch.setattr(routes_chat, "_user", none)
     monkeypatch.setattr(routes_chat, "add_usage", none)
     monkeypatch.setattr(routes_chat, "_chat_input", lambda *a: none())
     assistant = SimpleNamespace(aget_state=aget_state, astream=astream)
-    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(assistant=assistant, store=None)))
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(assistant=assistant, store=None, checkpointer=None)))
     response = await chat("auto", ChatRequest(message="hi"), request, "u1")
     return [json.loads(c.removeprefix("data: ")) async for c in response.body_iterator]
 
@@ -493,14 +495,15 @@ async def _run_kind(monkeypatch, kind, saved):
 
     monkeypatch.setattr(routes_chat, "create_conversation", lambda u, k, m: {"id": "c1", "title": "t"})
     monkeypatch.setattr(routes_chat, "touch_conversation", lambda cid: None)
-    monkeypatch.setattr(routes_chat, "recall_facts", lambda u: "")
+    async def snapshot(*args):
+        return {"user": "", "memories": "", "recent_chats": ""}
+
+    monkeypatch.setattr(routes_chat, "chat_snapshot", snapshot)
     monkeypatch.setattr(routes_chat, "load_settings", lambda u: saved)
-    monkeypatch.setattr(routes_chat, "_recent_chats", none)
-    monkeypatch.setattr(routes_chat, "_user", none)
     monkeypatch.setattr(routes_chat, "add_usage", spy)
     monkeypatch.setattr(routes_chat, "_chat_input", lambda *a: none())
     assistant = SimpleNamespace(astream=astream)
-    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(assistant=assistant, store=None)))
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(assistant=assistant, store=None, checkpointer=None)))
     response = await chat(kind, ChatRequest(message="hi"), request, "u1")
     raw = [part async for part in response.body_iterator]
     return [json.loads(p[len("data: "):]) for p in raw], seen["context"]

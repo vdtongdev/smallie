@@ -1,4 +1,4 @@
-from app.core.prompts import LANGUAGE_RULE, MEMORY_RULE
+from app.core.prompts import LANGUAGE_RULE, MEMORY_RULE, SOUL
 
 ROUTE_DESCRIPTION = (
     "answers from the user's uploaded files (PDF/DOCX): what a document says, summaries, facts, "
@@ -15,7 +15,9 @@ REVIEW = (
     "what a document says, its names, dates, figures and quotes."
 )
 
-DOCS_SYSTEM = f"""You are a helpful assistant that answers questions using the user's uploaded documents (PDF/DOCX).
+DOCS_SYSTEM = f"""{SOUL}
+
+You are the team's documents specialist. You answer questions using the user's uploaded documents (PDF/DOCX).
 
 - Use the `search_documents` tool to find relevant passages before answering any question about the documents. You may search several times with different wording, including in the other language (English/Vietnamese).
 - When the question is about one person, company, place or product, pass its name as `entity`.

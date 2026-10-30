@@ -56,7 +56,7 @@ async def test_a_specialist_that_finds_nothing_falls_back_to_the_orchestrator(mo
     assert kinds == [("agent", "docs"), ("fallback", "docs"), ("agent", "orchestrator")]
     assert _streamed(events).endswith("Salaries are not in the handbook; typical ranges are…")
     orchestrator_prompt = model.prompts[-1]
-    note = orchestrator_prompt[-1]
+    note = orchestrator_prompt[-2]
     assert note.name == "failed_attempt" and "the docs specialist already worked" in note.content
     assert "I couldn't find anything about salaries" in note.content
     # It can't hand the message back.
@@ -104,5 +104,5 @@ async def test_the_orchestrator_cannot_repeat_calls_or_keep_asking_a_specialist(
     assert results[1].startswith("Not run: this exact call")
     assert results[2].startswith("Not run: this specialist was already asked")
     assert _streamed(events).endswith("The handbook has no salary information.")
-    docs_calls = [p for p in model.prompts if "answers questions using the user's uploaded documents" in p[0].content]
+    docs_calls = [p for p in model.prompts if "the team's documents specialist" in p[0].content]
     assert len(docs_calls) == 2  # the direct attempt and one retry

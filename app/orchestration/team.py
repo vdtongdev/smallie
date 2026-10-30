@@ -27,7 +27,7 @@ from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 from langgraph.runtime import Runtime
 from langgraph.types import Command, Send, interrupt
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.agents.artifacts import KINDS, collect
 from app.agents.remote import CallBudgetExceeded
@@ -87,7 +87,33 @@ class Board(BaseModel):
     agreements: list[str] = []
     differences: list[Difference] = []
     conflicts: list[Conflict] = []
-    question: str = ""
+    question: str = Field(default="", description="A question to the user about missing information only they have. Never the user's message, in any wording.")
+
+
+def _words(text: str) -> list[str]:
+    return re.sub(r"[^\w\s]|_", " ", text.casefold()).split()
+
+
+def echoes(question: str, messages: Sequence[AnyMessage]) -> bool:
+    """True when `question` restates a user message in the thread: equal, nested (three words or more), or about 80% the same words."""
+    asked = _words(question)
+    if not asked:
+        return False
+    text = " ".join(asked)
+    for m in messages:
+        if not isinstance(m, HumanMessage):
+            continue
+        said = _words(m.text)
+        if not said:
+            continue
+        own = " ".join(said)
+        if min(len(asked), len(said)) >= 3 and (f" {text} " in f" {own} " or f" {own} " in f" {text} "):
+            return True
+        if asked == said:
+            return True
+        if len(set(asked) & set(said)) / max(len(set(asked)), len(set(said))) >= 0.8:
+            return True
+    return False
 
 
 class Challenge(BaseModel):
@@ -547,6 +573,9 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         fixable = [c for c in board.conflicts if c.fixable_by]
         failed = broken or synthesis["forced"] or any(
             t["status"] == "failed" and results[t["id"]]["round"] == done_rounds + 1 for t in speakers)
+        if board.question.strip() and echoes(board.question, messages):
+            log.info("Dropped a review question that repeats the user's message: %r", board.question)
+            board.question = ""
         asks = bool(board.question.strip())
         again = bool(fixable) and not asks and not failed and done_rounds < settings.team_max_rounds
         forced = failed or (bool(fixable) and not asks and not again)

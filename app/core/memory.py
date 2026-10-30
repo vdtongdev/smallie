@@ -43,6 +43,8 @@ class AgentContext:
 
     user_id: str
     user: str = ""  # "Name (username: x)" of the account; never the password
+    profile: str = ""  # the account's profile facts as bullets (name, language, job...), apart from other memories
+    bootstrap: bool = False  # the profile is still missing facts the onboarding asks for
     memories: str = ""
     recent_chats: str = ""  # latest turns of the user's other chats
     agent: str = "auto"  # "auto" lets the router pick; a registered route (app/agents/registry.py) forces that agent

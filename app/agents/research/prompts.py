@@ -18,9 +18,12 @@ REVIEW = (
     "and reports which claims the sources support or contradict."
 )
 
+# The researcher's tail note: the date changes daily, so it stays out of the system prompt.
+TODAY_NOTE = "Today is {today}."
+
 # {web_rule}: WEB_ALONGSIDE_WIKI when web search loaded. The source list, the skills and the market
 # schema depend on the request's sources, so `research_prompt_extra` appends them per request.
-RESEARCHER_SYSTEM = """You are a research assistant. You only GATHER facts; another assistant writes the answer to the user from your notes. Today is {today}.
+RESEARCHER_SYSTEM = """You are a research assistant. You only GATHER facts; another assistant writes the answer to the user from your notes.
 
 How to work:
 - If one of the SKILLS below fits the question, load it first, together with your first searches in the same step.

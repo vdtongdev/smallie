@@ -9,6 +9,7 @@ from app.core.auth import get_current_user
 from app.core.config import get_settings
 from app.core.db import documents, get_engine
 from app.core.graph import drop_orphans
+from app.core.snapshot import clear_snapshots
 from app.features.documents.card import process_document
 from app.features.documents.ingest import SUPPORTED_SUFFIXES, delete_document_chunks
 
@@ -68,4 +69,5 @@ def remove(document_id: str, user_id: str = Depends(get_current_user)):
         delete_document_chunks(document_id, row["chunk_count"])
         conn.execute(delete(documents).where(documents.c.id == document_id))  # cascades to its graph node
     drop_orphans(user_id)  # entities only this file mentioned
+    clear_snapshots(user_id)
     Path(row["path"]).unlink(missing_ok=True)

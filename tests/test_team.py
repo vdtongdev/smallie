@@ -888,6 +888,95 @@ async def test_drawer_charts_the_final_answers_table(monkeypatch):
     assert {e["agent"] for e in _events(chunks, "speaker")} >= {"chart"}
 
 
+async def test_drawer_charts_the_table_gathered_before_a_pause(monkeypatch):
+    """Regression test for the bug: a table the sql agent returned before the board asked the user a question must
+    still reach the chart agent after the user answers. Currently failing."""
+    _board(monkeypatch, Board(question="Which year?"), Board())
+    model = per_agent(orchestrator=[AIMessage("Final.")], chart=DRAW)
+    assistant = _assistant(monkeypatch, model, sql=Fake("sql", "Cap.", log=[], table=TABLE),
+                           research=Fake("research", "Notes.", log=[]))
+    await _stream(assistant, _ask("chart AAPL"))
+    assert (await assistant.aget_state(CONFIG)).interrupts
+    chunks = await _stream(assistant, Command(resume="2024 please"))
+
+    final = (await _thread(assistant))[-1]
+    assert final.additional_kwargs.get("tables") == [TABLE]
+    charts = final.additional_kwargs.get("charts")
+    assert charts and charts[0]["table_id"] == "t1" and [e["charts"] for e in _events(chunks, "charts")] == [charts]
+
+
+async def test_drawer_charts_the_table_when_the_task_runs_again_after_a_pause(monkeypatch):
+    """Regression test for the bug, currently failing: the board asks the user a question, the user answers, the
+    next review sends sql back for a conflict round, and that second run queries nothing new. The table it
+    gathered before the question must still reach the final answer and the chart agent."""
+    class TableOnce(Fake):
+        async def ainvoke(self, input, config=None, **kwargs):
+            out = await super().ainvoke(input, config, **kwargs)
+            self.table = None
+            return out
+
+    _board(monkeypatch, Board(question="Which year?"), _conflict(["sql"], routes=("sql", "research")), Board())
+    model = per_agent(orchestrator=[AIMessage("Final.")], chart=DRAW)
+    sql = TableOnce("sql", "Cap.", log=[], table=TABLE)
+    assistant = _assistant(monkeypatch, model, sql=sql, research=Fake("research", "Notes.", log=[]))
+    await _stream(assistant, _ask("chart AAPL"))
+    await _stream(assistant, Command(resume="2024 please"))
+
+    assert sql.calls == 2  # the conflict round ran sql again
+    final = (await _thread(assistant))[-1]
+    assert final.additional_kwargs.get("tables") == [TABLE]
+    assert final.additional_kwargs.get("charts")
+
+
+async def test_drawer_charts_figures_from_the_answer_text_when_the_tables_hold_other_data(monkeypatch):
+    """Regression test for the bug as seen live, currently failing. Plan: docs reads the portfolio (figures only in
+    its text), sql runs a query whose table holds other data, the board asks the user a question, the user's reply
+    brings research in (wave 3), then the chart task draws the portfolio split. The final answer carries sql's
+    unrelated table, so `chart_data` is denied and `chart_table` has nothing to draw: no chart, though the
+    figures to draw are in the answer."""
+    _plan(monkeypatch, Plan(tasks=[Task(id="t1", agent="docs", goal="read the portfolio"),
+                                   Task(id="t2", agent="sql", goal="check prices", depends_on=["t1"]),
+                                   Task(id="t3", agent="chart", goal="draw the split", depends_on=["answer"])]))
+    _board(monkeypatch, Board(question="Compare with which prices?"), Board())
+    model = per_agent(orchestrator=[AIMessage("Final.")], chart=[CHART_DATA_CALL, AIMessage("Drawn.")])
+    log = []
+    docs_text = "| Asset | Share |\n| AAPL | 60% |\n| MSFT | 40% |"
+    assistant = _assistant(monkeypatch, model, documents=("portfolio.docx",), docs=Fake("docs", docs_text, log=log),
+                           sql=Fake("sql", "Prices.", log=log, table=TABLE),
+                           research=Fake("research", "Web prices.", log=log))
+    first = await _stream(assistant, _ask("analyse my portfolio and draw its split"))
+    assert [(e["wave"], e["agents"]) for e in _events(first, "wave")] == [(1, ["docs"]), (2, ["sql"])]
+    assert (await assistant.aget_state(CONFIG)).interrupts
+    second = await _stream(assistant, Command(resume="use the research agent for current prices"))
+
+    assert [(e["wave"], e["agents"]) for e in _events(second, "wave")] == [(3, ["research"])]
+    final = (await _thread(assistant))[-1]
+    assert final.additional_kwargs.get("tables") == [TABLE]  # unrelated to the portfolio split
+    assert final.additional_kwargs.get("charts")
+
+
+async def test_write_up_is_written_by_the_orchestrator_not_the_joined_specialist_texts(monkeypatch):
+    """Regression test for the live chat (portfolio: docs, then sql, then a chart task), currently failing. The
+    write-up is the orchestrator's job: it must not be able to hand the thread off (the final answer was then just the
+    specialists' texts joined, byte for byte, with no analysis), and its answer comes out as the reply plus the chart."""
+    _plan(monkeypatch, Plan(tasks=[Task(id="t1", agent="docs", goal="read the portfolio"),
+                                   Task(id="t2", agent="sql", goal="check prices", depends_on=["t1"]),
+                                   Task(id="t3", agent="chart", goal="draw the split", depends_on=["answer"])]))
+    _board(monkeypatch, Board())
+    handoff = AIMessage("", tool_calls=[{"name": "handoff", "args": {"agent": "chart"}, "id": "h1"}])
+    model = per_agent(orchestrator=[handoff, AIMessage("Analysis of the portfolio.")], chart=DRAW)
+    assistant = _assistant(monkeypatch, model, documents=("portfolio.docx",), docs=Fake("docs", "Holdings.", log=[]),
+                           sql=Fake("sql", "Prices.", log=[], table=TABLE), research=Fake("research", "Web.", log=[]))
+    await _stream(assistant, _ask("analyse my portfolio, check it against the database and draw its split"))
+
+    final = (await _thread(assistant))[-1]
+    assert final.text != "Holdings.\n\nPrices."
+    assert final.text == "Analysis of the portfolio."
+    assert final.additional_kwargs.get("charts")
+    writeup = next(i for i, prompt in enumerate(model.prompts) if any("TEAM RESULT" in m.text for m in prompt))
+    assert "handoff" not in {t["function"]["name"] for t in model.tools[writeup]}
+
+
 async def test_drawer_failure_keeps_the_answer(monkeypatch):
     _board(monkeypatch, Board())
     model = per_agent(orchestrator=[AIMessage("Final.")])
@@ -1350,21 +1439,6 @@ def _unforced(model):
     return all(c in (None, "auto", "none") for c in model.choices)
 
 
-async def test_drawer_cannot_copy_numbers_when_the_answer_has_a_table(monkeypatch):
-    """Goal B: the final answer carries this turn's table, so the drawer is not offered `chart_data` (a call is
-    refused: no chart from it), and it is never forced to call a tool."""
-    _research_does_not_join(monkeypatch)
-    _board(monkeypatch, Board())
-    model = _recording_per_agent(chart=[CHART_DATA_CALL, AIMessage("Done.")])
-    assistant = _assistant(monkeypatch, model, sql=Fake("sql", "Cap.", log=[], table=TABLE))
-    chunks = await _stream(assistant, _ask(SQL_CHART))
-
-    assert "chart_table" in _offered(model) and "chart_data" not in _offered(model)
-    assert _unforced(model)
-    final = (await _thread(assistant))[-1]
-    assert "charts" not in final.additional_kwargs and not _events(chunks, "charts")
-
-
 async def test_drawer_may_chart_inline_numbers_when_the_answer_has_no_table(monkeypatch):
     """Goal B: without a table on the final answer `chart_data` stays offered (figures written in the answer are fine);
     the drawer's first call is not forced."""
@@ -1616,19 +1690,6 @@ def _chart_plan(monkeypatch, *, table, log, chart_depends=("t1",), with_research
     return model, _assistant(monkeypatch, model, sql=Fake("sql", "Cap.", log=log, table=table),
                              research=Fake("research", "Notes.", log=log),
                              chart=Fake("chart", "drawn", log=log, chart="chart-1"))
-
-
-async def test_chart_task_charts_its_inputs_table(monkeypatch):
-    log = []
-    _, assistant = _chart_plan(monkeypatch, table={**TABLE, "id": "tbl1"}, log=log)
-    chunks = await _stream(assistant, _ask())
-
-    (start,) = _starts(log, "chart")
-    assert start["sources"] == team.NO_SOURCES and start["deny"] == ("chart_data",)
-    assert len(_waves((await _thread(assistant))[-1].additional_kwargs["team"])) == 1  # the chart task takes no wave
-    assert (await _thread(assistant))[-1].additional_kwargs["charts"] == [{"id": "chart-1"}]
-    assert [e["charts"] for e in _events(chunks, "charts")] == [[{"id": "chart-1"}]]
-    assert "chart" in {e["agent"] for e in _events(chunks, "speaker")}
 
 
 async def test_chart_task_without_table_may_use_chart_data(monkeypatch):

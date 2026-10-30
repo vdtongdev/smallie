@@ -1317,7 +1317,7 @@ async def test_orchestrator_cannot_chart_in_the_write_up_when_a_drawer_draws(mon
     await _stream(assistant, _ask("chart AAPL"))
 
     offered = {t["function"]["name"] for prompt, tools in zip(model.prompts, model.tools)
-               if "You are smallie" in prompt[0].content for t in tools}
+               if "You coordinate the team." in prompt[0].content for t in tools}
     assert offered.isdisjoint({"chart_table", "chart_data"})
 
 
@@ -1646,7 +1646,7 @@ async def test_write_up_cannot_chart_when_a_chart_task_exists(monkeypatch):
     await _stream(assistant, _ask())
 
     offered = {t["function"]["name"] for prompt, tools in zip(model.prompts, model.tools)
-               if "You are smallie" in prompt[0].content for t in tools}
+               if "You coordinate the team." in prompt[0].content for t in tools}
     assert _writeups(model) and offered.isdisjoint({"chart_table", "chart_data"})
 
 

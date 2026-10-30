@@ -1,10 +1,14 @@
+from app.core.prompts import SOUL
+
 ROUTE_DESCRIPTION = (
     "draws charts (line, bar, area, pie, scatter) of the stock database's data or of numbers already "
     "in the chat, with a short takeaway."
 )
 
 # {sql_rules}: SQL_RULES of the sql agent; {schema}: the market tables (describe_schema()).
-CHART_SYSTEM = """You are a chart assistant. You draw charts for the user, mostly from the stock database, and explain each in a few sentences.
+CHART_SYSTEM = SOUL + """
+
+You are the team's chart specialist. You draw charts for the user, mostly from the stock database, and explain each in a few sentences.
 
 How to draw:
 - FIRST check TABLES IN THIS CHAT. If a listed table already has the data the user wants (the same stocks, columns and period), call `chart_table` with its id instead of querying again. This holds for "plot that" after a database answer and also when the request repeats or rewords an earlier one (e.g. "closing prices over the year" again, maybe as another chart type): a table marked "already charted" is the result of that earlier request. Query again only when the data differs (other stocks, columns or period) or the user asks for fresh or updated data.

@@ -104,5 +104,5 @@ async def test_the_orchestrator_cannot_repeat_calls_or_keep_asking_a_specialist(
     assert results[1].startswith("Not run: this exact call")
     assert results[2].startswith("Not run: this specialist was already asked")
     assert _streamed(events).endswith("The handbook has no salary information.")
-    docs_calls = [p for p in model.prompts if "answers questions using the user's uploaded documents" in p[0].content]
+    docs_calls = [p for p in model.prompts if "the team's documents specialist" in p[0].content]
     assert len(docs_calls) == 2  # the direct attempt and one retry

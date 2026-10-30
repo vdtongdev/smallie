@@ -39,13 +39,15 @@ from pydantic import BaseModel
 from app.agents.registry import AGENTS
 from app.api.routes_chat import _events_from
 from app.core.config import get_settings
-from sqlalchemy import text
+from sqlalchemy import func, text
 
 from app.core.accounts import ADMIN_USER_ID
-from app.core.db import get_engine, init_db
+from app.core.accounts import delete_user_row
+from app.core.conversations import create_conversation
+from app.core.db import get_engine, init_db, users
 from app.core.llm import get_chat_model
 from app.core.memory import AgentContext, open_persistence
-from app.core.snapshot import build_snapshot
+from app.core.snapshot import build_snapshot, save_snapshot
 from app.core.usage import UsageCounter
 from app.orchestration import team as team_module
 from app.orchestration.graph import build_assistant
@@ -98,6 +100,9 @@ SCENARIOS = {
                         "scenario E: a document's numerical claim needs a database check (follow-up)"),
     "team_planted": ("What is MSFT's market cap according to bench_team_planted.docx, and is it right?",
                      "team mode: a wrong stock figure planted in an uploaded file"),
+    # Two messages on one thread under a fresh user with no facts: the first reply should end with an onboarding question, the second not.
+    "bootstrap": (["Why is the sky blue?", "Give me a tip for keeping a desk tidy."],
+                  "a new user: the first reply asks one question, the next asks none"),
 }
 EXPECTED = {  # team scenario -> agents that must / may take part
     "team": {"required": ["sql"], "optional": ["research"]},
@@ -154,11 +159,38 @@ class Result:
     cached_tokens: int | None = None  # None: no reply reported it
     calls: list[Call] = field(default_factory=list)  # timed calls made in this process
     answer: str = ""
+    earlier_answers: list[str] = field(default_factory=list)  # replies to the setup turns (bootstrap scenario)
+    checks: dict = field(default_factory=dict)  # bootstrap scenario: bootstrap_ok, language
     charts: list[str] = field(default_factory=list)  # charts drawn: "type: title (series x points)"
     error: str = ""
     team: dict = field(default_factory=dict)  # the answer's workspace (team scenarios)
     scores: dict = field(default_factory=dict)  # choice, contribution, check (team scenarios)
     ablation: dict = field(default_factory=dict)  # agent -> {"better", "why"} (--ablate)
+
+
+def ends_with_question(reply: str) -> bool:
+    """The last non-empty line ends with "?", ignoring trailing spaces, closing quotes, brackets and markdown emphasis."""
+    lines = [line for line in reply.splitlines() if line.strip()]
+    return bool(lines) and lines[-1].rstrip(" 	\"'”’)*_`").endswith("?")
+
+
+def bootstrap_ok(first: str, second: str) -> bool:
+    """Onboarding asked a question in the first reply and none in the second."""
+    return ends_with_question(first) and not ends_with_question(second)
+
+
+def reply_language(reply: str) -> str:
+    """"vi" when the reply has Vietnamese-only letters, else "en" (a rough check for English-only scenarios)."""
+    return "vi" if re.search("[ăâđêôơưĂÂĐÊÔƠƯạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỵỷỹ]", reply) else "en"
+
+
+async def create_bench_user() -> str:
+    """A temporary user with no facts, calling the admin's model server."""
+    user_id = f"bench-boot-{uuid.uuid4().hex[:8]}"
+    with get_engine().begin() as conn:
+        conn.execute(users.insert().values(id=user_id, display_name=user_id, graph_built_at=func.now()))
+    copy_admin_settings(user_id)
+    return user_id
 
 
 class Comparison(BaseModel):
@@ -214,14 +246,17 @@ async def judge(user_id: str, question: str, full: str, without: str) -> dict:
 
 
 AGENT_PHRASES = {
-    "You are smallie": "orchestrator",
-    "You decide which assistant": "router",
+    "You coordinate the team.": "orchestrator",
     "You are a research assistant": "researcher",
-    "You are a research writer": "writer",
-    "You are a data analyst": "sql",
-    "uploaded documents": "docs",
-    "You are a chart assistant": "chart",
+    "the team's data analyst": "sql",
+    "the team's documents specialist": "docs",
+    "the team's chart specialist": "chart",
 }
+
+
+def onboards(name: str) -> bool:
+    """Only the bootstrap scenario has a conversation row, so only it can run the onboarding question."""
+    return name == "bootstrap"
 
 
 def agent_of(messages) -> str:
@@ -261,12 +296,17 @@ async def run_scenario(assistant, store, user_id: str, name: str, run: int) -> R
     *before, message = messages_of(name)
     result, timing, usage = Result(scenario=name, run=run), Timing(), UsageCounter()
     config = {"configurable": {"thread_id": f"bench-{uuid.uuid4()}"}, "callbacks": [timing, usage]}
+    if name == "bootstrap":  # bootstrap_ran lives on a conversation row: make one, as POST /api/chat/auto does
+        config["configurable"]["thread_id"] = (await asyncio.to_thread(create_conversation, user_id, "auto", message))["id"]
     try:
         snapshot = await build_snapshot(None, user_id, config["configurable"]["thread_id"])
-        context = AgentContext(user_id=user_id, **snapshot, agent="team" if name.startswith("team") else "auto")
+        if name == "bootstrap":
+            await asyncio.to_thread(save_snapshot, user_id, config["configurable"]["thread_id"], snapshot)
+        context = AgentContext(user_id=user_id, **{**snapshot, "bootstrap": snapshot.get("bootstrap", False) and onboards(name)}, agent="team" if name.startswith("team") else "auto")
         for earlier in before:  # setup turns, not measured; same context so the measured turn can reuse their prefix
-            await assistant.ainvoke({"messages": [{"role": "user", "content": earlier}]},
-                                    config={"configurable": config["configurable"]}, context=context)
+            state = await assistant.ainvoke({"messages": [{"role": "user", "content": earlier}]},
+                                            config={"configurable": config["configurable"]}, context=context)
+            result.earlier_answers.append(str(state["messages"][-1].content))
     except Exception as exc:  # noqa: BLE001
         result.error = f"setup failed: {type(exc).__name__}: {str(exc)[:200]}"
     start = time.perf_counter()
@@ -305,6 +345,9 @@ async def run_scenario(assistant, store, user_id: str, name: str, run: int) -> R
     except Exception as exc:  # noqa: BLE001 - a failed scenario is a result too
         result.error = f"{type(exc).__name__}: {str(exc)[:200]}"
     result.total = elapsed()
+    if name == "bootstrap" and not result.error:
+        result.checks = {"bootstrap_ok": bootstrap_ok(result.earlier_answers[0], result.answer),
+                         "language": reply_language(result.earlier_answers[0] + result.answer)}
     totals = usage.totals()
     result.calls, result.model_calls = timing.order, totals["model_calls"]
     result.input_tokens, result.output_tokens = totals["input_tokens"], totals["output_tokens"]
@@ -418,6 +461,8 @@ def report(results: list[Result]) -> None:
             print(f"{r.scenario:<16} precision {c['precision']:.2f} recall {c['recall']:.2f}"
                   f"{' MISSING ' + ','.join(c['missing_required']) if c['missing_required'] else ''}  {used}"
                   f"  {r.scores.get('check', '')}")
+        elif r.checks:
+            print(f"{r.scenario:<16} {r.checks}")
         for agent, v in r.ablation.items():
             print(f"{'':<16} without {agent}: {v['better']} - {v['why']}")
     print(f"\nmodel calls: {sum(r.model_calls for r in results)}")
@@ -462,8 +507,9 @@ async def main(args) -> None:
                     await asyncio.sleep(PAUSE_SECONDS)
                 print(f"[run {run}] {name}: {' / '.join(messages_of(name))}", flush=True)
                 doc_ids = [await upload_fixture(store, user_id, *f) for f in FIXTURES.get(name, [])]
+                bench_user = await create_bench_user() if name == "bootstrap" else None
                 try:
-                    results.append(await run_scenario(assistant, store, user_id, name, run))
+                    results.append(await run_scenario(assistant, store, bench_user or user_id, name, run))
                     if name in EXPECTED and not results[-1].error:
                         score(name, results[-1])
                         if args.ablate:
@@ -471,6 +517,8 @@ async def main(args) -> None:
                 finally:
                     for doc_id in doc_ids:
                         delete_fixture(user_id, doc_id)
+                    if bench_user:  # its conversations, settings and graph rows go with the user (ON DELETE CASCADE)
+                        delete_user_row(bench_user)
                 r = results[-1]
                 print(f"  {'->'.join(r.route)}  {r.model_calls} calls  {r.total:.1f}s  {r.error}", flush=True)
     report(results)

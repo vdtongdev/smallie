@@ -44,6 +44,8 @@ class Settings(BaseSettings):
     cross_chat_history: bool = True
     # A chat keeps its memory snapshot (facts, profile, other chats in the prompt) while it was active within this many minutes.
     memory_snapshot_minutes: int = 60
+    # The orchestrator asks a new user about their work and goals in up to this many chats while the profile lacks them. 0 = off.
+    bootstrap_chats: int = 3
     # Daily stock update, weekdays at this New York time (HH:MM). Empty = no background update.
     market_update_time: str = "17:30"
 

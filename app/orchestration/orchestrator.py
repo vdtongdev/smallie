@@ -48,6 +48,7 @@ from app.core.prompts import CALL_NOTE, LANGUAGE_RULE, MEMORY_RULE, reply_langua
 from app.orchestration.prompts import (
     ALREADY_ASKED,
     ATTEMPT_MESSAGE,
+    BOOTSTRAP_SECTION,
     COMPOSE_SECTION,
     FINDINGS_MESSAGE,
     MENTIONS_NOTE,
@@ -186,18 +187,29 @@ def is_composing(messages: Sequence[AnyMessage]) -> bool:
     return False
 
 
+def is_first_turn(messages: Sequence[AnyMessage]) -> bool:
+    """True while no reply precedes the latest visible user message: the chat's first turn."""
+    for i in range(len(messages) - 1, -1, -1):
+        if isinstance(messages[i], HumanMessage) and messages[i].name not in HIDDEN:
+            return not any(isinstance(m, AIMessage) for m in messages[:i])
+    return False
+
+
 def compose_section(request: ModelRequest) -> str:
     """This request's notes, plus the format and citation rules once there is something to write
-    up: the first (deciding) call stays short, and plain chat doesn't get research formatting."""
+    up: the first (deciding) call stays short, and plain chat doesn't get research formatting.
+    On an onboarding user's first turn, every call ends with the onboarding question."""
     question = [m for m in request.messages if not (isinstance(m, HumanMessage) and m.name in HIDDEN)]
-    notes = f"\n\n{request.runtime.context.notes}" if request.runtime.context.notes else ""
-    notes += REPLY_LANGUAGE.format(language=reply_language(question))
-    if not is_composing(request.messages):
-        return notes
-    tables = artifacts_from(request.messages, "tables")  # e.g. from ask_sql, for chart_table
-    charts = artifacts_from(request.messages, "charts")
-    tables = TABLES_SECTION.format(tables=table_note(tables, charts)) if tables else ""
-    return notes + tables + COMPOSE_SECTION.format(formats=FORMATS, language=reply_language(question))
+    section = f"\n\n{request.runtime.context.notes}" if request.runtime.context.notes else ""
+    section += REPLY_LANGUAGE.format(language=reply_language(question))
+    if is_composing(request.messages):
+        tables = artifacts_from(request.messages, "tables")  # e.g. from ask_sql, for chart_table
+        charts = artifacts_from(request.messages, "charts")
+        tables = TABLES_SECTION.format(tables=table_note(tables, charts)) if tables else ""
+        section += tables + COMPOSE_SECTION.format(formats=FORMATS, language=reply_language(question))
+    if request.runtime.context.bootstrap and is_first_turn(request.messages):
+        section += BOOTSTRAP_SECTION
+    return section
 
 
 def agent_lines(specs: Sequence[AgentSpec]) -> str:

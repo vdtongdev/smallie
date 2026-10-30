@@ -184,3 +184,99 @@ def test_snapshot_built_at_the_clear_instant_is_not_saved(env):
         cleared = conn.execute(select(conversations.c.snapshot_at).where(conversations.c.id == chat)).scalar()
     save_snapshot(user, chat, {"user": "", "memories": "x", "recent_chats": ""}, built_at=cleared)
     assert stored(chat) is None
+
+
+async def test_snapshot_has_profile_apart_from_memories(env):
+    user = env.user()
+    graph.save_facts(user, [Fact(subject="User", relation="works_at", object="Acme"),
+                            Fact(subject="User", relation="holds", object="FPT")], "chat")
+    chat = create_conversation(user, "auto", "hi")
+    snapshot = await chat_snapshot(None, user, chat)
+    assert snapshot["profile"] == "- User works at Acme"
+    assert snapshot["memories"] == "- User holds FPT"
+
+
+async def test_saved_snapshot_without_profile_is_rebuilt(env):
+    user = env.user()
+    chat = create_conversation(user, "auto", "hi")["id"]
+    save_snapshot(user, chat, {"user": "", "memories": "- old", "recent_chats": ""})
+    with get_engine().begin() as conn:
+        conn.execute(update(conversations).where(conversations.c.id == chat).values(updated_at=text("now()")))
+    snapshot = await chat_snapshot(None, user, get_conversation(user, chat))
+    assert "profile" in snapshot and snapshot["memories"] == ""
+
+
+def ran(chat: str) -> bool:
+    with get_engine().connect() as conn:
+        return conn.execute(select(conversations.c.bootstrap_ran).where(conversations.c.id == chat)).scalar()
+
+
+def know(user: str, relation: str, obj: str) -> None:
+    graph.save_facts(user, [Fact(subject="User", relation=relation, object=obj)], "chat")
+
+
+async def open_chat(user: str) -> tuple[str, dict]:
+    chat = create_conversation(user, "auto", "hi")["id"]
+    return chat, await chat_snapshot(None, user, get_conversation(user, chat))
+
+
+async def test_bootstrap_on_for_empty_profile(env):
+    user = env.user()
+    chat, snap = await open_chat(user)
+    assert snap["bootstrap"] is True
+    assert ran(chat) is True
+
+
+async def test_bootstrap_on_with_only_role_or_only_goal(env):
+    user = env.user()
+    know(user, "has_role", "analyst")
+    assert (await open_chat(user))[1]["bootstrap"] is True
+    other = env.user()
+    know(other, "has_goal", "Retire early")
+    assert (await open_chat(other))[1]["bootstrap"] is True
+
+
+async def test_bootstrap_off_with_role_and_goal(env):
+    user = env.user()
+    know(user, "works_at", "Acme")
+    know(user, "has_goal", "Retire early")
+    chat, snap = await open_chat(user)
+    assert snap["bootstrap"] is False
+    assert ran(chat) is False
+
+
+async def test_bootstrap_stops_after_bootstrap_chats_conversations(env):
+    user = env.user()
+    results = [(await open_chat(user))[1]["bootstrap"] for _ in range(4)]
+    assert results == [True, True, True, False]
+
+
+async def test_bootstrap_stays_on_when_the_same_chat_is_rebuilt(env):
+    user = env.user()
+    chats = [(await open_chat(user))[0] for _ in range(3)]
+    clear_snapshots(user)
+    again = await chat_snapshot(None, user, get_conversation(user, chats[2]))
+    assert again["bootstrap"] is True
+
+
+async def test_bootstrap_off_when_setting_is_zero(env, monkeypatch):
+    monkeypatch.setattr(get_settings(), "bootstrap_chats", 0)
+    user = env.user()
+    chat, snap = await open_chat(user)
+    assert snap["bootstrap"] is False
+    assert ran(chat) is False
+
+
+async def test_bootstrap_ran_survives_clear_snapshots(env):
+    user = env.user()
+    chats = [(await open_chat(user))[0] for _ in range(2)]
+    clear_snapshots(user)
+    assert [ran(c) for c in chats] == [True, True]
+
+
+async def test_other_users_conversations_do_not_count(env):
+    first = env.user()
+    for _ in range(3):
+        await open_chat(first)
+    second = env.user()
+    assert (await open_chat(second))[1]["bootstrap"] is True

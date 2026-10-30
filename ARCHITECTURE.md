@@ -106,7 +106,7 @@ This file describes `main` plus the 0.4.0 remote agents (section 10) and the 0.5
    - Verify the session cookie → `user_id`
    - Load or create the conversation
    - Take the chat's memory snapshot (`chat_snapshot`, section 8): the saved one while the chat was active within `MEMORY_SNAPSHOT_MINUTES`, else a new one (newest 20 facts, last turns of the 3 most recent other chats, the profile) that is saved on the chat
-   - Build `AgentContext(user_id, user, memories, recent_chats, agent=kind, ...)` from the snapshot (also `notes`, `mentioned`, `sources`, `failed`)
+   - Build `AgentContext(user_id, user, profile, memories, recent_chats, bootstrap, agent=kind, ...)` from the snapshot (also `notes`, `mentioned`, `sources`, `failed`)
 3. **Stream start**
    - Begin the SSE stream and emit a `conversation` event with id + title
    - Start the LangGraph assistant on the conversation's thread (loads prior messages from the checkpointer)
@@ -216,6 +216,7 @@ The "front door" agent. Answers general questions itself, asks specialists as to
 ### System Prompt Includes
 
 - Today's date
+- The team voice (`SOUL`, first in the prompt) and the "we" rule; on a chat's first turn while the snapshot asks for it, the onboarding question (`BOOTSTRAP_SECTION`, at the end of the tail note, not the system prompt; see Onboarding in section 8)
 - The available specialists and how to use them (`ask_docs`, `handoff`, ...)
 - Web search availability (Wikipedia alongside every web search)
 - Per-request notes, in the tail note of every call (not the system prompt):
@@ -466,8 +467,9 @@ One-node StateGraph:
 
 **Recall** (when a snapshot is built)
 
-- `recall_facts(user_id)`: one SQL query for the newest 20 facts at the User node
-- Part of the chat's memory snapshot (below): passed to every agent as `AgentContext.memories` and added to its prompt
+- `recall_profile(user_id)`: the profile relations (`PROFILE`: name, place, work, role, risk tolerance, investment horizon, language, goal, preferences), the newest 20 of them, listed in `PROFILE` order; it also returns which relations are present (for BOOTSTRAP)
+- `recall_facts(user_id)`: the newest 20 other facts at the User node (profile relations excluded)
+- Part of the chat's memory snapshot (below): passed to every agent as `AgentContext.profile` and `AgentContext.memories`, added to its prompt as `PROFILE_SECTION` and `MEMORIES_SECTION`
 
 **Search**
 
@@ -479,11 +481,20 @@ One-node StateGraph:
 
 The memory part of a chat's prompt (profile, facts, other chats) is frozen per chat, so the prompt prefix stays the same across the chat's turns and the provider's prompt cache can reuse it (`app/core/snapshot.py`).
 
-- Saved on the conversation row: `memory_snapshot` (jsonb) and `snapshot_at`
-- `chat_snapshot` reuses the saved snapshot while the chat's last turn is within `MEMORY_SNAPSHOT_MINUTES` (default 60); otherwise it builds one (`build_snapshot`) and saves it
+- Saved on the conversation row: `memory_snapshot` (jsonb, keys `user`, `profile`, `memories`, `recent_chats`, `bootstrap`) and `snapshot_at`
+- `chat_snapshot` reuses the saved snapshot while the chat's last turn is within `MEMORY_SNAPSHOT_MINUTES` (default 60) and the saved snapshot has a `profile` key (older ones are rebuilt); otherwise it builds one (`build_snapshot`) and saves it
 - Deleting a fact, a file or a conversation calls `clear_snapshots(user_id)`: every chat of that user rebuilds its snapshot on the next turn
 - Race rule: a snapshot whose build started before or at a clear is not saved, because it may hold the deleted data
 - Facts learned during a chat are already in its history, so the snapshot does not need them until it is rebuilt
+
+### Onboarding (BOOTSTRAP)
+
+While the profile lacks a role (`has_role` or `works_at`) or a goal (`has_goal`), the orchestrator is asked to end its reply with one question about what is missing. The question only asks: the user's answer is saved by the usual fact extraction, and no tool or model call is added.
+
+- `bootstrap_due` (`app/core/snapshot.py`) decides it once per snapshot, in `build_snapshot`: on while the profile is missing and either this chat already ran it (`conversations.bootstrap_ran`) or fewer than `BOOTSTRAP_CHATS` of the user's chats ran it (default 3; 0 turns it off)
+- `save_snapshot` sets `bootstrap_ran` when it saves a snapshot with `bootstrap` on. `clear_snapshots` leaves it alone, so deleting a fact, file or chat does not restart onboarding; deleting a chat frees one of the slots
+- The orchestrator's tail note ends with `BOOTSTRAP_SECTION` on every call of a chat's first turn while `context.bootstrap` is set (`compose_section`, `is_first_turn`: no `AIMessage` before the latest visible user message). The question is asked at most once per chat by code, since later turns never get the text. The system prompt is the same with and without onboarding. A chat whose first turn a specialist answered is not asked, but it still counts toward `BOOTSTRAP_CHATS`. Specialists never get it. `bench_chat` runs onboarding only in its `bootstrap` scenario
+- Known gap: facts are extracted only from turns the orchestrator answered, so an answer given in a turn that a specialist answers is not saved
 
 ### Cross-Chat Memory
 
@@ -540,12 +551,15 @@ Tables and charts travel as `ToolMessage` artifacts (and on the orchestrator's f
 Each model request is laid out from the most stable part to the least stable, so the provider's prefix cache can reuse the start:
 
 1. the tools
-2. the agent's static system prompt
-3. the chat's memory snapshot (`USER_SECTION`, `MEMORIES_SECTION`, `RECENT_CHATS_SECTION`, section 8), and then the mode-stable extra (`prompt_extra`, e.g. the researcher's sources, skills and schema)
-4. the thread's messages
-5. the tail note: per-call text added as the last message (`build_agent(tail=...)`, `make_call_note`), never saved
+2. `SOUL`, the start of the static prompt of the orchestrator, docs, sql and chart agents (the same for every user)
+3. the rest of the agent's static prompt, ending with `LANGUAGE_RULE` and `MEMORY_RULE`
+4. USER: the account name (`USER_SECTION`) and the profile (`PROFILE_SECTION`, when there is one)
+5. MEMORY: other facts (`MEMORIES_SECTION`) and recent chats (`RECENT_CHATS_SECTION`), from the chat's memory snapshot (section 8)
+6. the mode-stable extra (`prompt_extra`, e.g. the researcher's sources, skills and schema)
+7. the thread's messages
+8. the tail note: per-call text added as the last message (`build_agent(tail=...)`, `make_call_note`), never saved; on the orchestrator's first turn of an onboarding chat it ends with `BOOTSTRAP_SECTION`
 
-Items 1 to 3 are the system prompt. The tail note holds what changes per call or per day: the orchestrator's notes, reply language and (while composing) the format rules (`compose_section`), the chart agent's tables (`tables_section`), and the researcher's date (`TODAY_NOTE`). The `prompt_extra` in item 3 is appended after the memory sections in the code, so a new snapshot changes what follows it too.
+Items 2 to 6 are the system prompt. While the snapshot is fresh they stay the same across a chat's turns, so the provider's cache can reuse them. The tail note holds what changes per call or per day: the orchestrator's notes, reply language and (while composing) the format rules (`compose_section`), the chart agent's tables (`tables_section`), the researcher's date (`TODAY_NOTE`), and on a chat's first turn with onboarding the question (`BOOTSTRAP_SECTION`, last). The `prompt_extra` in item 6 comes after the memory sections in the code, so a new snapshot changes what follows it too.
 
 ### Hidden Messages
 
@@ -888,6 +902,7 @@ Traces contain full prompts (users' messages, file passages, memories), so traci
 
 - Windows + WSL Ubuntu; Docker inside WSL runs Postgres 18 + pgvector, Redis and the four agent servers (`docker compose up -d`, ports 2101–2104)
 - `uv sync` installs the dependencies
+- Agent servers are rebuilt with the app: `docker compose up -d --build` after a code change (they are not kept compatible with the old `AgentContext`)
 - `uv run uvicorn app.api.main:app --reload --loop asyncio:SelectorEventLoop`
 
 **Cloud deployment**
@@ -897,6 +912,7 @@ Traces contain full prompts (users' messages, file passages, memories), so traci
 - Main app: `gcloud run deploy smallie --source . --region asia-southeast1 ...` (public URL, login required)
 - Static UI (`app/static/`, mounted at `/` by `NoCacheStaticFiles` in `app/api/main.py`) sends `Cache-Control: no-cache`, so browsers revalidate `app.js` after a deploy (unchanged files get 304); `/api` is not affected
 - Agent servers: one image built by `gcloud builds submit --config cloudbuild.agent.yaml`, then one private service per agent (`smallie-<route>`, `--no-allow-unauthenticated`, its own env file); the main app's service account has `roles/run.invoker` on each
+- Agent servers ship with the app: `AgentContext` gained `profile` and `bootstrap` (section 8), and the servers are not kept compatible with the old context, so rebuild and deploy them in the same release
 - Neon Postgres (direct URL, no pooler): the app's database plus one small database per agent server
 
 **Services**

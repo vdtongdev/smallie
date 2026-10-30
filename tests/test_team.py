@@ -104,6 +104,17 @@ async def test_ask_board_calls_the_model_once(monkeypatch):
     assert "question?" in human and "SQL SAYS 3T" in human and "DOCS SAYS 2T" in human
 
 
+async def test_ask_board_and_ask_plan_return_none_when_the_model_made_no_tool_call(monkeypatch):
+    async def ainvoke(messages, config):
+        return None
+
+    monkeypatch.setattr(team, "get_chat_model", lambda model=None: SimpleNamespace(
+        with_structured_output=lambda schema, method: SimpleNamespace(ainvoke=ainvoke)))
+    answers = [{"round": 1, "agent": "sql", "text": "x"}]
+    assert await team.ask_board([HumanMessage("question?")], answers, {"callbacks": []}, user_id="u") is None
+    assert await team.ask_plan([HumanMessage("question?")], [(SQL, RouteInfo())], {"callbacks": []}, user_id="u") is None
+
+
 async def test_ask_plan_uses_the_users_model_once(monkeypatch):
     from app.orchestration.team_plan import Plan
     calls, asked = [], []
@@ -471,6 +482,17 @@ async def test_failed_board_forces_write_up(monkeypatch):
     assert last.text == "Final." and last.additional_kwargs["team"]["synthesis"]["forced"] is True
     assert _events(chunks, "review")[-1]["forced"] is True
     assert "Cap is 3T." in _writeups(model)[0]
+
+
+async def test_missing_board_counts_as_no_findings_not_a_failure(monkeypatch, caplog):
+    _board(monkeypatch, None, None)
+    model, assistant = _two(monkeypatch, [])
+    chunks = await _stream(assistant, _ask())
+
+    last = (await _thread(assistant))[-1]
+    assert last.text == "Final." and last.additional_kwargs["team"]["synthesis"]["forced"] is False
+    assert _events(chunks, "review")[-1]["forced"] is False
+    assert "Team board failed" not in caplog.text
 
 
 async def test_failed_board_rate_limit_still_propagates(monkeypatch):
@@ -1523,6 +1545,22 @@ async def test_the_fallback_runs_every_agent_in_wave_one(monkeypatch):
     (event,) = _events(chunks, "plan")
     assert event["fallback"] is True
     assert [sorted(e["agents"]) for e in _events(chunks, "wave")][0] == ["docs", "research", "sql"]
+
+
+@pytest.mark.parametrize("message, route", [
+    (QUESTION, "sql"),  # the router's obvious route
+    ("Research the AAPL market cap", "sql"),  # two agents are obvious: the first one mentioned
+    ("Compare the two options and tell me which is better overall", "docs"),  # nothing points anywhere: the first speaker
+])
+async def test_a_missing_plan_runs_one_task_for_the_best_pick(monkeypatch, message, route):
+    log = []
+    _, assistant, _ = _docs_sql(monkeypatch, None, log)
+    chunks = await _stream(assistant, _ask(message))
+
+    (event,) = _events(chunks, "plan")
+    assert event["fallback"] is True
+    assert [t["agent"] for t in event["tasks"]] == [route]
+    assert [e["agent"] for e in log if e["event"] == "start"] == [route]
 
 
 async def test_independent_tasks_share_a_wave(monkeypatch):

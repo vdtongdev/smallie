@@ -10,7 +10,7 @@ from langgraph.store.base import BaseStore
 from pydantic import BaseModel, Field
 
 from app.core.graph import save_card
-from app.core.llm import get_chat_model
+from app.core.llm import ask_structured, get_chat_model
 from app.core.usage import UsageCounter, add_usage
 from app.features.documents.ingest import ingest_document
 from app.features.documents.prompts import CARD_PROMPT
@@ -40,13 +40,12 @@ async def write_card(store: BaseStore, document_id: str, user_id: str, filename:
     try:
         opening = "\n".join(c.page_content for c in chunks)[:CARD_CHARS]
         model = await asyncio.to_thread(get_chat_model, user_id)
-        card = await model.with_structured_output(DocumentCard, method="function_calling").ainvoke(
-            [SystemMessage(CARD_PROMPT), HumanMessage(f"File name: {filename}\n\n{opening}")],
-            config={"callbacks": [usage]},
-        )
-        entities = [e for e in card.entities if len(e) <= 80]
-        await asyncio.to_thread(save_card, user_id, document_id, f"{card.doc_type}: {card.summary}", entities)
-        written = True
+        card = await ask_structured(
+            model, DocumentCard, [SystemMessage(CARD_PROMPT), HumanMessage(f"File name: {filename}\n\n{opening}")], {"callbacks": [usage]})
+        if card is not None:
+            entities = [e for e in card.entities if len(e) <= 80]
+            await asyncio.to_thread(save_card, user_id, document_id, f"{card.doc_type}: {card.summary}", entities)
+            written = True
     except Exception:  # noqa: BLE001
         log.exception("Document card failed for %s", filename)
     try:

@@ -98,3 +98,10 @@ def test_overall_cache_counts_only_reporting_results():
     assert bench_chat.overall_cache([R("a", 1, input_tokens=200, cached_tokens=50),
                                      R("b", 1, input_tokens=100)]) == (300, 50, 25)
     assert bench_chat.overall_cache([R("b", 1, input_tokens=100)]) == (100, None, None)
+
+
+def test_bootstrap_check():
+    asked, plain = "Autumn is cool.\n\nWhat do you do for work?\n", "Here is the answer.\nHope it helps."
+    assert bench_chat.bootstrap_ok(asked, plain)
+    assert not bench_chat.bootstrap_ok(plain, plain)
+    assert not bench_chat.bootstrap_ok(asked, asked)

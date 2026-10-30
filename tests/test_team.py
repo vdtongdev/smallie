@@ -828,6 +828,46 @@ async def test_drawer_charts_the_final_answers_table(monkeypatch):
     assert {e["agent"] for e in _events(chunks, "speaker")} >= {"chart"}
 
 
+async def test_drawer_charts_the_table_gathered_before_a_pause(monkeypatch):
+    """Regression test for the bug: a table the sql agent returned before the board asked the user a question must
+    still reach the chart agent after the user answers. Currently failing."""
+    _board(monkeypatch, Board(question="Which year?"), Board())
+    model = per_agent(orchestrator=[AIMessage("Final.")], chart=DRAW)
+    assistant = _assistant(monkeypatch, model, sql=Fake("sql", "Cap.", log=[], table=TABLE),
+                           research=Fake("research", "Notes.", log=[]))
+    await _stream(assistant, _ask("chart AAPL"))
+    assert (await assistant.aget_state(CONFIG)).interrupts
+    chunks = await _stream(assistant, Command(resume="2024 please"))
+
+    final = (await _thread(assistant))[-1]
+    assert final.additional_kwargs.get("tables") == [TABLE]
+    charts = final.additional_kwargs.get("charts")
+    assert charts and charts[0]["table_id"] == "t1" and [e["charts"] for e in _events(chunks, "charts")] == [charts]
+
+
+async def test_drawer_charts_the_table_when_the_task_runs_again_after_a_pause(monkeypatch):
+    """Regression test for the bug, currently failing: the board asks the user a question, the user answers, the
+    next review sends sql back for a conflict round, and that second run queries nothing new. The table it
+    gathered before the question must still reach the final answer and the chart agent."""
+    class TableOnce(Fake):
+        async def ainvoke(self, input, config=None, **kwargs):
+            out = await super().ainvoke(input, config, **kwargs)
+            self.table = None
+            return out
+
+    _board(monkeypatch, Board(question="Which year?"), _conflict(["sql"], routes=("sql", "research")), Board())
+    model = per_agent(orchestrator=[AIMessage("Final.")], chart=DRAW)
+    sql = TableOnce("sql", "Cap.", log=[], table=TABLE)
+    assistant = _assistant(monkeypatch, model, sql=sql, research=Fake("research", "Notes.", log=[]))
+    await _stream(assistant, _ask("chart AAPL"))
+    await _stream(assistant, Command(resume="2024 please"))
+
+    assert sql.calls == 2  # the conflict round ran sql again
+    final = (await _thread(assistant))[-1]
+    assert final.additional_kwargs.get("tables") == [TABLE]
+    assert final.additional_kwargs.get("charts")
+
+
 async def test_drawer_failure_keeps_the_answer(monkeypatch):
     _board(monkeypatch, Board())
     model = per_agent(orchestrator=[AIMessage("Final.")])

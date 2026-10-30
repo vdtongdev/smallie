@@ -246,14 +246,17 @@ async def judge(user_id: str, question: str, full: str, without: str) -> dict:
 
 
 AGENT_PHRASES = {
-    "You are smallie": "orchestrator",
-    "You decide which assistant": "router",
+    "You coordinate the team.": "orchestrator",
     "You are a research assistant": "researcher",
-    "You are a research writer": "writer",
-    "You are a data analyst": "sql",
-    "uploaded documents": "docs",
-    "You are a chart assistant": "chart",
+    "the team's data analyst": "sql",
+    "the team's documents specialist": "docs",
+    "the team's chart specialist": "chart",
 }
+
+
+def onboards(name: str) -> bool:
+    """Only the bootstrap scenario has a conversation row, so only it can run the onboarding question."""
+    return name == "bootstrap"
 
 
 def agent_of(messages) -> str:
@@ -299,7 +302,7 @@ async def run_scenario(assistant, store, user_id: str, name: str, run: int) -> R
         snapshot = await build_snapshot(None, user_id, config["configurable"]["thread_id"])
         if name == "bootstrap":
             await asyncio.to_thread(save_snapshot, user_id, config["configurable"]["thread_id"], snapshot)
-        context = AgentContext(user_id=user_id, **snapshot, agent="team" if name.startswith("team") else "auto")
+        context = AgentContext(user_id=user_id, **{**snapshot, "bootstrap": snapshot.get("bootstrap", False) and onboards(name)}, agent="team" if name.startswith("team") else "auto")
         for earlier in before:  # setup turns, not measured; same context so the measured turn can reuse their prefix
             state = await assistant.ainvoke({"messages": [{"role": "user", "content": earlier}]},
                                             config={"configurable": config["configurable"]}, context=context)

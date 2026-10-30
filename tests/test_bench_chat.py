@@ -105,3 +105,25 @@ def test_bootstrap_check():
     assert bench_chat.bootstrap_ok(asked, plain)
     assert not bench_chat.bootstrap_ok(plain, plain)
     assert not bench_chat.bootstrap_ok(asked, asked)
+
+
+def test_agent_phrases_match_the_prompts():
+    from app.agents.chart.prompts import CHART_SYSTEM
+    from app.agents.docs.prompts import DOCS_SYSTEM
+    from app.agents.research.prompts import RESEARCHER_SYSTEM
+    from app.agents.sql.prompts import SQL_SYSTEM
+    from app.core.prompts import SOUL
+    from app.orchestration.prompts import ORCHESTRATOR_SYSTEM
+
+    prompts = {"orchestrator": ORCHESTRATOR_SYSTEM, "sql": SQL_SYSTEM, "docs": DOCS_SYSTEM,
+               "chart": CHART_SYSTEM, "researcher": RESEARCHER_SYSTEM}
+    phrases = {agent: phrase for phrase, agent in bench_chat.AGENT_PHRASES.items()}
+    assert set(phrases) == set(prompts)
+    for agent, phrase in phrases.items():
+        assert [a for a, system in prompts.items() if phrase in system] == [agent]
+        assert phrase not in SOUL
+
+
+def test_only_the_bootstrap_scenario_onboards():
+    assert bench_chat.onboards("bootstrap")
+    assert not any(bench_chat.onboards(name) for name in ("generic", "team_vi", "bootstrap2", ""))

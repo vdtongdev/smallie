@@ -288,7 +288,8 @@ def recall_profile(user_id: str, limit: int = RECALL_FACTS) -> tuple[str, frozen
     """The user's profile facts as a bullet list in PROFILE order, and the profile relations present."""
     with get_engine().connect() as conn:
         rows = conn.execute(_facts_query(user_id).where(or_(_S.c.kind == "user", _T.c.kind == "user"),
-                                                        graph_edges.c.relation.in_(PROFILE)).limit(limit)).all()
+                                                        graph_edges.c.relation.in_(PROFILE))
+                            .order_by(graph_edges.c.updated_at.desc(), graph_edges.c.id).limit(limit)).all()
     rows = sorted(rows, key=lambda r: (PROFILE.index(r.relation), r.object))
     return "\n".join(f"- {_line(r)}" for r in rows), frozenset(r.relation for r in rows)
 

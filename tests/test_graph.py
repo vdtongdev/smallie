@@ -140,6 +140,15 @@ def test_recall_profile_is_scoped_to_the_user(make_user, embeddings):
 
 
 @requires_db
+def test_recall_profile_cap_keeps_the_newest(make_user, embeddings):
+    user = make_user()
+    for goal in ("Zeta", "Alpha", "Mid", "Omega"):
+        graph.save_facts(user, [Fact(subject="User", relation="has_goal", object=goal)], "chat")
+    assert graph.recall_profile(user, limit=2) == ("- User has goal Mid\n- User has goal Omega",
+                                                   frozenset({"has_goal"}))
+
+
+@requires_db
 def test_facts_are_scoped_per_user(make_user, embeddings):
     alice, bob, carol = make_user(), make_user(), make_user()
     graph.save_facts(alice, [Fact(subject="User", relation="works_at", object="Acme")], "chat")

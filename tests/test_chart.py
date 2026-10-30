@@ -134,6 +134,26 @@ def test_listed_tables_say_how_they_were_already_charted():
     assert "already charted" not in second
 
 
+async def test_chart_tables_note_in_the_tail(monkeypatch):
+    from app.agents import factory
+    from app.agents.chart import agent as chart_agent
+    from app.core.memory import AgentContext
+    from app.core.prompts import CALL_NOTE
+    from tests.scripted import scripted
+
+    model = scripted(AIMessage("Same data as a line."))
+    monkeypatch.setattr(factory, "get_chat_model", lambda *a, **k: model)
+    monkeypatch.setattr(chart_agent.sql_agent, "describe_schema", lambda: "")
+    call = {"name": "chart_sql", "args": {}, "id": "c1"}
+    messages = [HumanMessage("Chart AAPL vs MSFT"), AIMessage("", tool_calls=[call]),
+                ToolMessage("drawn", tool_call_id="c1", name="chart_sql", artifact={"tables": [PRICES]}),
+                AIMessage("Done."), HumanMessage("plot that as a line")]
+    await chart_agent.build_chart_agent().ainvoke({"messages": messages}, context=AgentContext(user_id="u"))
+    prompt = model.prompts[0]
+    assert prompt[-1].name == CALL_NOTE and "TABLES IN THIS CHAT (" in prompt[-1].content
+    assert "TABLES IN THIS CHAT (" not in prompt[0].content  # the system prompt only names the heading
+
+
 @requires_db
 async def test_chart_sql_charts_a_real_query_and_keeps_its_table():
     content, artifact = await chart_sql.coroutine(

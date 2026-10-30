@@ -56,7 +56,7 @@ async def test_a_specialist_that_finds_nothing_falls_back_to_the_orchestrator(mo
     assert kinds == [("agent", "docs"), ("fallback", "docs"), ("agent", "orchestrator")]
     assert _streamed(events).endswith("Salaries are not in the handbook; typical ranges are…")
     orchestrator_prompt = model.prompts[-1]
-    note = orchestrator_prompt[-1]
+    note = orchestrator_prompt[-2]
     assert note.name == "failed_attempt" and "the docs specialist already worked" in note.content
     assert "I couldn't find anything about salaries" in note.content
     # It can't hand the message back.

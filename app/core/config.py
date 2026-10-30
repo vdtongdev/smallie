@@ -42,6 +42,8 @@ class Settings(BaseSettings):
     chat_temperature: float = 0.3
     # Let agents see the user's other chats (recent turns in the prompt + search_chat_history).
     cross_chat_history: bool = True
+    # A chat keeps its memory snapshot (facts, profile, other chats in the prompt) while it was active within this many minutes.
+    memory_snapshot_minutes: int = 60
     # Daily stock update, weekdays at this New York time (HH:MM). Empty = no background update.
     market_update_time: str = "17:30"
 

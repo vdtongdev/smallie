@@ -43,9 +43,9 @@ from sqlalchemy import text
 
 from app.core.accounts import ADMIN_USER_ID
 from app.core.db import get_engine, init_db
-from app.core.graph import recall_facts
 from app.core.llm import get_chat_model
 from app.core.memory import AgentContext, open_persistence
+from app.core.snapshot import build_snapshot
 from app.core.usage import UsageCounter
 from app.orchestration import team as team_module
 from app.orchestration.graph import build_assistant
@@ -149,6 +149,9 @@ class Result:
     first_token: float | None = None
     total: float = 0.0
     model_calls: int = 0  # every call of the message, the agent servers' included
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cached_tokens: int | None = None  # None: no reply reported it
     calls: list[Call] = field(default_factory=list)  # timed calls made in this process
     answer: str = ""
     charts: list[str] = field(default_factory=list)  # charts drawn: "type: title (series x points)"
@@ -259,19 +262,18 @@ async def run_scenario(assistant, store, user_id: str, name: str, run: int) -> R
     result, timing, usage = Result(scenario=name, run=run), Timing(), UsageCounter()
     config = {"configurable": {"thread_id": f"bench-{uuid.uuid4()}"}, "callbacks": [timing, usage]}
     try:
-        for earlier in before:  # setup turns, not measured
+        snapshot = await build_snapshot(None, user_id, config["configurable"]["thread_id"])
+        context = AgentContext(user_id=user_id, **snapshot, agent="team" if name.startswith("team") else "auto")
+        for earlier in before:  # setup turns, not measured; same context so the measured turn can reuse their prefix
             await assistant.ainvoke({"messages": [{"role": "user", "content": earlier}]},
-                                    config={"configurable": config["configurable"]},
-                                    context=AgentContext(user_id=user_id))
+                                    config={"configurable": config["configurable"]}, context=context)
     except Exception as exc:  # noqa: BLE001
         result.error = f"setup failed: {type(exc).__name__}: {str(exc)[:200]}"
     start = time.perf_counter()
     elapsed = lambda: round(time.perf_counter() - start, 2)  # noqa: E731
     try:
-        memories = await asyncio.to_thread(recall_facts, user_id)
         stream = assistant.astream(
-            {"messages": [{"role": "user", "content": message}]}, config=config,
-            context=AgentContext(user_id=user_id, memories=memories, agent="team" if name.startswith("team") else "auto"),
+            {"messages": [{"role": "user", "content": message}]}, config=config, context=context,
             stream_mode=["messages", "updates", "custom"], subgraphs=True,
         )
         first_spoke, synthesized = None, False  # as the answer bubble: a lone speaker's text is the reply
@@ -303,7 +305,10 @@ async def run_scenario(assistant, store, user_id: str, name: str, run: int) -> R
     except Exception as exc:  # noqa: BLE001 - a failed scenario is a result too
         result.error = f"{type(exc).__name__}: {str(exc)[:200]}"
     result.total = elapsed()
-    result.calls, result.model_calls = timing.order, usage.model_calls
+    totals = usage.totals()
+    result.calls, result.model_calls = timing.order, totals["model_calls"]
+    result.input_tokens, result.output_tokens = totals["input_tokens"], totals["output_tokens"]
+    result.cached_tokens = totals.get("cached_tokens")
     await assistant.checkpointer.adelete_thread(config["configurable"]["thread_id"])
     return result
 
@@ -374,18 +379,37 @@ def messages_of(name: str) -> list[str]:
     return message if isinstance(message, list) else [message]
 
 
+def hit_rate(input_tokens: int, cached_tokens: int | None) -> int | None:
+    """Percent of the input served from the prompt cache; None when unknown."""
+    if cached_tokens is None or not input_tokens:
+        return None
+    return round(100 * cached_tokens / input_tokens)
+
+
 def fmt(value: float | None) -> str:
     return "-" if value is None else f"{value:.1f}"
 
 
+def overall_cache(results: list[Result]) -> tuple[int, int | None, int | None]:
+    """Total input, cached total and hit rate; cached and the rate count only results whose replies reported it."""
+    known = [r for r in results if r.cached_tokens is not None]
+    cached = sum(r.cached_tokens for r in known) if known else None
+    return sum(r.input_tokens for r in results), cached, hit_rate(sum(r.input_tokens for r in known), cached)
+
+
+def na(value) -> str:
+    return "n/a" if value is None else str(value)
+
+
 def report(results: list[Result]) -> None:
-    print(f"\n{'scenario':<16} {'route':<26} {'calls':>5} {'1st evt':>7} {'1st tok':>7} {'total':>6}  per-call s (agent)")
+    print(f"\n{'scenario':<16} {'route':<26} {'calls':>5} {'1st evt':>7} {'1st tok':>7} {'total':>6} {'in':>7} {'cached':>7} {'hit%':>5}  per-call s (agent)")
     for r in results:
         calls = " ".join(f"{c.seconds:.1f}{'!' if c.error else ''}({c.agent[:4]}{f' {c.out_chars}ch' if c.out_chars else ''})"
                          for c in r.calls)
         route = "->".join(r.route) or "?"
         print(f"{r.scenario:<16} {route[:26]:<26} {r.model_calls:>5} {fmt(r.first_event):>7} "
-              f"{fmt(r.first_token):>7} {r.total:>6.1f}  {calls}{'  ERROR ' + r.error if r.error else ''}")
+              f"{fmt(r.first_token):>7} {r.total:>6.1f} {r.input_tokens:>7} {na(r.cached_tokens):>7} "
+              f"{na(hit_rate(r.input_tokens, r.cached_tokens)):>5}  {calls}{'  ERROR ' + r.error if r.error else ''}")
     for r in results:
         if r.scores:
             c = r.scores["choice"]
@@ -397,6 +421,8 @@ def report(results: list[Result]) -> None:
         for agent, v in r.ablation.items():
             print(f"{'':<16} without {agent}: {v['better']} - {v['why']}")
     print(f"\nmodel calls: {sum(r.model_calls for r in results)}")
+    total_in, total_cached, rate = overall_cache(results)
+    print(f"input tokens: {total_in}, cached: {na(total_cached)}, hit rate: {na(rate) if rate is None else f'{rate}%'}")
     seconds = [c.seconds for r in results for c in r.calls if not c.error]
     if seconds:
         print(f"timed in this process: {len(seconds)} ok, median {statistics.median(seconds):.1f}s, "

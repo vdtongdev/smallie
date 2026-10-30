@@ -105,9 +105,8 @@ This file describes `main` plus the 0.4.0 remote agents (section 10) and the 0.5
 2. **Authentication and context**
    - Verify the session cookie → `user_id`
    - Load or create the conversation
-   - Recall the newest 20 facts from the knowledge graph
-   - Load the last turns of the 3 most recent other chats (cross-chat memory)
-   - Build `AgentContext(user_id, user, memories, recent_chats, agent=kind, ...)` (also `notes`, `mentioned`, `sources`, `failed`)
+   - Take the chat's memory snapshot (`chat_snapshot`, section 8): the saved one while the chat was active within `MEMORY_SNAPSHOT_MINUTES`, else a new one (newest 20 facts, last turns of the 3 most recent other chats, the profile) that is saved on the chat
+   - Build `AgentContext(user_id, user, memories, recent_chats, agent=kind, ...)` from the snapshot (also `notes`, `mentioned`, `sources`, `failed`)
 3. **Stream start**
    - Begin the SSE stream and emit a `conversation` event with id + title
    - Start the LangGraph assistant on the conversation's thread (loads prior messages from the checkpointer)
@@ -151,7 +150,7 @@ This file describes `main` plus the 0.4.0 remote agents (section 10) and the 0.5
 ### Completion Phase
 
 9. **Turn completes**
-   - A final `done` event
+   - A `usage` event (the latest reply's and the chat's token totals, section 14), then a final `done` event
    - A specialist's reply stays in the thread with its tool calls and results (so "plot that" finds the table later). When the orchestrator answers, only its final message enters the thread; what it asked specialists streams to the UI but stays out of later prompts.
    - The checkpointer saves the thread
 10. **Background: fact extraction** (after the response is sent)
@@ -219,7 +218,7 @@ The "front door" agent. Answers general questions itself, asks specialists as to
 - Today's date
 - The available specialists and how to use them (`ask_docs`, `handoff`, ...)
 - Web search availability (Wikipedia alongside every web search)
-- Per-request notes:
+- Per-request notes, in the tail note of every call (not the system prompt):
   - which specialists are unavailable (no files)
   - the user's file names + summaries
   - the agent that gave the previous answer
@@ -256,7 +255,7 @@ The "front door" agent. Answers general questions itself, asks specialists as to
 **Call 2+** (writing up):
 
 - Tool results are in (parallel calls run concurrently)
-- Format rules + citation rules + reply language are added
+- Format rules + citation rules + reply language are added in the tail note (`compose_section`, section 9)
 
 ### Max Model Calls
 
@@ -265,7 +264,7 @@ The "front door" agent. Answers general questions itself, asks specialists as to
 - `trim_tool_calls` middleware (`app/agents/factory.py`, every agent) drops repeated tool calls of one model reply and keeps at most 8 (`MAX_TOOL_CALLS_PER_STEP`)
 - `MAX_OUTPUT_TOKENS` (default 32768, reasoning tokens count too) ends a reply that repeats itself, instead of letting it run to 131k tokens
 - `CHAT_TEMPERATURE` (default 0.3) is the sampling temperature of chat models; at 0 a repeating reply keeps repeating, higher values let weaker models slip words of another script into Vietnamese answers
-- `make_last_call` middleware (`app/agents/factory.py`, every agent but the orchestrator) makes the last allowed model call write the answer: no tool choice, a note (`LAST_CALL_NOTE`) naming the reply language, and any tool call the model makes anyway is dropped
+- `make_call_note` middleware (`app/agents/factory.py`, every agent) adds the agent's tail note to every model call (section 9); on the last call the limit allows, it also makes the answer: no tool choice, `LAST_CALL_NOTE` (naming the reply language) in the same note, and any tool call the model makes anyway is dropped. The orchestrator's limit is `last_call_writes=False`, so it never writes that way
 - `tool_errors` middleware (`app/agents/factory.py`, every agent) returns a tool's exception to the model as an error result instead of ending the run; interrupts and handoffs (`GraphBubbleUp`) pass through
 
 ### Handoff
@@ -465,10 +464,10 @@ One-node StateGraph:
 - **One edge per node pair**: a standard relation wins over an invented one
 - **Orphan cleanup**: entities without edges are deleted
 
-**Recall** (every chat)
+**Recall** (when a snapshot is built)
 
 - `recall_facts(user_id)`: one SQL query for the newest 20 facts at the User node
-- Passed to every agent as `AgentContext.memories` and added to its prompt
+- Part of the chat's memory snapshot (below): passed to every agent as `AgentContext.memories` and added to its prompt
 
 **Search**
 
@@ -476,12 +475,22 @@ One-node StateGraph:
 - Available to every agent
 - `same_memory_results` middleware (`app/agents/factory.py`): a memory tool result equal to an earlier result of the same tool in this run (the same lines, in any order) comes back as a short note (`SAME_RESULT`), not the same text again
 
+### Memory Snapshot (per chat)
+
+The memory part of a chat's prompt (profile, facts, other chats) is frozen per chat, so the prompt prefix stays the same across the chat's turns and the provider's prompt cache can reuse it (`app/core/snapshot.py`).
+
+- Saved on the conversation row: `memory_snapshot` (jsonb) and `snapshot_at`
+- `chat_snapshot` reuses the saved snapshot while the chat's last turn is within `MEMORY_SNAPSHOT_MINUTES` (default 60); otherwise it builds one (`build_snapshot`) and saves it
+- Deleting a fact, a file or a conversation calls `clear_snapshots(user_id)`: every chat of that user rebuilds its snapshot on the next turn
+- Race rule: a snapshot whose build started before or at a clear is not saved, because it may hold the deleted data
+- Facts learned during a chat are already in its history, so the snapshot does not need them until it is rebuilt
+
 ### Cross-Chat Memory
 
-**Recent chats** (every message)
+**Recent chats** (when a snapshot is built)
 
 - The last 3 turns of the 3 most recently used other conversations
-- Passed as `AgentContext.recent_chats` and added to the prompt
+- Part of the memory snapshot: passed as `AgentContext.recent_chats` and added to the prompt
 
 **Searchable history** (after each turn)
 
@@ -526,12 +535,24 @@ Tables and charts travel as `ToolMessage` artifacts (and on the orchestrator's f
 - the UI and other agents read the artifact from the thread
 - saves tokens and stops models from copying numbers wrongly
 
+### Prompt Layout
+
+Each model request is laid out from the most stable part to the least stable, so the provider's prefix cache can reuse the start:
+
+1. the tools
+2. the agent's static system prompt
+3. the chat's memory snapshot (`USER_SECTION`, `MEMORIES_SECTION`, `RECENT_CHATS_SECTION`, section 8), and then the mode-stable extra (`prompt_extra`, e.g. the researcher's sources, skills and schema)
+4. the thread's messages
+5. the tail note: per-call text added as the last message (`build_agent(tail=...)`, `make_call_note`), never saved
+
+Items 1 to 3 are the system prompt. The tail note holds what changes per call or per day: the orchestrator's notes, reply language and (while composing) the format rules (`compose_section`), the chart agent's tables (`tables_section`), and the researcher's date (`TODAY_NOTE`). The `prompt_extra` in item 3 is appended after the memory sections in the code, so a new snapshot changes what follows it too.
+
 ### Hidden Messages
 
-Research findings and a failed specialist attempt reach the orchestrator as hidden messages:
+Research findings, a failed specialist attempt and the per-call tail note (`CALL_NOTE`) reach the model as hidden messages:
 
 - the model reads them to write its answer
-- they are never saved to the thread
+- they are never saved to the thread (the tail note is not streamed or seen by fact extraction either)
 
 ### Multi-language
 
@@ -955,6 +976,11 @@ The server calls the endpoint, not the browser, so a user could otherwise make i
 
 It runs on save and each time a client is built. `ALLOW_PRIVATE_MODEL_URLS=true` (dev only, default `false`) allows `http` and private addresses, so a local Ollama works on the same machine. Known limit: DNS rebinding is not caught (a host that resolves to a private address between the check and the request).
 
-### Usage box
+### Token Usage
 
-The usage box is hidden in the UI for now. Usage is still counted: the model-call budget depends on it.
+- `UsageCounter` (`app/core/usage.py`) counts input, output and cached input tokens (`input_token_details.cache_read`). `cached_tokens` is in the totals only when a reply reported it: absent means unknown, a reported 0 is a count.
+- Per chat, `conversations.input_tokens`, `output_tokens`, `cached_tokens`, `cache_known`, `last_usage` and `usage_by_model` (per model name: calls and tokens) are added to atomically after each reply (`add_conversation_usage`). The stream sends a `usage` event (`reply`, `chat`) before `done`. `GET /api/conversations/{id}/usage` returns the same numbers when a chat is opened.
+- A Usage button under the chat box (hidden while the chat has no usage) opens a popup with the last reply and this chat: input, output, cached and the hit rate (cached / input). An unknown cache shows `cached n/a`, never 0. Each section lists one row per model (calls, input, cached, hit rate).
+- A provider may report 0 cached tokens because its host does not cache prompts (measured on 2026-10-29: `deepseek/deepseek-chat` on OpenRouter, served by DeepInfra and StreamLake, reported 0 on every call, with or without a `session_id`). When the chat's rate is 0%, the popup shows a note saying so.
+- Per-user totals (`/api/usage`) are unchanged. The model-call budget still depends on the counter.
+- `scripts.bench_chat` prints input tokens, cached tokens and the hit rate per scenario.

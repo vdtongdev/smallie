@@ -31,7 +31,7 @@ from app.core.config import get_settings
 from app.core.llm import get_chat_model, pick_model, placeholder_model
 from app.core.memory import MEMORY_TOOLS, TEAM_MODE, TOOL_SOURCE, AgentContext
 from app.core.model_settings import load_settings
-from app.core.prompts import LAST_CALL_NOTE, MEMORIES_SECTION, RECENT_CHATS_SECTION, SAME_RESULT, USER_SECTION, reply_language
+from app.core.prompts import CALL_NOTE, LAST_CALL_NOTE, MEMORIES_SECTION, RECENT_CHATS_SECTION, SAME_RESULT, USER_SECTION, reply_language
 
 log = logging.getLogger(__name__)
 
@@ -140,22 +140,30 @@ def trim_tool_calls(state, runtime):
     return {"messages": [message.model_copy(update={"tool_calls": kept})]}
 
 
-def make_last_call(limit: int):
-    """The last model call the limit allows writes the answer: no tool choice, a note naming the
-    reply language (in the request only, not saved), and any tool call the model makes anyway is dropped."""
+def make_call_note(tail: Callable[[ModelRequest], str] | None, limit: int, last_call_writes: bool):
+    """Per-call text goes last in the request, so the system prompt and the messages before it stay the
+    same from call to call: `tail(request)`, plus on the last model call the limit allows (when the agent
+    writes then) a note naming the reply language, no tool choice, and any tool call the model makes
+    anyway dropped. The note is in the request only, not saved."""
 
     @wrap_model_call
-    async def last_call(request: ModelRequest, handler):
-        if request.state.get("run_model_call_count", 0) != limit - 1:
+    async def call_note(request: ModelRequest, handler):
+        text = tail(request).strip() if tail else ""
+        last = last_call_writes and request.state.get("run_model_call_count", 0) == limit - 1
+        if last:
+            text = f"{text}\n\n" if text else ""
+            text += LAST_CALL_NOTE.format(language=reply_language(request.messages))
+        if text:
+            request = request.override(messages=[*request.messages, HumanMessage(text, name=CALL_NOTE)])
+        if not last:
             return await handler(request)
-        note = HumanMessage(LAST_CALL_NOTE.format(language=reply_language(request.messages)))
-        response = await handler(request.override(tool_choice="none", messages=[*request.messages, note]))
+        response = await handler(request.override(tool_choice="none"))
         message = response.result[-1] if response.result else None
         if isinstance(message, AIMessage) and message.tool_calls:
             response.result[-1] = message.model_copy(update={"tool_calls": [], "invalid_tool_calls": []})
         return response
 
-    return last_call
+    return call_note
 
 
 @wrap_model_call
@@ -234,6 +242,7 @@ def build_agent(
     store: BaseStore | None = None,
     max_model_calls: int | None = None,
     prompt_extra: Callable[[ModelRequest], str] | None = None,
+    tail: Callable[[ModelRequest], str] | None = None,
     middleware: Sequence[AgentMiddleware] = (),
     last_call_writes: bool = True,
 ):
@@ -241,6 +250,7 @@ def build_agent(
 
     Leave checkpointer/store unset when the agent runs as a subgraph of the assistant
     (app/orchestration/graph.py); it then uses the parent graph's. `prompt_extra(request)` is appended to the prompt on every model call;
+    `tail(request)` is added as the last message of every model call (not saved);
     `middleware` runs after the built-in ones.
     """
 
@@ -263,7 +273,7 @@ def build_agent(
     return create_agent(
         placeholder_model(),
         tools=[*tools, *MEMORY_TOOLS],
-        middleware=[user_model, prompt_with_memories, *([make_last_call(limit)] if last_call_writes else []), call_limit, trim_tool_calls, scope_tools, source_first, tool_errors, same_memory_results, refuse_hidden_tools,
+        middleware=[user_model, prompt_with_memories, make_call_note(tail, limit, last_call_writes), call_limit, trim_tool_calls, scope_tools, source_first, tool_errors, same_memory_results, refuse_hidden_tools,
                     *middleware],
         context_schema=AgentContext,
         checkpointer=checkpointer,

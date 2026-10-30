@@ -9,6 +9,7 @@ const state = {
   docsPoll: null,
   awaiting: false, // the open chat is paused on a question to the user
   kinds: {}, // conversation id -> kind ("auto" | "team"), from /api/conversations
+  usage: null, // last {reply, chat} token usage of the open chat, shown under the input box
   agents: {}, // route -> {labels: {en, vi}, steps: {step: {en, vi}}}, from /api/agents
 };
 
@@ -176,6 +177,7 @@ $("langBtn").onclick = () => {
   loadConversations();
   loadDocuments();
   loadUsage();
+  renderUsage(state.usage);
   if ($("readmeDialog").open) loadMarketStatus();
   if ($("adminDialog").open) loadAccounts();
   if ($("activityDialog").open) renderActivity();
@@ -550,6 +552,46 @@ async function loadUsage() {
   $("usageCost").textContent = t("usageCost").replace("{cost}", usage.cost.toFixed(usage.cost < 0.01 ? 6 : 4)); // one call costs ~$0.000005
 }
 
+// Tokens of the open chat: {reply: part | null, chat: part}, part = {input_tokens, output_tokens, cached_tokens | null}.
+// The button under the input box opens a popup with all of it. cached_tokens null means the provider did not say (shown as n/a, not 0).
+function renderUsage(usage) {
+  state.usage = usage;
+  const chat = usage?.chat;
+  const empty = !usage || (!usage.reply && !chat.input_tokens && !chat.output_tokens);
+  $("usageBtn").hidden = empty;
+  if (empty) { if ($("usageDialog").open) $("usageDialog").close(); $("usageBody").textContent = ""; return; }
+  const n = (x) => x.toLocaleString(state.lang === "vi" ? "vi-VN" : "en-US");
+  // One row per model, most input first: name, calls, input, cached (n/a when never reported), hit rate.
+  const modelRows = (byModel) => Object.entries(byModel || {}).sort((a, b) => b[1].input_tokens - a[1].input_tokens)
+    .map(([name, m]) => {
+      const div = document.createElement("div");
+      div.className = "usage-model";
+      div.textContent = t(m.cached_tokens == null ? "usageModelUnknown" : "usageModelRow")
+        .replace("{model}", name).replace("{calls}", t(m.model_calls === 1 ? "usageCall" : "usageCalls").replace("{n}", n(m.model_calls)))
+        .replace("{in}", n(m.input_tokens)).replace("{cached}", n(m.cached_tokens ?? 0))
+        .replace("{rate}", m.input_tokens ? Math.round(100 * (m.cached_tokens ?? 0) / m.input_tokens) : 0);
+      return div;
+    });
+  const section = (label, p, byModel) => {
+    const key = p.cached_tokens == null ? "usageLineUnknown" : p.input_tokens ? "usageLine" : "usageLineNoRate";
+    const head = document.createElement("h3");
+    head.textContent = t(label);
+    const line = document.createElement("div");
+    line.textContent = t(key).replace("{in}", n(p.input_tokens)).replace("{out}", n(p.output_tokens))
+      .replace("{cached}", n(p.cached_tokens ?? 0)).replace("{rate}", p.input_tokens ? Math.round(100 * p.cached_tokens / p.input_tokens) : 0);
+    return [head, line, ...modelRows(byModel)];
+  };
+  const note = document.createElement("div");
+  note.className = "usage-note";
+  note.textContent = t("usageCacheNote");
+  const noCache = chat.cached_tokens === 0 && chat.input_tokens > 0;
+  $("usageBody").replaceChildren(...(usage.reply ? section("usageReply", usage.reply, usage.reply_by_model) : []),
+    ...section("usageChat", chat, usage.chat_by_model), ...(noCache ? [note] : []));
+}
+$("usageBtn").onclick = () => $("usageDialog").showModal();
+$("usageDialog").addEventListener("close", () => $("usageBtn").focus());
+$("usageDialog").addEventListener("click", (e) => { if (e.target === $("usageDialog")) $("usageDialog").close(); }); // the backdrop
+
 // Readme examples go into the message box, ready to send or edit.
 $("readmeDialog").addEventListener("click", (e) => {
   const example = e.target.closest(".example");
@@ -632,6 +674,7 @@ async function loadConversations() {
 
 async function openConversation(id) {
   if (state.busy) return;
+  renderUsage(null);
   setConversation(id);
   setAwaiting(false);
   $("messages").innerHTML = "";
@@ -672,10 +715,13 @@ async function openConversation(id) {
   }
   end();
   loadConversations();
+  const usage = await api(`/conversations/${id}/usage`).catch(() => null);
+  if (state.conversationId === id) renderUsage(usage);
 }
 
 function newChat() {
   setConversation(null);
+  renderUsage(null);
   setAwaiting(false);
   showWelcome();
   loadConversations();
@@ -881,6 +927,9 @@ async function sendMessage(text) {
             markPending(current.el);
             act.question = event.question;
             touch(turn);
+            break;
+          case "usage":
+            renderUsage(event);
             break;
           case "done":
             finished = true;

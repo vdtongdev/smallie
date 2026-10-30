@@ -45,12 +45,17 @@ USER_SECTION = """
 
 YOU ARE TALKING TO: {user}"""
 
+PROFILE_SECTION = """
+
+WHAT THE USER TOLD YOU ABOUT THEMSELVES:
+{profile}
+
+A stored language preference never changes the reply language: reply in the language of the latest message you answer."""
+
 MEMORIES_SECTION = """
 
 WHAT YOU KNOW ABOUT THIS USER (from earlier chats and their files, newest first; may be empty):
-{memories}
-
-A stored language preference never changes the reply language: reply in the language of the latest message you answer."""
+{memories}"""
 
 RECENT_CHATS_SECTION = """
 

@@ -11,7 +11,7 @@ from app.core.accounts import get_profile
 from app.core.config import get_settings
 from app.core.conversations import list_conversations
 from app.core.db import conversations, get_engine
-from app.core.graph import recall_facts
+from app.core.graph import recall_facts, recall_profile
 from app.core.memory import load_recent_chats
 
 log = logging.getLogger(__name__)
@@ -41,15 +41,16 @@ async def _empty() -> str:
 async def build_snapshot(checkpointer: BaseCheckpointSaver | None, user_id: str, conversation_id: str) -> dict:
     recent = _recent_chats(checkpointer, user_id, conversation_id) \
         if get_settings().cross_chat_history and checkpointer else _empty()
-    memories, recent_chats, user = await asyncio.gather(asyncio.to_thread(recall_facts, user_id), recent, _user(user_id))
-    return {"user": user, "memories": memories, "recent_chats": recent_chats}
+    (profile, _), memories, recent_chats, user = await asyncio.gather(
+        asyncio.to_thread(recall_profile, user_id), asyncio.to_thread(recall_facts, user_id), recent, _user(user_id))
+    return {"user": user, "profile": profile, "memories": memories, "recent_chats": recent_chats, "bootstrap": False}
 
 
 async def chat_snapshot(checkpointer: BaseCheckpointSaver | None, user_id: str, conversation: dict) -> dict:
     """The chat's saved snapshot while the chat was active within `memory_snapshot_minutes`; else a new one."""
     saved, active = conversation.get("memory_snapshot"), conversation.get("updated_at")
     window = timedelta(minutes=get_settings().memory_snapshot_minutes)
-    if saved and active and active > datetime.now(timezone.utc) - window:
+    if saved and "profile" in saved and active and active > datetime.now(timezone.utc) - window:
         return saved
     built_at = datetime.now(timezone.utc)
     snapshot = await build_snapshot(checkpointer, user_id, conversation["id"])

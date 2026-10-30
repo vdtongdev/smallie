@@ -31,7 +31,7 @@ from app.core.config import get_settings
 from app.core.llm import get_chat_model, pick_model, placeholder_model
 from app.core.memory import MEMORY_TOOLS, TEAM_MODE, TOOL_SOURCE, AgentContext
 from app.core.model_settings import load_settings
-from app.core.prompts import CALL_NOTE, LAST_CALL_NOTE, MEMORIES_SECTION, RECENT_CHATS_SECTION, SAME_RESULT, USER_SECTION, reply_language
+from app.core.prompts import CALL_NOTE, LAST_CALL_NOTE, MEMORIES_SECTION, PROFILE_SECTION, RECENT_CHATS_SECTION, SAME_RESULT, USER_SECTION, reply_language
 
 log = logging.getLogger(__name__)
 
@@ -260,6 +260,8 @@ def build_agent(
         prompt = system_prompt
         if context.user:
             prompt += USER_SECTION.format(user=context.user)
+        if context.profile:
+            prompt += PROFILE_SECTION.format(profile=context.profile)
         prompt += MEMORIES_SECTION.format(memories=context.memories or "(nothing yet)")
         if context.recent_chats:
             prompt += RECENT_CHATS_SECTION.format(recent_chats=context.recent_chats)

@@ -184,3 +184,23 @@ def test_snapshot_built_at_the_clear_instant_is_not_saved(env):
         cleared = conn.execute(select(conversations.c.snapshot_at).where(conversations.c.id == chat)).scalar()
     save_snapshot(user, chat, {"user": "", "memories": "x", "recent_chats": ""}, built_at=cleared)
     assert stored(chat) is None
+
+
+async def test_snapshot_has_profile_apart_from_memories(env):
+    user = env.user()
+    graph.save_facts(user, [Fact(subject="User", relation="works_at", object="Acme"),
+                            Fact(subject="User", relation="holds", object="FPT")], "chat")
+    chat = create_conversation(user, "auto", "hi")
+    snapshot = await chat_snapshot(None, user, chat)
+    assert snapshot["profile"] == "- User works at Acme"
+    assert snapshot["memories"] == "- User holds FPT"
+
+
+async def test_saved_snapshot_without_profile_is_rebuilt(env):
+    user = env.user()
+    chat = create_conversation(user, "auto", "hi")["id"]
+    save_snapshot(user, chat, {"user": "", "memories": "- old", "recent_chats": ""})
+    with get_engine().begin() as conn:
+        conn.execute(update(conversations).where(conversations.c.id == chat).values(updated_at=text("now()")))
+    snapshot = await chat_snapshot(None, user, get_conversation(user, chat))
+    assert "profile" in snapshot and snapshot["memories"] == ""

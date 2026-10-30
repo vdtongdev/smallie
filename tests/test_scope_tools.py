@@ -76,10 +76,10 @@ def test_external_db_tools_are_tagged():
     assert research_agent.SPEC.sources == frozenset({"web", "external_db"})
 
 
-def test_memories_section_keeps_message_language():
-    from app.core.prompts import MEMORIES_SECTION
+def test_profile_section_keeps_message_language():
+    from app.core.prompts import PROFILE_SECTION
 
-    text = MEMORIES_SECTION.lower()
+    text = PROFILE_SECTION.lower()
     assert "language" in text and "latest message" in text
 
 

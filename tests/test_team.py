@@ -868,6 +868,33 @@ async def test_drawer_charts_the_table_when_the_task_runs_again_after_a_pause(mo
     assert final.additional_kwargs.get("charts")
 
 
+async def test_drawer_charts_figures_from_the_answer_text_when_the_tables_hold_other_data(monkeypatch):
+    """Regression test for the bug as seen live, currently failing. Plan: docs reads the portfolio (figures only in
+    its text), sql runs a query whose table holds other data, the board asks the user a question, the user's reply
+    brings research in (wave 3), then the chart task draws the portfolio split. The final answer carries sql's
+    unrelated table, so `chart_data` is denied and `chart_table` has nothing to draw: no chart, though the
+    figures to draw are in the answer."""
+    _plan(monkeypatch, Plan(tasks=[Task(id="t1", agent="docs", goal="read the portfolio"),
+                                   Task(id="t2", agent="sql", goal="check prices", depends_on=["t1"]),
+                                   Task(id="t3", agent="chart", goal="draw the split", depends_on=["answer"])]))
+    _board(monkeypatch, Board(question="Compare with which prices?"), Board())
+    model = per_agent(orchestrator=[AIMessage("Final.")], chart=[CHART_DATA_CALL, AIMessage("Drawn.")])
+    log = []
+    docs_text = "| Asset | Share |\n| AAPL | 60% |\n| MSFT | 40% |"
+    assistant = _assistant(monkeypatch, model, documents=("portfolio.docx",), docs=Fake("docs", docs_text, log=log),
+                           sql=Fake("sql", "Prices.", log=log, table=TABLE),
+                           research=Fake("research", "Web prices.", log=log))
+    first = await _stream(assistant, _ask("analyse my portfolio and draw its split"))
+    assert [(e["wave"], e["agents"]) for e in _events(first, "wave")] == [(1, ["docs"]), (2, ["sql"])]
+    assert (await assistant.aget_state(CONFIG)).interrupts
+    second = await _stream(assistant, Command(resume="use the research agent for current prices"))
+
+    assert [(e["wave"], e["agents"]) for e in _events(second, "wave")] == [(3, ["research"])]
+    final = (await _thread(assistant))[-1]
+    assert final.additional_kwargs.get("tables") == [TABLE]  # unrelated to the portfolio split
+    assert final.additional_kwargs.get("charts")
+
+
 async def test_drawer_failure_keeps_the_answer(monkeypatch):
     _board(monkeypatch, Board())
     model = per_agent(orchestrator=[AIMessage("Final.")])

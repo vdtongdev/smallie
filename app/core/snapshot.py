@@ -5,7 +5,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
-from sqlalchemy import or_, update
+from sqlalchemy import func, or_, select, update
 
 from app.core.accounts import get_profile
 from app.core.config import get_settings
@@ -38,12 +38,30 @@ async def _empty() -> str:
     return ""
 
 
+def bootstrap_due(user_id: str, conversation_id: str, present: frozenset[str]) -> bool:
+    """Onboarding questions: the profile lacks work or goal, and this chat ran them already or fewer than `bootstrap_chats` chats did."""
+    limit = get_settings().bootstrap_chats
+    if limit <= 0:
+        return False
+    if not (("has_role" not in present and "works_at" not in present) or "has_goal" not in present):
+        return False
+    with get_engine().connect() as conn:
+        mine = conn.execute(select(conversations.c.bootstrap_ran).where(
+            conversations.c.id == conversation_id, conversations.c.user_id == user_id)).scalar()
+        if mine:
+            return True
+        count = conn.execute(select(func.count()).select_from(conversations).where(
+            conversations.c.user_id == user_id, conversations.c.bootstrap_ran.is_(True))).scalar()
+    return count < limit
+
+
 async def build_snapshot(checkpointer: BaseCheckpointSaver | None, user_id: str, conversation_id: str) -> dict:
     recent = _recent_chats(checkpointer, user_id, conversation_id) \
         if get_settings().cross_chat_history and checkpointer else _empty()
-    (profile, _), memories, recent_chats, user = await asyncio.gather(
+    (profile, present), memories, recent_chats, user = await asyncio.gather(
         asyncio.to_thread(recall_profile, user_id), asyncio.to_thread(recall_facts, user_id), recent, _user(user_id))
-    return {"user": user, "profile": profile, "memories": memories, "recent_chats": recent_chats, "bootstrap": False}
+    bootstrap = await asyncio.to_thread(bootstrap_due, user_id, conversation_id, present)
+    return {"user": user, "profile": profile, "memories": memories, "recent_chats": recent_chats, "bootstrap": bootstrap}
 
 
 async def chat_snapshot(checkpointer: BaseCheckpointSaver | None, user_id: str, conversation: dict) -> dict:
@@ -61,11 +79,12 @@ async def chat_snapshot(checkpointer: BaseCheckpointSaver | None, user_id: str, 
 def save_snapshot(user_id: str, conversation_id: str, snapshot: dict, built_at: datetime | None = None) -> None:
     """Not saved when a deletion cleared the chat after `built_at` (when the build started): it may hold deleted data."""
     now = datetime.now(timezone.utc)
+    ran = {"bootstrap_ran": True} if snapshot.get("bootstrap") else {}
     with get_engine().begin() as conn:
         conn.execute(update(conversations).where(
             conversations.c.id == conversation_id, conversations.c.user_id == user_id,
             or_(conversations.c.snapshot_at.is_(None), conversations.c.snapshot_at < (built_at or now)),
-        ).values(memory_snapshot=snapshot, snapshot_at=now))
+        ).values(memory_snapshot=snapshot, snapshot_at=now, **ran))
 
 
 def clear_snapshots(user_id: str) -> None:

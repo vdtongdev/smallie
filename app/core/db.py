@@ -54,6 +54,7 @@ conversations = Table(
     Column("usage_by_model", JSONB, nullable=False, server_default="{}"),  # model name -> calls and tokens, whole chat
     Column("memory_snapshot", JSONB),  # profile, facts and other chats as the prompt shows them (app/core/snapshot.py)
     Column("snapshot_at", DateTime(timezone=True)),
+    Column("bootstrap_ran", Boolean, nullable=False, server_default="false"),  # onboarding ran in this chat (app/core/snapshot.py)
     Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
     Column("updated_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
 )
@@ -192,6 +193,7 @@ def init_db() -> None:
             "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS memory_snapshot jsonb, "
             "ADD COLUMN IF NOT EXISTS snapshot_at timestamptz"
         ))
+        conn.execute(text("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS bootstrap_ran boolean NOT NULL DEFAULT false"))
         # These came with task model routing.
         conn.execute(text(
             "ALTER TABLE model_settings ADD COLUMN IF NOT EXISTS small_model text, "

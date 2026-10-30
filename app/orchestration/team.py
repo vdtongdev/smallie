@@ -34,7 +34,7 @@ from app.agents.remote import CallBudgetExceeded
 from app.agents.base import MEMORY_TOOL_NAMES, TOOL_RESULT_PREVIEW, AgentSpec, RouteInfo, ToolRecorder, turn_messages
 from app.agents.registry import AGENTS
 from app.core.config import get_settings
-from app.core.llm import get_chat_model, pick_model, pick_tier
+from app.core.llm import ask_structured, get_chat_model, pick_model, pick_tier
 from app.core.memory import TEAM_MODE, AgentContext
 from app.core.model_settings import load_settings
 from app.core.usage import UsageCounter
@@ -42,7 +42,7 @@ from app.core.prompts import reply_language
 from app.orchestration.prompts import BOARD_PROMPT, CHALLENGE_MESSAGE, CONFLICT_MESSAGE, DRAW_MESSAGE, DRAWING_NOTE, NOTHING_FOUND_MESSAGE, PLAN_PROMPT, ROUND_MESSAGE, TASK_MESSAGE, TEAM_MESSAGE
 from app.orchestration.team_plan import Plan, Task, add_follow_ups, after_user_files, dead_inputs, fallback_tasks, ready, validate_plan
 from app.orchestration.orchestrator import HIDDEN
-from app.orchestration.router import ORCHESTRATOR, AssistantState, available_agents
+from app.orchestration.router import ORCHESTRATOR, AssistantState, available_agents, mentioned_routes, obvious_route
 
 log = logging.getLogger(__name__)
 
@@ -244,8 +244,8 @@ def chat_so_far(earlier: Sequence[AnyMessage]) -> str:
 
 
 async def ask_plan(messages: list[AnyMessage], available: Sequence[tuple[AgentSpec, RouteInfo]], config: RunnableConfig, *,
-                   user_id: str) -> Plan:
-    """The one plan call per message, on the user's model; `config` carries the usage counter's callbacks."""
+                   user_id: str) -> Plan | None:
+    """The one plan call per message, on the user's model; `config` carries the usage counter's callbacks. None: the model made no tool call."""
     settings = get_settings()
     last = next((i for i in range(len(messages) - 1, -1, -1) if isinstance(messages[i], HumanMessage)), None)
     question = "" if last is None else messages[last].text
@@ -264,10 +264,9 @@ async def ask_plan(messages: list[AnyMessage], available: Sequence[tuple[AgentSp
     # Texts go into the message, not a template: they may contain braces.
     chat = chat_so_far(messages[:last] if last else [])
     human = (f"CHAT SO FAR:\n{chat}\n\n" if chat else "") + f"USER MESSAGE:\n{question}\n\nAGENTS:\n" + "\n".join(lines)
-    planner = (await asyncio.to_thread(get_chat_model, user_id)).with_structured_output(
-        Plan, method="function_calling")
+    planner = await asyncio.to_thread(get_chat_model, user_id)
     system = PLAN_PROMPT.format(language=reply_language(messages), max_tasks=settings.team_max_tasks)
-    return await planner.ainvoke([SystemMessage(system), HumanMessage(human)], config=config)
+    return await ask_structured(planner, Plan, [SystemMessage(system), HumanMessage(human)], config)
 
 
 def merge_workspace(old: dict | None, new: dict) -> dict:
@@ -341,6 +340,14 @@ def _drawing(drawers: Sequence[str]) -> str:
     return DRAWING_NOTE.format(agent=" and ".join(drawers)) if drawers else ""
 
 
+def best_pick(message: str, available: Sequence[tuple[AgentSpec, RouteInfo]], speakers: Sequence[str]) -> str:
+    """The one speaker for a message whose plan is missing: the router's obvious route, else the first speaker the message mentions, else the first speaker."""
+    obvious = obvious_route(message, list(available))
+    if obvious in speakers:
+        return obvious
+    return next((r for r in mentioned_routes(message, list(available)) if r in speakers), speakers[0])
+
+
 def with_drawers(tasks: Sequence[dict], drawers: Sequence[str], origin: str) -> list[dict]:
     """The tasks plus one chart task per drawer route; it waits for the final answer (`dispatch` never sends it)."""
     tasks = list(tasks)
@@ -411,9 +418,11 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         elif len(everyone) == 1:  # exactly one speaker named: one task, no plan call
             tasks = [{**t, "origin": "plan"} for t in fallback_tasks(chosen)]
         else:
+            missing = False
             try:
-                tasks = validate_plan(await ask_plan(messages, available, config, user_id=runtime.context.user_id), [s.route for s, _ in available],
-                                      get_settings().team_max_tasks)
+                made = await ask_plan(messages, available, config, user_id=runtime.context.user_id)
+                missing = made is None
+                tasks = validate_plan(made, [s.route for s, _ in available], get_settings().team_max_tasks)
             except (openai.RateLimitError, openai.AuthenticationError):
                 raise
             except Exception:  # noqa: BLE001 - the participants take the work, as the round table did
@@ -421,7 +430,12 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
                 tasks = None
             if tasks == []:
                 return await alone(state, runtime, config)
-            if tasks is None:  # the participants take the work, a named chart agent draws from the answer
+            if tasks is None:  # a named chart agent draws from the answer
+                if missing:  # the model made no plan: the best pick takes the work alone
+                    pick = best_pick(messages[-1].text, available, chosen)
+                    log.info("Team plan missing, %s takes the work", pick)
+                    chosen = [pick]
+                # a failed or invalid plan: the participants take the work, as the round table did
                 tasks = with_drawers(fallback_tasks(chosen), [s.route for s in everyone if s.draws], "fallback")
                 fallback = True
             else:  # a planned chart task waits for the answer, whatever the plan says; nothing waits for a chart task

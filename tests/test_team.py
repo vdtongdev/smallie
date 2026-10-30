@@ -1451,6 +1451,22 @@ async def test_the_fallback_runs_every_agent_in_wave_one(monkeypatch):
     assert [sorted(e["agents"]) for e in _events(chunks, "wave")][0] == ["docs", "research", "sql"]
 
 
+@pytest.mark.parametrize("message, route", [
+    (QUESTION, "sql"),  # the router's obvious route
+    ("Research the AAPL market cap", "sql"),  # two agents are obvious: the first one mentioned
+    ("Compare the two options and tell me which is better overall", "docs"),  # nothing points anywhere: the first speaker
+])
+async def test_a_missing_plan_runs_one_task_for_the_best_pick(monkeypatch, message, route):
+    log = []
+    _, assistant, _ = _docs_sql(monkeypatch, None, log)
+    chunks = await _stream(assistant, _ask(message))
+
+    (event,) = _events(chunks, "plan")
+    assert event["fallback"] is True
+    assert [t["agent"] for t in event["tasks"]] == [route]
+    assert [e["agent"] for e in log if e["event"] == "start"] == [route]
+
+
 async def test_independent_tasks_share_a_wave(monkeypatch):
     log = []
     plan = Plan(tasks=[Task(id="t1", agent="docs", goal="a"), Task(id="t2", agent="sql", goal="b", depends_on=["t1"]),

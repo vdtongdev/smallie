@@ -712,9 +712,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
                      "difficulty_reason": task["difficulty_reason"], "profile": profile, "tier": tier, "model": model,
                      "reason": reason, "fallback": None}
             emit({"type": "task_started", "task": tid, "agent": route, **trace})
-            # With a table on this turn's answer the chart agent charts that table: it may not copy numbers.
-            deny = ("chart_data",) if answer.additional_kwargs.get("tables") else ()
-            context = dataclasses.replace(runtime.context, sources=NO_SOURCES, deny_tools=deny, tier="standard")
+            context = dataclasses.replace(runtime.context, sources=NO_SOURCES, deny_tools=(), tier="standard")
             note = HumanMessage(DRAW_MESSAGE.format(language=reply_language(messages)), name=TEAM)
             recorder, counter, started = ToolRecorder(), UsageCounter(), time.monotonic()
             tools, text, charts = [], "", []

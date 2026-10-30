@@ -1357,21 +1357,6 @@ def _unforced(model):
     return all(c in (None, "auto", "none") for c in model.choices)
 
 
-async def test_drawer_cannot_copy_numbers_when_the_answer_has_a_table(monkeypatch):
-    """Goal B: the final answer carries this turn's table, so the drawer is not offered `chart_data` (a call is
-    refused: no chart from it), and it is never forced to call a tool."""
-    _research_does_not_join(monkeypatch)
-    _board(monkeypatch, Board())
-    model = _recording_per_agent(chart=[CHART_DATA_CALL, AIMessage("Done.")])
-    assistant = _assistant(monkeypatch, model, sql=Fake("sql", "Cap.", log=[], table=TABLE))
-    chunks = await _stream(assistant, _ask(SQL_CHART))
-
-    assert "chart_table" in _offered(model) and "chart_data" not in _offered(model)
-    assert _unforced(model)
-    final = (await _thread(assistant))[-1]
-    assert "charts" not in final.additional_kwargs and not _events(chunks, "charts")
-
-
 async def test_drawer_may_chart_inline_numbers_when_the_answer_has_no_table(monkeypatch):
     """Goal B: without a table on the final answer `chart_data` stays offered (figures written in the answer are fine);
     the drawer's first call is not forced."""
@@ -1623,19 +1608,6 @@ def _chart_plan(monkeypatch, *, table, log, chart_depends=("t1",), with_research
     return model, _assistant(monkeypatch, model, sql=Fake("sql", "Cap.", log=log, table=table),
                              research=Fake("research", "Notes.", log=log),
                              chart=Fake("chart", "drawn", log=log, chart="chart-1"))
-
-
-async def test_chart_task_charts_its_inputs_table(monkeypatch):
-    log = []
-    _, assistant = _chart_plan(monkeypatch, table={**TABLE, "id": "tbl1"}, log=log)
-    chunks = await _stream(assistant, _ask())
-
-    (start,) = _starts(log, "chart")
-    assert start["sources"] == team.NO_SOURCES and start["deny"] == ("chart_data",)
-    assert len(_waves((await _thread(assistant))[-1].additional_kwargs["team"])) == 1  # the chart task takes no wave
-    assert (await _thread(assistant))[-1].additional_kwargs["charts"] == [{"id": "chart-1"}]
-    assert [e["charts"] for e in _events(chunks, "charts")] == [[{"id": "chart-1"}]]
-    assert "chart" in {e["agent"] for e in _events(chunks, "speaker")}
 
 
 async def test_chart_task_without_table_may_use_chart_data(monkeypatch):

@@ -895,6 +895,28 @@ async def test_drawer_charts_figures_from_the_answer_text_when_the_tables_hold_o
     assert final.additional_kwargs.get("charts")
 
 
+async def test_write_up_is_written_by_the_orchestrator_not_the_joined_specialist_texts(monkeypatch):
+    """Regression test for the live chat (portfolio: docs, then sql, then a chart task), currently failing. The
+    write-up is the orchestrator's job: it must not be able to hand the thread off (the final answer was then just the
+    specialists' texts joined, byte for byte, with no analysis), and its answer comes out as the reply plus the chart."""
+    _plan(monkeypatch, Plan(tasks=[Task(id="t1", agent="docs", goal="read the portfolio"),
+                                   Task(id="t2", agent="sql", goal="check prices", depends_on=["t1"]),
+                                   Task(id="t3", agent="chart", goal="draw the split", depends_on=["answer"])]))
+    _board(monkeypatch, Board())
+    handoff = AIMessage("", tool_calls=[{"name": "handoff", "args": {"agent": "chart"}, "id": "h1"}])
+    model = per_agent(orchestrator=[handoff, AIMessage("Analysis of the portfolio.")], chart=DRAW)
+    assistant = _assistant(monkeypatch, model, documents=("portfolio.docx",), docs=Fake("docs", "Holdings.", log=[]),
+                           sql=Fake("sql", "Prices.", log=[], table=TABLE), research=Fake("research", "Web.", log=[]))
+    await _stream(assistant, _ask("analyse my portfolio, check it against the database and draw its split"))
+
+    final = (await _thread(assistant))[-1]
+    assert final.text != "Holdings.\n\nPrices."
+    assert final.text == "Analysis of the portfolio."
+    assert final.additional_kwargs.get("charts")
+    writeup = next(i for i, prompt in enumerate(model.prompts) if any("TEAM RESULT" in m.text for m in prompt))
+    assert "handoff" not in {t["function"]["name"] for t in model.tools[writeup]}
+
+
 async def test_drawer_failure_keeps_the_answer(monkeypatch):
     _board(monkeypatch, Board())
     model = per_agent(orchestrator=[AIMessage("Final.")])

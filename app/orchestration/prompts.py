@@ -32,7 +32,7 @@ REPLY_LANGUAGE = """
 
 REPLY LANGUAGE for this message: {language}, whatever language the stored memories or earlier replies use."""
 
-# Appended to the orchestrator's prompt, after the memories, while the snapshot says the user is still being
+# Ends the orchestrator's tail note on the first turn of a chat while the snapshot says the user is still being
 # onboarded (`context.bootstrap`). Never formatted. Specialists never get it.
 BOOTSTRAP_SECTION = """
 

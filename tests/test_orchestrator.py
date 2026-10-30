@@ -374,31 +374,54 @@ async def test_team_write_up_gets_compose_rules_in_the_tail(monkeypatch):
     assert "CITATIONS" not in model.prompts[0][0].content
 
 
-async def _run_bootstrap(assistant, message: str, bootstrap: bool) -> None:
+async def _run_bootstrap(assistant, message: str, bootstrap: bool, earlier: tuple = ()) -> None:
     stream = assistant.astream(
-        {"messages": [HumanMessage(message)]}, CONFIG, context=AgentContext(user_id="u1", bootstrap=bootstrap),
+        {"messages": [*earlier, HumanMessage(message)]}, CONFIG,
+        context=AgentContext(user_id="u1", bootstrap=bootstrap),
         stream_mode=["messages", "updates"], subgraphs=True,
     )
     [event async for event in _events_from(stream)]
 
 
-async def test_bootstrap_section_only_when_context_says_so(monkeypatch):
-    for bootstrap in (True, False):
-        model = per_agent(orchestrator=[AIMessage("Roses are red.")])
-        await _run_bootstrap(_assistant(monkeypatch, model), "write a short poem", bootstrap)
-        assert (BOOTSTRAP_SECTION in model.prompts[0][0].content) is bootstrap
-
-
-async def test_bootstrap_system_prompt_identical_across_calls(monkeypatch):
-    model = per_agent(orchestrator=[
+def _asks_sql():
+    return per_agent(orchestrator=[
         AIMessage("", tool_calls=[{"name": "ask_sql", "args": {"question": "AAPL cap?"}, "id": "s"}]),
         AIMessage("3T."),
     ], sql=[AIMessage("Cap 3T.")])
+
+
+async def test_bootstrap_ends_the_tail_on_the_first_turn(monkeypatch):
+    model = _asks_sql()
     await _run_bootstrap(_assistant(monkeypatch, model), "What is the AAPL market cap and what does handbook.pdf say?", True)
-    prompts = [p[0].content for p in model.prompts if "You coordinate the team." in p[0].content]
-    assert len(prompts) == 2
-    assert prompts[0] == prompts[1]
-    assert BOOTSTRAP_SECTION in prompts[0]
+    calls = [p for p in model.prompts if "You coordinate the team." in p[0].content]
+    assert len(calls) == 2
+    for prompt in calls:
+        tail = tail_of(prompt)
+        assert tail.endswith(BOOTSTRAP_SECTION)
+        assert "REPLY LANGUAGE" in tail
+
+
+async def test_no_bootstrap_on_a_later_turn(monkeypatch):
+    model = per_agent(orchestrator=[AIMessage("Roses are red.")])
+    earlier = (HumanMessage("hello"), AIMessage("Hi there."))
+    await _run_bootstrap(_assistant(monkeypatch, model), "write a short poem", True, earlier)
+    assert BOOTSTRAP_SECTION not in tail_of(model.prompts[0])
+
+
+async def test_no_bootstrap_when_context_says_no(monkeypatch):
+    model = per_agent(orchestrator=[AIMessage("Roses are red.")])
+    await _run_bootstrap(_assistant(monkeypatch, model), "write a short poem", False)
+    assert BOOTSTRAP_SECTION not in tail_of(model.prompts[0])
+
+
+async def test_system_prompt_same_with_and_without_bootstrap(monkeypatch):
+    systems = []
+    for bootstrap in (True, False):
+        model = per_agent(orchestrator=[AIMessage("Roses are red.")])
+        await _run_bootstrap(_assistant(monkeypatch, model), "write a short poem", bootstrap)
+        systems.append(model.prompts[0][0].content)
+    assert systems[0] == systems[1]
+    assert BOOTSTRAP_SECTION not in systems[0]
 
 
 async def test_specialists_never_get_bootstrap(monkeypatch):

@@ -15,11 +15,12 @@ Each model request is laid out stable-first:
 | 3 | AGENTS | each agent's `*_SYSTEM`, `LANGUAGE_RULE`, `MEMORY_RULE` | on deploy |
 | 4 | USER | account name + profile facts, from the snapshot | per snapshot |
 | 5 | MEMORY | other facts + recent chats, from the snapshot | per snapshot |
-| 6 | BOOTSTRAP | `BOOTSTRAP_SECTION`, orchestrator only, when the snapshot says so | per snapshot |
-| 7 | history | thread messages | grows |
-| 8 | tail note | part A | every call |
+| 6 | history | thread messages | grows |
+| 7 | tail note | part A; plus BOOTSTRAP_SECTION on the orchestrator's first turn of an onboarding chat | every call |
 
-Layers 2 to 6 form the system prompt and stay byte-identical across the calls of one chat.
+Layers 2 to 5 form the system prompt and stay byte-identical across the calls of one chat.
+
+Amended 2026-10-30 after the bench_chat after-run: BOOTSTRAP first sat in the system prompt after MEMORY, and deepseek/deepseek-chat never asked the question there. It moved to the tail note; see section 3.
 
 ## Out of scope
 
@@ -87,9 +88,9 @@ Storage: `conversations.bootstrap_ran boolean not null default false`, added in 
 Stop rules:
 
 - Across chats: once role and goal are both known, the next snapshot turns BOOTSTRAP off; after `BOOTSTRAP_CHATS` conversations where it ran, new conversations go without it even with an empty profile.
-- Within a chat: the snapshot stays frozen, so the text tells the model to ask only when no earlier reply in this chat asked.
+- Within a chat: code adds the text only on the orchestrator's first turn of the chat, so it is asked at most once per chat.
 
-Prompt: `BOOTSTRAP_SECTION` in `app/orchestration/prompts.py`. The orchestrator's `build_agent(..., prompt_extra=...)` returns it when `context.bootstrap` is set and `""` otherwise, so it comes after the snapshot and stays fixed for the chat. Specialists never get it. Draft (final wording via `writing-llm-document`):
+Prompt: `BOOTSTRAP_SECTION` in `app/orchestration/prompts.py`, appended by `compose_section` at the end of the orchestrator's tail note when `context.bootstrap` is set and the request holds no `AIMessage` before the latest visible user message (every call of the chat's first turn). It is not in the system prompt, so the system prompt is the same for onboarding and other users. Specialists never get it. A chat whose first turn a specialist answered is not asked; it still counts toward `BOOTSTRAP_CHATS`. Draft (final wording via `writing-llm-document`):
 
 > GETTING TO KNOW THE USER: We don't know yet what the user does or what they want from us. When you write the reply yourself, answer their message fully first, then end with one short, friendly question about whichever is missing from YOU ARE TALKING TO: their work or role, or what they want our help with (their investment goal if the chat is about stocks). Skip the question when an earlier reply in this chat already asked one, when the user declined, or when they're upset or in a hurry. Never ask instead of answering.
 
@@ -106,7 +107,8 @@ Tests, written from this spec:
 - `USER_SECTION` renders the profile and the language-preference sentence; `MEMORIES_SECTION` no longer has that sentence.
 - `requires_db`, BOOTSTRAP decision: on for an empty profile; still on with only a role or only a goal; off with both; off after `BOOTSTRAP_CHATS` other conversations ran it; stays on when the same conversation's snapshot is rebuilt; off with `BOOTSTRAP_CHATS=0`; `bootstrap_ran` survives `clear_snapshots`; another user's conversations do not count.
 - A saved snapshot without `profile` is rebuilt.
-- The orchestrator's system prompt contains `BOOTSTRAP_SECTION` only when `context.bootstrap` is set and is byte-identical across two calls of one message; specialists never contain it; the model-call count of a message is the same with and without it.
+- The orchestrator's tail note ends with `BOOTSTRAP_SECTION` (and keeps `REPLY LANGUAGE`) on every call of a chat's first turn when `context.bootstrap` is set; not on a later turn, nor when `bootstrap` is off. The orchestrator's system prompt is byte-identical with and without `bootstrap` and never contains `BOOTSTRAP_SECTION`; specialists never contain it; the model-call count of a message is the same with and without it.
+- bench_chat: only the bootstrap scenario runs with onboarding; every other scenario has bootstrap off.
 
 Measurement (`bench_chat` spends free quota; ask the user before each run):
 

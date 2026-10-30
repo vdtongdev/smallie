@@ -48,6 +48,7 @@ from app.core.prompts import CALL_NOTE, LANGUAGE_RULE, MEMORY_RULE, reply_langua
 from app.orchestration.prompts import (
     ALREADY_ASKED,
     ATTEMPT_MESSAGE,
+    BOOTSTRAP_SECTION,
     COMPOSE_SECTION,
     FINDINGS_MESSAGE,
     MENTIONS_NOTE,
@@ -200,6 +201,11 @@ def compose_section(request: ModelRequest) -> str:
     return notes + tables + COMPOSE_SECTION.format(formats=FORMATS, language=reply_language(question))
 
 
+def bootstrap_section(request: ModelRequest) -> str:
+    """The onboarding question, while the snapshot says the user is still being onboarded."""
+    return BOOTSTRAP_SECTION if request.runtime.context.bootstrap else ""
+
+
 def agent_lines(specs: Sequence[AgentSpec]) -> str:
     lines = []
     for spec in specs:
@@ -257,6 +263,7 @@ def build_orchestrator(specs: Sequence[AgentSpec], agents: Mapping[str, Runnable
         ),
         tools=tools,
         max_model_calls=settings.orchestrator_max_model_calls,
+        prompt_extra=bootstrap_section,
         tail=compose_section,
         last_call_writes=False,
         middleware=[make_prefer_handoff(targets, frozenset(

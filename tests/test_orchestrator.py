@@ -12,6 +12,7 @@ from app.api.routes_chat import _events_from
 from app.core.memory import TEAM_MODE, AgentContext
 from app.core.prompts import CALL_NOTE
 from app.orchestration import orchestrator as orchestrator_module
+from app.orchestration.prompts import BOOTSTRAP_SECTION
 from app.orchestration.graph import build_assistant
 from tests.conftest import local_agents
 from tests.scripted import per_agent
@@ -371,3 +372,50 @@ async def test_team_write_up_gets_compose_rules_in_the_tail(monkeypatch):
     [event async for event in _events_from(stream)]
     assert "CITATIONS" in tail_of(model.prompts[0])
     assert "CITATIONS" not in model.prompts[0][0].content
+
+
+async def _run_bootstrap(assistant, message: str, bootstrap: bool) -> None:
+    stream = assistant.astream(
+        {"messages": [HumanMessage(message)]}, CONFIG, context=AgentContext(user_id="u1", bootstrap=bootstrap),
+        stream_mode=["messages", "updates"], subgraphs=True,
+    )
+    [event async for event in _events_from(stream)]
+
+
+async def test_bootstrap_section_only_when_context_says_so(monkeypatch):
+    for bootstrap in (True, False):
+        model = per_agent(orchestrator=[AIMessage("Roses are red.")])
+        await _run_bootstrap(_assistant(monkeypatch, model), "write a short poem", bootstrap)
+        assert (BOOTSTRAP_SECTION in model.prompts[0][0].content) is bootstrap
+
+
+async def test_bootstrap_system_prompt_identical_across_calls(monkeypatch):
+    model = per_agent(orchestrator=[
+        AIMessage("", tool_calls=[{"name": "ask_sql", "args": {"question": "AAPL cap?"}, "id": "s"}]),
+        AIMessage("3T."),
+    ], sql=[AIMessage("Cap 3T.")])
+    await _run_bootstrap(_assistant(monkeypatch, model), "What is the AAPL market cap and what does handbook.pdf say?", True)
+    prompts = [p[0].content for p in model.prompts if "You coordinate the team." in p[0].content]
+    assert len(prompts) == 2
+    assert prompts[0] == prompts[1]
+    assert BOOTSTRAP_SECTION in prompts[0]
+
+
+async def test_specialists_never_get_bootstrap(monkeypatch):
+    model = per_agent(orchestrator=[_call("handoff", {"agent": "sql"})], sql=[AIMessage("Apple's market cap is $3T.")])
+    await _run_bootstrap(_assistant(monkeypatch, model), "how big is the most valuable tech company?", True)
+    specialist = [p[0].content for p in model.prompts if "the team's data analyst" in p[0].content]
+    assert specialist
+    assert all(BOOTSTRAP_SECTION not in system for system in specialist)
+
+
+async def test_bootstrap_adds_no_model_call(monkeypatch):
+    counts = []
+    for bootstrap in (True, False):
+        model = per_agent(orchestrator=[
+            AIMessage("", tool_calls=[{"name": "ask_sql", "args": {"question": "AAPL cap?"}, "id": "s"}]),
+            AIMessage("3T."),
+        ], sql=[AIMessage("Cap 3T.")])
+        await _run_bootstrap(_assistant(monkeypatch, model), "What is the AAPL market cap and what does handbook.pdf say?", bootstrap)
+        counts.append(len(model.prompts))
+    assert counts[0] == counts[1]

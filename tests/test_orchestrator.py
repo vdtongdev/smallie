@@ -141,10 +141,10 @@ async def test_delegations_run_in_parallel_and_only_the_write_up_streams(monkeyp
     assert _streamed(events) == "The handbook says $1B [handbook.pdf, p. 2]; the database says $400B."
 
     # The specialists only saw the orchestrator's self-contained question.
-    questions = {p[-1].content for p in model.prompts if "orchestrator" not in p[0].content and "smallie" not in p[0].content}
+    questions = {p[-1].content for p in model.prompts if "orchestrator" not in p[0].content and "You coordinate the team." not in p[0].content}
     assert questions == {"What revenue does the handbook state?", "What is AAPL's revenue?"}
     # The write-up call got the writing rules; the deciding call didn't.
-    orchestrator_prompts = [p for p in model.prompts if "You are smallie" in p[0].content]
+    orchestrator_prompts = [p for p in model.prompts if "You coordinate the team." in p[0].content]
     assert "CITATIONS" not in tail_of(orchestrator_prompts[0])
     assert "CITATIONS" in tail_of(orchestrator_prompts[1])
     # Only the final answer is kept in the thread.
@@ -205,7 +205,7 @@ async def test_a_message_for_two_specialists_is_asked_of_both_and_combined(monke
     assert [e["name"] for e in events if e["type"] == "agent"] == ["orchestrator"]
     assert [e["name"] for e in events if e["type"] == "tool_call"] == ["ask_docs", "ask_sql"]
     assert _streamed(events).startswith("The handbook mentions Apple")
-    first_prompt = tail_of(next(p for p in model.prompts if "You are smallie" in p[0].content))
+    first_prompt = tail_of(next(p for p in model.prompts if "You coordinate the team." in p[0].content))
     assert "touches the data of several specialists: docs, sql" in first_prompt
     messages = await _thread(assistant)
     assert [(type(m), m.name) for m in messages] == [(HumanMessage, None), (AIMessage, "orchestrator")]
@@ -292,7 +292,7 @@ async def test_the_orchestrator_charts_a_specialist_table_and_keeps_it_on_its_an
     assert [e["name"] for e in events if e["type"] == "tool_call"].count("chart_table") == 1
     assert len(_charts(events)) == 1
     # The write-up call listed the sql table so it could chart it by id.
-    writer_prompts = [tail_of(p) for p in model.prompts if "You are smallie" in p[0].content]
+    writer_prompts = [tail_of(p) for p in model.prompts if "You coordinate the team." in p[0].content]
     assert "tabcdef: 2 rows" in writer_prompts[1]
     # Only the answer enters the thread, carrying the chart (for reload) and the table (for "plot that").
     messages = await _thread(assistant)
@@ -356,7 +356,7 @@ async def test_composing_call_shares_the_system_prompt(monkeypatch):
     )
     assistant = _assistant(monkeypatch, model)
     await _run(assistant, "what is Apple's revenue?")
-    orchestrator_prompts = [p for p in model.prompts if "You are smallie" in p[0].content]
+    orchestrator_prompts = [p for p in model.prompts if "You coordinate the team." in p[0].content]
     assert len(orchestrator_prompts) == 2
     assert orchestrator_prompts[0][0].content == orchestrator_prompts[1][0].content
 

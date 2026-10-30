@@ -30,3 +30,34 @@ async def test_no_profile_no_profile_lines(monkeypatch):
     prompt = await _system_prompt(monkeypatch, user="Ann (username: ann)", profile="")
     assert "- User" not in prompt
     assert "language preference" not in prompt
+
+
+def test_user_facing_agents_start_with_soul():
+    from app.agents.chart.prompts import CHART_SYSTEM
+    from app.agents.docs.prompts import DOCS_SYSTEM
+    from app.agents.sql.prompts import SQL_SYSTEM
+    from app.core.prompts import SOUL
+    from app.orchestration.prompts import ORCHESTRATOR_SYSTEM
+
+    for system in (ORCHESTRATOR_SYSTEM, DOCS_SYSTEM, SQL_SYSTEM, CHART_SYSTEM):
+        assert system.startswith(SOUL)
+
+
+def test_researcher_has_no_soul():
+    from app.agents.research.prompts import RESEARCHER_SYSTEM
+    from app.core.prompts import SOUL
+
+    assert SOUL not in RESEARCHER_SYSTEM
+
+
+def test_soul_has_no_braces_and_ends_with_precedence():
+    from app.core.prompts import SOUL
+
+    assert "{" not in SOUL and "}" not in SOUL
+    assert "precedence" in SOUL.rstrip().split(". ")[-1]
+
+
+def test_orchestrator_no_longer_says_one_assistant():
+    from app.orchestration.prompts import ORCHESTRATOR_SYSTEM
+
+    assert "answer as one assistant" not in ORCHESTRATOR_SYSTEM

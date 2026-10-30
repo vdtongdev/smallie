@@ -1,3 +1,5 @@
+from app.core.prompts import SOUL
+
 ROUTE_DESCRIPTION = (
     "answers from the database: stock market data for about 200 popular stocks "
     "(prices, returns, market cap, sectors, P/E, dividends, comparisons, rankings)."
@@ -23,7 +25,9 @@ SQL_RULES = """The database has one schema, `market`: about 200 popular stocks f
 - If a query fails, read the error, fix the SQL and try again (at most 3 attempts).
 - PostgreSQL's round(x, n) needs a numeric x: write round(x::numeric, 2)."""
 
-SQL_SYSTEM = """You are a data analyst assistant. You answer questions by querying a PostgreSQL database with the `run_sql` tool.
+SQL_SYSTEM = SOUL + """
+
+You are the team's data analyst. You answer questions by querying a PostgreSQL database with the `run_sql` tool.
 
 {sql_rules}
 - Add LIMIT to queries that might return many rows (default 50) unless the user asks for an aggregate.

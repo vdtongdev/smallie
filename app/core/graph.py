@@ -35,6 +35,9 @@ FUNCTIONAL = frozenset({"has_name", "lives_in", "works_at", "has_role", "risk_to
                         "prefers_language"})
 # The relations EXTRACT_PROMPT asks for. Between two nodes, one of these wins over an invented one.
 STANDARD = FUNCTIONAL | {"holds", "interested_in", "has_skill", "studied_at", "has_goal", "prefers"}
+# Relations that describe the user, in the order the prompt lists them (recall_profile).
+PROFILE: tuple[str, ...] = ("has_name", "lives_in", "works_at", "has_role", "risk_tolerance", "investment_horizon",
+                            "prefers_language", "has_goal", "prefers")
 # Wordings free models used for a standard relation (seen in real extractions).
 ALIASES = {
     "is_named": "has_name", "named": "has_name", "is_called": "has_name", "name_is": "has_name",
@@ -281,10 +284,20 @@ def _line(row) -> str:
     return f"{row.subject} {row.relation.replace('_', ' ')} {row.object}"
 
 
-def recall_facts(user_id: str, limit: int = RECALL_FACTS) -> str:
-    """The newest facts about the user, as a bullet list for the prompt."""
+def recall_profile(user_id: str, limit: int = RECALL_FACTS) -> tuple[str, frozenset[str]]:
+    """The user's profile facts as a bullet list in PROFILE order, and the profile relations present."""
     with get_engine().connect() as conn:
-        rows = conn.execute(_facts_query(user_id).where(or_(_S.c.kind == "user", _T.c.kind == "user"))
+        rows = conn.execute(_facts_query(user_id).where(or_(_S.c.kind == "user", _T.c.kind == "user"),
+                                                        graph_edges.c.relation.in_(PROFILE)).limit(limit)).all()
+    rows = sorted(rows, key=lambda r: (PROFILE.index(r.relation), r.object))
+    return "\n".join(f"- {_line(r)}" for r in rows), frozenset(r.relation for r in rows)
+
+
+def recall_facts(user_id: str, limit: int = RECALL_FACTS) -> str:
+    """The newest facts about the user other than the profile ones, as a bullet list for the prompt."""
+    with get_engine().connect() as conn:
+        rows = conn.execute(_facts_query(user_id).where(or_(_S.c.kind == "user", _T.c.kind == "user"),
+                                                        graph_edges.c.relation.not_in(PROFILE))
                             .order_by(graph_edges.c.updated_at.desc()).limit(limit)).all()
     return "\n".join(f"- {_line(r)}" for r in rows)
 

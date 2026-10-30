@@ -113,20 +113,47 @@ def test_one_fact_is_kept_once_whatever_it_is_called(make_user, embeddings):
 
 
 @requires_db
+def test_recall_profile_lists_only_profile_relations_in_profile_order(make_user, embeddings):
+    user = make_user()
+    graph.save_facts(user, [Fact(subject="User", relation="has_goal", object="Retire early"),
+                            Fact(subject="User", relation="works_at", object="Acme"),
+                            Fact(subject="User", relation="holds", object="FPT")], "chat")
+    assert graph.recall_profile(user) == ("- User works at Acme\n- User has goal Retire early",
+                                          frozenset({"works_at", "has_goal"}))
+
+
+@requires_db
+def test_recall_facts_excludes_profile_relations(make_user, embeddings):
+    user = make_user()
+    graph.save_facts(user, [Fact(subject="User", relation="has_goal", object="Retire early"),
+                            Fact(subject="User", relation="works_at", object="Acme"),
+                            Fact(subject="User", relation="holds", object="FPT")], "chat")
+    assert graph.recall_facts(user) == "- User holds FPT"
+
+
+@requires_db
+def test_recall_profile_is_scoped_to_the_user(make_user, embeddings):
+    alice, bob = make_user(), make_user()
+    graph.save_facts(bob, [Fact(subject="User", relation="has_role", object="Analyst")], "chat")
+    assert graph.recall_profile(alice) == ("", frozenset())
+    assert graph.recall_profile(bob) == ("- User has role Analyst", frozenset({"has_role"}))
+
+
+@requires_db
 def test_facts_are_scoped_per_user(make_user, embeddings):
     alice, bob, carol = make_user(), make_user(), make_user()
     graph.save_facts(alice, [Fact(subject="User", relation="works_at", object="Acme")], "chat")
     graph.save_facts(bob, [Fact(subject="I", relation="lives_in", object="Hanoi")], "chat")
 
-    assert graph.recall_facts(alice) == "- User works at Acme"
-    assert graph.recall_facts(bob) == "- User lives in Hanoi"
-    assert graph.recall_facts(carol) == ""
+    assert graph.recall_profile(alice)[0] == "- User works at Acme"
+    assert graph.recall_profile(bob)[0] == "- User lives in Hanoi"
+    assert graph.recall_profile(carol)[0] == ""
     assert "Acme" not in graph.search_facts(bob, "Acme")
     # Another user's fact id deletes nothing.
     alice_edge = graph.list_facts(alice)[0]["id"]
     assert not graph.delete_fact(bob, alice_edge)
     assert graph.delete_fact(alice, alice_edge)
-    assert graph.recall_facts(alice) == "" and node_names(alice) == []
+    assert graph.recall_profile(alice)[0] == "" and node_names(alice) == []
 
 
 @requires_db
@@ -151,7 +178,7 @@ def test_single_valued_relations_replace_the_old_value(make_user, embeddings):
     graph.save_facts(user, [Fact(subject="User", relation="holds", object="AAA"),
                             Fact(subject="User", relation="holds", object="BBB")], "chat")
     assert node_names(user) == ["AAA", "BBB", "Da Nang"]  # Hanoi's node went with its edge
-    assert "lives in Da Nang" in graph.recall_facts(user)
+    assert "lives in Da Nang" in graph.recall_profile(user)[0]
 
 
 @requires_db
@@ -188,7 +215,7 @@ def test_deleting_files_chats_and_accounts(make_user, embeddings):
     graph.drop_orphans(user)
     assert node_names(user) == ["Acme"]  # still used by the chat fact
     assert node_names(user, "file") == []
-    assert graph.recall_facts(user) == "- User works at Acme"  # deleting chat c1 would not touch it
+    assert graph.recall_profile(user)[0] == "- User works at Acme"  # deleting chat c1 would not touch it
 
     with get_engine().begin() as conn:
         conn.execute(delete(users).where(users.c.id == user))
@@ -223,7 +250,7 @@ def test_search_follows_the_graph_to_the_linked_file(make_user, embeddings, chun
     graph.save_card(alice, contract, "Contract: supply deal", ["Acme"])
     # The cross question: the user's employer, then the files that mention it.
     graph.save_facts(alice, [Fact(subject="User", relation="works_at", object="Acme")], "chat")
-    assert "User works at Acme" in graph.recall_facts(alice)
+    assert "User works at Acme" in graph.recall_profile(alice)[0]
 
     scoped = search_with_graph(alice, "termination clause", entity="Acme")
     assert "contract.pdf" in scoped and "resume.pdf" not in scoped

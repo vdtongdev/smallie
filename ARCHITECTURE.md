@@ -224,6 +224,7 @@ The "front door" agent. Answers general questions itself, asks specialists as to
   - the user's file names + summaries
   - the agent that gave the previous answer
   - which agents the message mentions, when it mentions several
+  - in team mode, `TEAM_VOICE`: say "we" for the team, "I" only for a step you alone took
 
 ### Tool Set
 

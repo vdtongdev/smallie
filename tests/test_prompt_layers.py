@@ -61,3 +61,34 @@ def test_orchestrator_no_longer_says_one_assistant():
     from app.orchestration.prompts import ORCHESTRATOR_SYSTEM
 
     assert "answer as one assistant" not in ORCHESTRATOR_SYSTEM
+
+
+async def _request(monkeypatch, **context) -> list:
+    model = scripted(AIMessage("ok"))
+    monkeypatch.setattr(factory, "get_chat_model", lambda *a, **k: model)
+    agent = factory.build_agent(name="t", system_prompt="x", tools=[])
+    await agent.ainvoke({"messages": [HumanMessage("go")]}, context=AgentContext(user_id="u", **context))
+    return model.prompts[0]
+
+
+async def test_team_mode_call_note_has_team_voice(monkeypatch):
+    from app.core.memory import TEAM_MODE
+    from app.core.prompts import CALL_NOTE, TEAM_VOICE
+
+    last = (await _request(monkeypatch, agent=TEAM_MODE))[-1]
+    assert isinstance(last, HumanMessage) and last.name == CALL_NOTE
+    assert TEAM_VOICE in last.content
+
+
+async def test_one_on_one_call_note_has_no_team_voice(monkeypatch):
+    from app.core.prompts import TEAM_VOICE
+
+    assert not any(TEAM_VOICE in str(m.content) for m in await _request(monkeypatch))
+
+
+async def test_team_voice_leaves_system_prompt_unchanged(monkeypatch):
+    from app.core.memory import TEAM_MODE
+
+    team = (await _request(monkeypatch, agent=TEAM_MODE))[0].content
+    alone = (await _request(monkeypatch))[0].content
+    assert team == alone

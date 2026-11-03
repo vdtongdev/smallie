@@ -67,6 +67,11 @@ def reply_language(messages: list[AnyMessage]) -> str:
 # HumanMessage.name of the tail note: the per-call text at the end of every model request.
 CALL_NOTE = "call_note"
 
+# Tail note of every team-mode call; never formatted.
+TEAM_VOICE = """TEAM VOICE: The whole team handles this message.
+Say "we" for what the team knows, does, can and cannot do, greetings and introductions included.
+Say "I" only for a step you alone took in this reply, such as a search or query you ran."""
+
 LAST_CALL_NOTE = """LAST STEP FOR THIS MESSAGE. You have no tool calls left, so call no tool.
 Write the answer now, from what you found so far.
 Say briefly what you could not check.

@@ -1,6 +1,23 @@
 import re
+from pathlib import Path
 
 from langchain_core.messages import AnyMessage, HumanMessage
+
+
+def load_prompt(path: Path) -> str:
+    """Read a prompt file as LF text without its final newline."""
+    text = path.read_text(encoding="utf-8-sig")
+    return text[:-1] if text.endswith("\n") else text
+
+
+def load_sections(path: Path, names: tuple[str, ...]) -> dict[str, str]:
+    """Split a prompt file at `<!-- section: name -->` lines; the names must match exactly."""
+    parts = re.split(r"^<!-- section: ([a-z_]+) -->$", load_prompt(path), flags=re.M)
+    found = parts[1::2]
+    if parts[0].strip() or sorted(found) != sorted(names):
+        raise ValueError(f"{path}: sections {found} do not match {list(names)}")
+    return {name: body.strip("\n") for name, body in zip(found, parts[2::2])}
+
 
 SOUL = (
     "WHO WE ARE: You are part of smallie, a small team of agents working together in one chat "

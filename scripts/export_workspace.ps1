@@ -51,7 +51,8 @@ function Copy-Rel([string]$srcRoot, [string]$rel, [string]$dstRoot) {
     $dst = Join-Path $dstRoot $rel
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dst) | Out-Null
     if (Test-Path -LiteralPath $src -PathType Container) {
-        Copy-Item -LiteralPath $src -Destination $dst -Recurse -Force
+        New-Item -ItemType Directory -Force -Path $dst | Out-Null
+        Copy-Item -Path (Join-Path $src "*") -Destination $dst -Recurse -Force
     } else {
         Copy-Item -LiteralPath $src -Destination $dst -Force
     }
@@ -60,24 +61,30 @@ function Copy-Rel([string]$srcRoot, [string]$rel, [string]$dstRoot) {
 # --- git facts ---
 $worktrees = @()
 $cur = $null
-foreach ($line in (git -C $Repo worktree list --porcelain)) {
+$wtLines = git -C $Repo worktree list --porcelain
+if ($LASTEXITCODE -ne 0) { Write-Error "git worktree list failed in $Repo" }
+foreach ($line in $wtLines) {
     if ($line -like "worktree *") {
         $cur = [ordered]@{ path = $line.Substring(9).Replace("/", "\"); branch = $null; head = $null }
         $worktrees += , $cur
     } elseif ($line -like "HEAD *") { $cur.head = $line.Substring(5)
     } elseif ($line -like "branch *") { $cur.branch = $line.Substring(7) -replace '^refs/heads/', '' }
 }
-if ($LASTEXITCODE -ne 0) { Write-Error "git worktree list failed in $Repo" }
 $mainPath = $worktrees[0].path
 $slug = Get-ClaudeSlug $mainPath
 $mainCommit = (git -C $mainPath rev-parse main) -join ""
+if ($LASTEXITCODE -ne 0) { Write-Error "git rev-parse main failed in $mainPath" }
 
 $branches = @()
-foreach ($line in (git -C $Repo for-each-ref --format="%(refname:short)|%(upstream:short)" refs/heads)) {
+$refLines = git -C $Repo for-each-ref --format="%(refname:short)|%(upstream:short)" refs/heads
+if ($LASTEXITCODE -ne 0) { Write-Error "git for-each-ref failed in $Repo" }
+foreach ($line in $refLines) {
     $name, $up = $line -split "\|", 2
     $ahead = $null; $behind = $null
     if ($up) {
-        $counts = ((git -C $Repo rev-list --left-right --count "$name...$up") -join "") -split "\s+"
+        $countOut = git -C $Repo rev-list --left-right --count "$name...$up"
+        if ($LASTEXITCODE -ne 0) { Write-Error "git rev-list failed for $name...$up" }
+        $counts = ($countOut -join "") -split "\s+"
         $ahead = [int]$counts[0]; $behind = [int]$counts[1]
     }
     $branches += [ordered]@{ name = $name; upstream = $up; ahead = $ahead; behind = $behind }
@@ -89,8 +96,12 @@ try {
     # --- 1. repo/: untracked and ignored files ---
     $skip = '(^|/)(\.venv|__pycache__|\.pytest_cache|\.codegraph|\.langgraph_api)(/|$)|^\.claude/worktrees(/|$)'
     $files = @()
-    $files += Split-Z (git -C $Repo -c core.quotepath=false ls-files -z --others --exclude-standard)
-    $files += Split-Z (git -C $Repo -c core.quotepath=false ls-files -z --others --ignored --exclude-standard)
+    $o1 = git -C $Repo -c core.quotepath=false ls-files -z --others --exclude-standard
+    if ($LASTEXITCODE -ne 0) { Write-Error "git ls-files (untracked) failed." }
+    $o2 = git -C $Repo -c core.quotepath=false ls-files -z --others --ignored --exclude-standard
+    if ($LASTEXITCODE -ne 0) { Write-Error "git ls-files (ignored) failed." }
+    $files += Split-Z $o1
+    $files += Split-Z $o2
     $files = $files | Where-Object { $_ -notmatch $skip } | Sort-Object -Unique
     Write-Host ("repo/: {0} untracked or ignored files" -f @($files).Count)
     foreach ($f in $files) { Copy-Rel $Repo ($f.TrimEnd("/").Replace("/", "\")) (Join-Path $stage "repo") }
@@ -100,7 +111,9 @@ try {
     foreach ($wt in $worktrees) {
         if ($wt.path -ieq $Repo) { continue }
         if (-not (Test-Path -LiteralPath $wt.path)) { continue }
-        $entries = Split-Z (git -C $wt.path -c core.quotepath=false status --porcelain -uall -z)
+        $statusOut = git -C $wt.path -c core.quotepath=false status --porcelain -uall -z
+        if ($LASTEXITCODE -ne 0) { Write-Error "git status failed in $($wt.path)" }
+        $entries = Split-Z $statusOut
         if (@($entries).Count -eq 0) { continue }
         $label = if ($wt.branch) { $wt.branch -replace '/', '-' } else { "detached-" + $wt.head.Substring(0, 7) }
         $dst = Join-Path $stage ("dirty\" + $label)

@@ -92,7 +92,13 @@ try {
         }
         foreach ($item in (Get-ChildItem -LiteralPath $csrc -Force)) {
             if ($item.Name -eq "projects") { continue }
-            Copy-Item -LiteralPath $item.FullName -Destination (Join-Path $ClaudeHome $item.Name) -Recurse -Force
+            $dst = Join-Path $ClaudeHome $item.Name
+            if ($item.PSIsContainer) {
+                New-Item -ItemType Directory -Force -Path $dst | Out-Null
+                if (Get-ChildItem -LiteralPath $item.FullName -Force) { Copy-Item -Path (Join-Path $item.FullName "*") -Destination $dst -Recurse -Force }
+            } else {
+                Copy-Item -LiteralPath $item.FullName -Destination $dst -Force
+            }
         }
         $newSlug = Get-ClaudeSlug $repo
         $projSrc = Join-Path $csrc ("projects\" + $manifest.sourceSlug)

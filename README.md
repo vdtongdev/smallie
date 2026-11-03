@@ -7,7 +7,7 @@ LangChain agents behind a FastAPI app with a small web UI. You type into one cha
 - **Charts**: say "chart", "plot" or "vẽ biểu đồ" for an interactive line, bar, area, pie or scatter chart of the stock data, or of numbers from another answer ("plot that").
 - **Research**: gathers facts from the web (Tavily), Wikipedia, arXiv, an optional external Postgres, the stock database and your files; the orchestrator writes them up with sources.
 
-All agents understand and reply in **English and Vietnamese**, remember each conversation, and keep long-term memories about you across chats (a knowledge graph per user in Postgres). The **Readme** button in the app header explains how to use it, with example questions.
+All agents understand and reply in **English and Vietnamese**, remember each conversation, and keep long-term memories about you across chats (a knowledge graph per user in Postgres). New accounts are asked for their role and goal in their first chats. A **Usage** button under the chat box shows the tokens and the cache hit rate of the last reply and of the chat. The **Readme** button in the app header explains how to use it, with example questions.
 
 ## Contents
 

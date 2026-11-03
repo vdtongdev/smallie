@@ -28,6 +28,11 @@ def test_unknown_or_unavailable_agent_is_dropped_with_its_dependents_edges():
     assert out[0]["status"] == "pending" and out[0]["origin"] == "plan"
 
 
+def test_no_plan_at_all_falls_back():
+    # the structured call returns None when the model makes no tool call; the spec says: a failed call or None -> fallback plan
+    assert validate_plan(None, ["sql"], 6) is None
+
+
 def test_empty_plan_means_no_specialist():
     assert validate_plan(Plan(), ["sql"], 6) == []
 

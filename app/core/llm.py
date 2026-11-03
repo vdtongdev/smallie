@@ -1,3 +1,4 @@
+import logging
 from functools import lru_cache
 from urllib.parse import urlparse
 
@@ -6,6 +7,8 @@ from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from app.core.config import OPENROUTER_BASE_URL, get_settings
 from app.core.endpoint import check_endpoint
 from app.core.model_settings import ModelSettings, load_settings
+
+log = logging.getLogger(__name__)
 
 # OpenRouter uses these optional headers to show the app name in its dashboard.
 _HEADERS = {"HTTP-Referer": "http://localhost:8000", "X-Title": "smallie"}
@@ -100,3 +103,11 @@ def get_embeddings() -> OpenAIEmbeddings:
         check_embedding_ctx_length=False,
         chunk_size=64,
     )
+
+
+async def ask_structured(model, schema, messages, config):
+    """One structured-output call; None when the model made no tool call (the caller decides what that means)."""
+    result = await model.with_structured_output(schema, method="function_calling").ainvoke(messages, config=config)
+    if result is None:
+        log.info("The model made no tool call for %s", schema.__name__)
+    return result

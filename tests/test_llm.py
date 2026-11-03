@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 
 from app.core import llm
@@ -73,3 +75,36 @@ def test_openrouter_headers_only_for_openrouter(user_settings):
     assert get_chat_model("u1").default_headers
     user_settings["value"] = ModelSettings("https://api.deepseek.com/v1", "m", "k")
     assert not get_chat_model("u1").default_headers
+
+
+def _structured(result):
+    """A model whose structured output returns `result` (or raises it); `calls` counts the model calls."""
+    calls, schemas = [], []
+
+    async def ainvoke(messages, config=None):
+        calls.append((messages, config))
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    model = SimpleNamespace(with_structured_output=lambda schema, method: schemas.append((schema, method)) or SimpleNamespace(ainvoke=ainvoke))
+    return model, calls, schemas
+
+
+async def test_ask_structured_returns_the_parsed_object_after_one_call():
+    model, calls, schemas = _structured(obj := object())
+    config = {"callbacks": []}
+    assert await llm.ask_structured(model, dict, ["m"], config) is obj
+    assert calls == [(["m"], config)] and schemas == [(dict, "function_calling")]
+
+
+async def test_ask_structured_returns_none_when_the_model_made_no_tool_call():
+    model, calls, _ = _structured(None)
+    assert await llm.ask_structured(model, dict, ["m"], {}) is None
+    assert len(calls) == 1
+
+
+async def test_ask_structured_lets_errors_propagate():
+    model, _, _ = _structured(RuntimeError("boom"))
+    with pytest.raises(RuntimeError, match="boom"):
+        await llm.ask_structured(model, dict, ["m"], {})

@@ -20,7 +20,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import aliased
 
 from app.core.db import documents, get_engine, graph_edges, graph_nodes
-from app.core.llm import get_chat_model, get_embeddings
+from app.core.llm import ask_structured, get_chat_model, get_embeddings
 from app.core.prompts import EXTRACT_PROMPT
 
 # Cosine similarity at which a new entity name is taken as one already in the graph. Measured on
@@ -417,8 +417,7 @@ async def extract_from_turns(user_id: str, turns: str, callbacks: list, source: 
         (f"Relations already in the user's graph: {', '.join(relations)}\n" if relations else "") + \
         ("\n" if files or relations else "") + turns
     model = await asyncio.to_thread(get_chat_model, user_id)
-    extractor = model.with_structured_output(FactUpdate, method="function_calling")
-    update_ = await extractor.ainvoke([SystemMessage(EXTRACT_PROMPT), HumanMessage(turn)], config={"callbacks": callbacks})
-    if not update_.facts:
+    update_ = await ask_structured(model, FactUpdate, [SystemMessage(EXTRACT_PROMPT), HumanMessage(turn)], {"callbacks": callbacks})
+    if update_ is None or not update_.facts:
         return 0
     return await asyncio.to_thread(save_facts, user_id, update_.facts, source, conversation_id)

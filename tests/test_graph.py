@@ -211,6 +211,38 @@ async def test_extract_facts_saves_what_the_model_returns(make_user, embeddings,
 
 
 @requires_db
+async def test_extract_facts_saves_nothing_when_the_model_made_no_tool_call(make_user, embeddings, monkeypatch):
+    user = make_user()
+
+    async def ainvoke(messages, config):
+        return None
+
+    monkeypatch.setattr(graph, "get_chat_model", lambda model=None: SimpleNamespace(
+        with_structured_output=lambda schema, method: SimpleNamespace(ainvoke=ainvoke)))
+    assert await graph.extract_facts(user, "q1: B", "You are balanced.", []) == 0
+    assert graph.list_facts(user) == []
+
+
+@requires_db
+async def test_document_card_is_skipped_when_the_model_made_no_tool_call(make_user, embeddings, monkeypatch, caplog):
+    from langgraph.store.memory import InMemoryStore
+
+    from app.features.documents import card as card_module
+
+    user = make_user()
+    document = add_document(user, "a.pdf")
+
+    async def ainvoke(messages, config):
+        return None
+
+    monkeypatch.setattr(card_module, "get_chat_model", lambda model=None: SimpleNamespace(
+        with_structured_output=lambda schema, method: SimpleNamespace(ainvoke=ainvoke)))
+    assert await card_module.write_card(InMemoryStore(), document, user, "a.pdf", [Document("Opening text.")]) is False
+    assert "Document card failed" not in caplog.text
+    assert node_names(user) == []
+
+
+@requires_db
 def test_deleting_files_chats_and_accounts(make_user, embeddings):
     user = make_user()
     contract = add_document(user, "contract.pdf")

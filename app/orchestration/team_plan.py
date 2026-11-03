@@ -55,8 +55,10 @@ def _acyclic(tasks: Sequence[dict]) -> bool:
     return True
 
 
-def validate_plan(plan: Plan, available: Sequence[str], max_tasks: int) -> list[dict] | None:
-    """Workspace tasks, [] for an empty plan, None when the caller must fall back."""
+def validate_plan(plan: Plan | None, available: Sequence[str], max_tasks: int) -> list[dict] | None:
+    """Workspace tasks, [] for an empty plan, None when the caller must fall back (also for no plan at all)."""
+    if plan is None:
+        return None
     kept = [x for x in plan.tasks if x.agent in available]
     if plan.tasks and not kept:
         return None

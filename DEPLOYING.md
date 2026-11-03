@@ -34,6 +34,7 @@ The app runs as a container on **Cloud Run** (free tier, scales to zero). All da
      --member="serviceAccount:$num-compute@developer.gserviceaccount.com"
    ```
 4. Create `cloudrun.env.yaml` (gitignored). It's your `.env` as YAML, with the Neon URLs and `SESSION_HTTPS_ONLY: "true"`. All values must be quoted strings. Add `TAVILY_API_KEY` for the orchestrator's web search. Rename the old OpenRouter key variable to `EMBED_API_KEY` (embeddings only; for a hard cap on that spend, give it a dedicated OpenRouter key with a credit limit) and add `MODEL_KEY_SECRET` (the same value on all five services; generate it as in `.env.example`; keep it unchanged, because changing it makes every saved model key unreadable). Drop any old chat, fallback, orchestrator, judge, quantization and provider-sort model settings if you set them: they were removed. `MCP_SERVERS` and `EXTERNAL_DATABASE_URL` belong only in `cloudrun.agent.research-secrets.yaml` (section 3, step 3); `MCP_SERVERS` is JSON, so wrap it in single quotes in YAML.
+   `MEMORY_SNAPSHOT_MINUTES` (default 60) and `BOOTSTRAP_CHATS` (default 3) are optional; set them only in this file. Only the main app reads them (`app/core/snapshot.py`, used by the chat and conversation routes), so `cloudrun.agent.env.yaml` doesn't need them. `BOOTSTRAP_CHATS: "0"` turns onboarding off.
 5. Deploy from the project folder (Cloud Build builds the `Dockerfile`; `.gcloudignore` keeps `.env` and `.venv` out):
    ```powershell
    gcloud run deploy smallie --source . --region asia-southeast1 --allow-unauthenticated `
@@ -121,6 +122,8 @@ Each specialist runs as its own private Cloud Run service, all from one image (`
 
 ## 4. Current deployment
 
+Version 0.6.2 is deployed (2026-11-03).
+
 Project `smallie-review`, region `asia-southeast1`, https://smallie-976519788978.asia-southeast1.run.app, database on Neon (Singapore, Postgres 18). App logs:
 ```powershell
 gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=smallie" --limit 50 --freshness 1h
@@ -130,4 +133,4 @@ gcloud logging read "resource.type=cloud_run_revision AND resource.labels.servic
 
 **Cut-over to user model keys:** after the deploy that adds `MODEL_KEY_SECRET` and `EMBED_API_KEY`, no account can chat until it saves its model settings in the app's Settings dialog. That includes the admin's account. Tell every user before deploying.
 
-The first request after ~15 min idle cold-starts the container (10–20 s), and the first call to an idle agent server cold-starts that one too. Chat quota is each account's own, on the endpoint it set in Settings; the operator's OpenRouter key is used only for embeddings. The images are stored in Artifact Registry as `asia-southeast1-docker.pkg.dev/smallie-review/cloud-run-source-deploy/smallie` and `.../smallie-agent` (0.5 GB free for both; delete old images if you redeploy often). An agent server that is awake polls Redis about once a second, so watch the Upstash command count in the first week (its free tier has a monthly cap). Neon only hosts the database; a deploy never touches it unless the schema changes.
+The first request after ~15 min idle cold-starts the container (10–20 s), and the first call to an idle agent server cold-starts that one too. Chat quota is each account's own, on the endpoint it set in Settings; the operator's OpenRouter key is used only for embeddings. The images are stored in Artifact Registry as `asia-southeast1-docker.pkg.dev/smallie-review/cloud-run-source-deploy/smallie` and `.../smallie-agent` (0.5 GB free for both; delete old images if you redeploy often). An agent server that is awake polls Redis about once a second, so watch the Upstash command count in the first week (its free tier has a monthly cap). Neon only hosts the database. A deploy changes it only when a release changes the schema. Release 0.6.1 added columns to `conversations` (token usage, memory snapshot, onboarding flag) and no table: the app adds them at start with `ADD COLUMN IF NOT EXISTS` (`app/core/db.py`, run from the lifespan in `app/api/main.py`), so there is no manual migration.

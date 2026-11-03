@@ -17,3 +17,6 @@ cloudrun.agent*.yaml
 .superpowers/
 .antipatterns/
 CLAUDE.local.md
+.agents/
+.codex/
+AGENTS.md

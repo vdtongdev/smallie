@@ -185,7 +185,8 @@ async def source_first(request: ModelRequest, handler):
     if request.tool_choice == "none":
         return await handler(request)
     context = request.runtime.context
-    last_human = max((i for i, m in enumerate(request.messages) if isinstance(m, HumanMessage)), default=-1)
+    last_human = max((i for i, m in enumerate(request.messages) if isinstance(m, HumanMessage) and m.name != CALL_NOTE),
+                     default=-1)
     first_call = not any(isinstance(m, ToolMessage) for m in request.messages[last_human + 1:])
     names = [t.name for t in request.tools if (getattr(t, "metadata", None) or {}).get(TOOL_SOURCE)
              and _in_scope(t, context.sources)]

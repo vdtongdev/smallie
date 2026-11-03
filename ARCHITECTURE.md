@@ -561,6 +561,8 @@ Each model request is laid out from the most stable part to the least stable, so
 
 Items 2 to 6 are the system prompt. While the snapshot is fresh they stay the same across a chat's turns, so the provider's cache can reuse them. The tail note holds what changes per call or per day: the orchestrator's notes, reply language and (while composing) the format rules (`compose_section`), the chart agent's tables (`tables_section`), the researcher's date (`TODAY_NOTE`), and on a chat's first turn with onboarding the question (`BOOTSTRAP_SECTION`, last). The `prompt_extra` in item 6 comes after the memory sections in the code, so a new snapshot changes what follows it too.
 
+The prompt text lives in Markdown files, so it can be edited without touching Python: `SOUL` in `app/core/layers/SOUL.md`; the shared rules (`LANGUAGE_RULE`, `MEMORY_RULE`) in `app/core/layers/AGENTS.md`, split into sections; USER and MEMORY in `app/core/layers/USER.md`, split into sections; the orchestrator and its onboarding in `app/orchestration/AGENTS.md` and `app/orchestration/BOOTSTRAP.md`; each specialist's system prompt in `app/agents/<name>/AGENTS.md` (the researcher has no `SOUL`). The Python loaders in `app/core/prompts.py` read each file once at import and build the same constants as before, so the request layout above does not change. Under `uvicorn --reload`, edits to `.md` files restart the server.
+
 ### Hidden Messages
 
 Research findings, a failed specialist attempt and the per-call tail note (`CALL_NOTE`) reach the model as hidden messages:

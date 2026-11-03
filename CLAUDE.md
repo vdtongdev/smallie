@@ -36,7 +36,7 @@ Development is on Windows with `uv`. Postgres 18 (pgvector) runs on **port 5433*
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\dev_db.ps1   # start Postgres, keep WSL up until shutdown
 uv sync                                            # install deps into .venv
-uv run uvicorn app.api.main:app --reload --loop asyncio:SelectorEventLoop
+uv run uvicorn app.api.main:app --reload --reload-include "*.md" --loop asyncio:SelectorEventLoop
 uv run pytest                                      # all tests
 uv run pytest tests/test_sql.py::test_name         # single test
 uv run python -m scripts.reindex                   # after changing OPENROUTER_EMBED_MODEL or EMBED_DIM (app stopped; also re-embeds graph entities)

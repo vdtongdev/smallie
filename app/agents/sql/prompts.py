@@ -1,4 +1,6 @@
-from app.core.prompts import SOUL
+from pathlib import Path
+
+from app.core.prompts import SOUL, load_prompt
 
 ROUTE_DESCRIPTION = (
     "answers from the database: stock market data for about 200 popular stocks "
@@ -25,21 +27,4 @@ SQL_RULES = """The database has one schema, `market`: about 200 popular stocks f
 - If a query fails, read the error, fix the SQL and try again (at most 3 attempts).
 - PostgreSQL's round(x, n) needs a numeric x: write round(x::numeric, 2)."""
 
-SQL_SYSTEM = SOUL + """
-
-You are the team's data analyst. You answer questions by querying a PostgreSQL database with the `run_sql` tool.
-
-{sql_rules}
-- Add LIMIT to queries that might return many rows (default 50) unless the user asks for an aggregate.
-- In your final answer: give a short explanation, then a markdown table of the key results. Do not include the SQL; the app already shows the query under the tool call. Only show SQL if the user asks for it.
-- State the date every price or market figure is as of: `trade_date` for prices, the profile's `updated_at` for profile figures such as market cap.
-- Format large numbers with thousands separators and show currencies.
-- You cannot see the user's uploaded documents; if asked about them, say so and suggest asking about the documents directly.
-- For greetings or questions about the user themselves, you don't need to query.
-
-{language_rule}
-
-{memory_rule}
-
-DATABASE SCHEMA:
-{schema}"""
+SQL_SYSTEM = SOUL + "\n\n" + load_prompt(Path(__file__).parent / "AGENTS.md")

@@ -233,3 +233,42 @@ Versions are `major.minor.patch`: the major version stays 0 for now, each minor 
 - **Fix: a follow-up database task was skipped because the task it depended on had failed**
   - A follow-up kept waiting on a failed, withdrawn or skipped task
   - A follow-up no longer waits on such a task and runs with what it has (`add_follow_ups`)
+
+## 0.6.1 - Prompt cache, usage popup and onboarding, and fixes
+- **Prompt cache layout**: each model request now starts with the parts that stay the same (tools, the agent's system prompt, the chat's memory snapshot, the thread), and only a short hidden tail note changes per call
+  - Within one message every model call shares the same system prompt and history, so a provider's prompt cache can reuse them
+  - The per-message notes (reply language, compose rules, the research date, the chart agent's tables note) moved from the system prompt into that tail note (`build_agent(tail=...)`, `make_call_note` in `app/agents/factory.py`)
+  - Limit: the cache helps only when the provider caches prompts. `deepseek/deepseek-chat` on OpenRouter reported 0 cached tokens on every call, so its hit rate shows 0%
+  - Behaviour change, kept on purpose: asked how many people are in the chat room, the orchestrator now presents the specialists as its team (it used to answer "only me")
+- **Frozen memory snapshot** (`app/core/snapshot.py`): the memory part of the prompt (profile, facts, other chats' recent turns) is read once per chat and reused while the chat was active within `MEMORY_SNAPSHOT_MINUTES` (new setting, default 60), then rebuilt
+  - Deleting a fact, a file or a chat clears the user's snapshots at once; a snapshot built before a clear is never saved, so deleted data cannot reach a later prompt
+- **Usage popup**: a **Usage** button under the chat box shows the last reply and the chat: input, output, cached tokens, hit rate and tokens per model (`GET /api/conversations/{id}/usage`)
+  - Cached tokens show `n/a` when the provider sends none, instead of 0
+  - `bench_chat` prints input, cached tokens and hit rate per scenario
+- **Team voice and profile** (`SOUL` in `app/core/prompts.py`): the orchestrator, docs, sql and chart agents share one persona and speak as "we"; the researcher does not
+  - Profile facts (name, location, work, role, risk, horizon, language, goals, preferences) have their own prompt section, apart from other memories (`recall_profile`)
+- **Onboarding**: while a new user's profile lacks a role or a goal, the first reply of a chat ends with one question about the missing part
+  - Only on the first `BOOTSTRAP_CHATS` chats (new setting, default 3; 0 turns it off); it adds no model call or tool, and fact extraction saves the answer
+  - Limit: a chat whose first turn a specialist answers is not asked, though it still counts toward the limit
+- **Settings**: new `MEMORY_SNAPSHOT_MINUTES` (60) and `BOOTSTRAP_CHATS` (3), documented in `.env.example`
+  - Deploy: rebuild the agent servers with the app (`docker compose up -d --build`); new database columns are added on start
+- **Fix: team mode asked the user their own question back**
+  - The review step sometimes set its question to the user's own message (same or reworded), so the turn paused and asked the user what they had just asked
+  - A question that restates a user message in the thread is dropped and the team goes on (`echoes`, `app/orchestration/team.py`); the review prompt says never to repeat the user's message
+  - Limit: a real clarifying question that shares about 80% of its words with the user's message is dropped too
+
+## 0.6.2 - Fixes
+- **Fix: a team plan the model skipped crashed and ran every agent**
+  - With function calling, the model sometimes made no tool call, so the structured output was `None`; the planner raised `AttributeError`, logged "Team plan failed" and ran every agent. In `bench_chat` (`team_compound`) that took 7 to 20 model calls and about 67k extra input tokens
+  - `ask_structured` (`app/core/llm.py`) returns `None` on no tool call, with no retry and no extra call; a missing plan now runs one task for the best pick
+  - The review board, fact extraction and document cards had the same unchecked `None`: an empty review, zero facts saved, and skipped cards, with no traceback
+  - Limit: when the plan is missing, the turn runs one specialist instead of all of them, so it may answer less; not yet measured on real models
+- **Fix: a team chart missed figures that were only in the answer text**
+  - A chart after a team answer was denied `chart_data` whenever the answer had any table, so a figure written only in the text (e.g. a portfolio split from the documents) could not be charted
+  - Both `chart_table` and `chart_data` are offered now
+- **Fix: a team task that ran again lost its first table**
+  - A task re-run after a challenge or conflict replaced its earlier tables and charts, so the answer lost the first run's table
+  - A re-run now merges the earlier artifacts with its own, once per id
+- **Fix: a team write-up was replaced by the specialists' texts joined together**
+  - When the write-up orchestrator called `handoff`, the answer became the specialists' texts joined, with no analysis
+  - The write-up now runs on an agent without `handoff` or `ask_*` tools; a message that finds nothing can still be handed off

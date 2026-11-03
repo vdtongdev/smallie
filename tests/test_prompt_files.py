@@ -2,6 +2,10 @@ from pathlib import Path
 
 import pytest
 
+import app.agents.chart.prompts
+import app.agents.docs.prompts
+import app.agents.research.prompts
+import app.agents.sql.prompts
 import app.core.prompts
 import app.orchestration.prompts
 from app.core.prompts import load_prompt, load_sections
@@ -46,6 +50,8 @@ ORCHESTRATION = Path(app.orchestration.prompts.__file__).parent
 LAYERS = Path(app.core.prompts.__file__).parent / "layers"
 LAYER_FILES = [LAYERS / "SOUL.md", LAYERS / "AGENTS.md", LAYERS / "USER.md",
                ORCHESTRATION / "AGENTS.md", ORCHESTRATION / "BOOTSTRAP.md"]
+LAYER_FILES += [Path(module.__file__).parent / "AGENTS.md" for module in (
+    app.agents.docs.prompts, app.agents.sql.prompts, app.agents.chart.prompts, app.agents.research.prompts)]
 
 
 def test_layer_paths_do_not_depend_on_the_working_directory():

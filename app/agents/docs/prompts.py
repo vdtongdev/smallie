@@ -1,4 +1,6 @@
-from app.core.prompts import LANGUAGE_RULE, MEMORY_RULE, SOUL
+from pathlib import Path
+
+from app.core.prompts import LANGUAGE_RULE, MEMORY_RULE, SOUL, load_prompt
 
 ROUTE_DESCRIPTION = (
     "answers from the user's uploaded files (PDF/DOCX): what a document says, summaries, facts, "
@@ -15,16 +17,5 @@ REVIEW = (
     "what a document says, its names, dates, figures and quotes."
 )
 
-DOCS_SYSTEM = f"""{SOUL}
-
-You are the team's documents specialist. You answer questions using the user's uploaded documents (PDF/DOCX).
-
-- Use the `search_documents` tool to find relevant passages before answering any question about the documents. You may search several times with different wording, including in the other language (English/Vietnamese).
-- When the question is about one person, company, place or product, pass its name as `entity`.
-- Base your answer only on what the tool returns. If nothing relevant is found, say so plainly; do not invent content.
-- Cite sources inline like [filename, p. 3] (omit the page if unknown).
-- For greetings or questions about the user themselves, you don't need to search.
-
-{LANGUAGE_RULE}
-
-{MEMORY_RULE}"""
+DOCS_SYSTEM = SOUL + "\n\n" + load_prompt(Path(__file__).parent / "AGENTS.md").format(
+    language_rule=LANGUAGE_RULE, memory_rule=MEMORY_RULE)

@@ -47,11 +47,13 @@ Rules:
 10. Return an empty list when the turns have nothing to remember. Most turns have nothing.
 11. When the turns disagree, keep what the latest turn says."""
 
-_user = load_sections(LAYERS / "USER.md", ("user", "profile", "memories", "recent_chats"))
+_user = load_sections(LAYERS / "USER.md", ("user", "profile"))
 USER_SECTION = "\n\n" + _user["user"]
 PROFILE_SECTION = "\n\n" + _user["profile"]
-MEMORIES_SECTION = "\n\n" + _user["memories"]
-RECENT_CHATS_SECTION = "\n\n" + _user["recent_chats"]
+_memory = load_sections(LAYERS / "MEMORY.md", ("notes", "memories", "recent_chats"))
+NOTES_SECTION = "\n\n" + _memory["notes"]
+MEMORIES_SECTION = "\n\n" + _memory["memories"]
+RECENT_CHATS_SECTION = "\n\n" + _memory["recent_chats"]
 
 _VIETNAMESE = re.compile(r"[ăâđêôơưàáạảãằắặẳẵầấậẩẫèéẹẻẽềếệểễìíịỉĩòóọỏõồốộổỗờớợởỡùúụủũừứựửữỳýỵỷỹ]", re.IGNORECASE)
 

@@ -84,10 +84,20 @@ class Fact(BaseModel):
         return ALIASES.get(relation, relation)
 
 
+class AgentNote(BaseModel):
+    """One working note: how this user wants an agent's work done."""
+
+    text: str = Field(min_length=1, max_length=NOTE_CHARS)
+    about: list[str] = Field(default_factory=list)
+
+
 class FactUpdate(BaseModel):
-    """Durable facts about the user from these chat turns; empty when there are none."""
+    """What these chat turns say that is worth keeping. `facts`: durable facts about the user, as
+    triples. `notes`: how the user wants the named agent to do its work, one short instruction each.
+    Either list is empty when the turns have nothing to keep."""
 
     facts: list[Fact] = Field(default_factory=list, max_length=MAX_FACTS)
+    notes: list[AgentNote] = Field(default_factory=list, max_length=MAX_NOTES)
 
     @field_validator("facts", mode="before")
     @classmethod
@@ -95,12 +105,10 @@ class FactUpdate(BaseModel):
         # A few facts too many shouldn't throw the whole reply away.
         return value[:MAX_FACTS] if isinstance(value, list) else value
 
-
-class AgentNote(BaseModel):
-    """One working note: how this user wants an agent's work done."""
-
-    text: str = Field(min_length=1, max_length=NOTE_CHARS)
-    about: list[str] = Field(default_factory=list)
+    @field_validator("notes", mode="before")
+    @classmethod
+    def first_notes(cls, value):
+        return value[:MAX_NOTES] if isinstance(value, list) else value
 
 
 # ---------- nodes ----------
@@ -276,10 +284,10 @@ def save_notes(user_id: str, agent: str, notes: list[AgentNote], conversation_id
                     node = nearest.id
                     conn.execute(update(graph_nodes).where(graph_nodes.c.id == node).values(
                         name=note.text, norm=norm, embedding=vectors[note.text]))
-                    conn.execute(delete(graph_edges).where(
-                        graph_edges.c.user_id == user_id, graph_edges.c.source_id == node, graph_edges.c.relation == ABOUT))
                 else:
                     node = _get_or_create(conn, user_id, "note", note.text, vectors[note.text], norm=norm)
+            conn.execute(delete(graph_edges).where(  # newest wins: a note found again takes the new about edges
+                graph_edges.c.user_id == user_id, graph_edges.c.source_id == node, graph_edges.c.relation == ABOUT))
             _link(conn, user_id, agent_node, NOTED, node, "chat", conversation_id=conversation_id)
             targets = {resolve(a) for a in note.about if a.strip()} or {user_node}
             for target in targets:
@@ -492,15 +500,17 @@ def format_turn(question: str, answer: str, answer_chars: int = EXTRACT_ANSWER_C
 
 
 async def extract_facts(user_id: str, question: str, answer: str, callbacks: list, source: str = "chat",
-                        conversation_id: str | None = None) -> int:
-    """Learn what one finished turn says about the user. A plain model call after the reply,
+                        conversation_id: str | None = None, agent: str | None = None) -> int:
+    """Learn what one finished turn says about the user, and (with `agent`, the route that wrote
+    the answer) how the user wants that agent to work. A plain model call after the reply,
     because free models rarely chose to call a save tool themselves (AP-006)."""
-    return await extract_from_turns(user_id, format_turn(question, answer), callbacks, source, conversation_id)
+    return await extract_from_turns(user_id, format_turn(question, answer), callbacks, source, conversation_id, agent)
 
 
 async def extract_from_turns(user_id: str, turns: str, callbacks: list, source: str = "chat",
-                             conversation_id: str | None = None) -> int:
-    """One extraction call over `turns` (one or more formatted chat turns); returns facts kept."""
+                             conversation_id: str | None = None, agent: str | None = None) -> int:
+    """One extraction call over `turns` (one or more formatted chat turns); returns facts kept.
+    Notes are saved under `agent` only when it is set."""
     def known() -> tuple[list[str], list[str]]:
         with get_engine().connect() as conn:
             files = conn.execute(select(documents.c.filename).where(
@@ -514,9 +524,14 @@ async def extract_from_turns(user_id: str, turns: str, callbacks: list, source: 
     # Names go into the message, not a template: file names may contain braces.
     turn = (f"The user's files: {', '.join(files)}\n" if files else "") + \
         (f"Relations already in the user's graph: {', '.join(relations)}\n" if relations else "") + \
-        ("\n" if files or relations else "") + turns
+        (f"The agent that wrote the answer: {agent}\n" if agent else "") + \
+        ("\n" if files or relations or agent else "") + turns
     model = await asyncio.to_thread(get_chat_model, user_id)
     update_ = await ask_structured(model, FactUpdate, [SystemMessage(EXTRACT_PROMPT), HumanMessage(turn)], {"callbacks": callbacks})
-    if update_ is None or not update_.facts:
+    if update_ is None or not (update_.facts or update_.notes):
+        return 0
+    if agent and update_.notes:
+        await asyncio.to_thread(save_notes, user_id, agent, update_.notes, conversation_id)
+    if not update_.facts:
         return 0
     return await asyncio.to_thread(save_facts, user_id, update_.facts, source, conversation_id)

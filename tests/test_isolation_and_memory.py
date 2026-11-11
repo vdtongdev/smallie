@@ -105,3 +105,55 @@ async def test_recent_chats_show_latest_turns_of_other_chats():
     assert "Assistant: Answer to latest question" in text
     assert "Empty" not in text
     assert await load_recent_chats(checkpointer, []) == ""
+
+
+# ---------- extraction after every finished turn ----------
+
+import json  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
+
+from langchain_core.messages import AIMessage, HumanMessage  # noqa: E402
+
+from app.api import routes_chat  # noqa: E402
+from app.api.main import app  # noqa: E402
+from app.core.model_settings import ModelSettings  # noqa: E402
+from tests.test_snapshot import env  # noqa: E402,F401  (fixture)
+
+
+def drive_turn(env, monkeypatch, answered_by: str) -> list[dict]:
+    """Run one chat turn whose final text is an AIMessage named `answered_by`; returns what the
+    extraction call received (the background task has run when the client call returns)."""
+    env.user()
+    calls: list[dict] = []
+
+    async def recorder(user_id, question, answer, callbacks, source="chat", conversation_id=None, agent=None):
+        calls.append({"question": question, "answer": answer, "agent": agent})
+        return 0
+
+    class Assistant:
+        async def astream(self, input, config, context, **kwargs):
+            return
+            yield
+
+        async def aget_state(self, config):
+            return SimpleNamespace(values={"messages": [HumanMessage("hi"), AIMessage("done", name=answered_by)]},
+                                   interrupts=[])
+
+    monkeypatch.setattr(routes_chat, "extract_facts", recorder)
+    monkeypatch.setattr(routes_chat, "load_settings", lambda uid: ModelSettings("https://x/v1", "m", "k"))
+    app.state.assistant, app.state.store, app.state.checkpointer = Assistant(), InMemoryStore(), None
+    response = env.client.post("/api/chat/auto", json={"message": "hi"})
+    assert any(json.loads(l[6:]).get("type") == "done" for l in response.text.splitlines() if l.startswith("data: "))
+    return calls
+
+
+@requires_db
+def test_a_turn_a_specialist_answered_is_extracted_once_with_its_route(env, monkeypatch):
+    calls = drive_turn(env, monkeypatch, "sql_agent")
+    assert [c["agent"] for c in calls] == ["sql"]
+
+
+@requires_db
+def test_an_orchestrator_turn_is_extracted_with_the_orchestrator_route(env, monkeypatch):
+    calls = drive_turn(env, monkeypatch, "orchestrator")
+    assert [c["agent"] for c in calls] == ["orchestrator"]

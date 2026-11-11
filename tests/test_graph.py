@@ -715,6 +715,16 @@ def test_a_reworded_note_replaces_the_old_one(make_user, embeddings):
 
 
 @requires_db
+def test_the_same_note_again_takes_the_new_about_edges(make_user, embeddings):
+    user = make_user()
+    graph.save_notes(user, "sql", [AgentNote(text="Round to two decimals", about=["HOSE"])])
+    graph.save_notes(user, "sql", [AgentNote(text="Round to two decimals", about=["HNX"])])
+    assert node_names(user, "note") == ["Round to two decimals"]
+    assert count(graph_edges, user, graph_edges.c.relation == "about") == 1
+    assert node_names(user) == ["HNX"]  # HOSE lost its last edge
+
+
+@requires_db
 def test_a_different_note_is_added(make_user, embeddings):
     user = make_user()
     graph.save_notes(user, "sql", [AgentNote(text="Limit queries to one exchange"), AgentNote(text="Round to two decimals")])
@@ -812,3 +822,46 @@ def test_notes_do_not_change_the_relations_offered_to_the_extractor(make_user, e
     monkeypatch.setattr(graph, "get_chat_model", lambda user_id: None)
     asyncio.run(graph.extract_from_turns(user, "User: hi", []))
     assert "noted" not in seen[0] and "about" not in seen[0]
+
+
+def test_fact_update_parses_without_notes_and_keeps_three():
+    assert FactUpdate.model_validate({"facts": []}).notes == []
+    assert len(FactUpdate.model_validate({"notes": [{"text": f"n{i}"} for i in range(5)]}).notes) == 3
+    with pytest.raises(ValidationError):
+        AgentNote(text="x" * 201)
+
+
+def fake_extractor(monkeypatch, seen):
+    async def ainvoke(messages, config):
+        seen.append(messages[1].content)
+        return FactUpdate(facts=[Fact(subject="User", relation="risk_tolerance", object="balanced")],
+                          notes=[AgentNote(text="Round to two decimals")])
+
+    monkeypatch.setattr(graph, "get_chat_model", lambda model=None: SimpleNamespace(
+        with_structured_output=lambda schema, method: SimpleNamespace(ainvoke=ainvoke)))
+
+
+@requires_db
+async def test_extract_facts_saves_notes_under_the_answering_agent(make_user, embeddings, monkeypatch):
+    user = make_user()
+    seen = []
+    fake_extractor(monkeypatch, seen)
+    assert await graph.extract_facts(user, "q", "a", [], agent="sql") == 1
+    assert graph.recall_notes(user) == {"sql": "- Round to two decimals"}
+    assert "sql" in seen[0].split("User: q")[0]  # the message names the agent before the turn
+
+
+@requires_db
+async def test_notes_without_a_known_agent_are_dropped_and_facts_kept(make_user, embeddings, monkeypatch):
+    user = make_user()
+    fake_extractor(monkeypatch, [])
+    assert await graph.extract_facts(user, "q", "a", []) == 1
+    assert graph.recall_notes(user) == {}
+    assert len(graph.list_facts(user)) == 1
+
+
+def test_extract_prompt_describes_notes():
+    from app.core.prompts import EXTRACT_PROMPT
+
+    assert "notes" in EXTRACT_PROMPT
+    assert "{" not in EXTRACT_PROMPT and "}" not in EXTRACT_PROMPT

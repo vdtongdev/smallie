@@ -45,7 +45,8 @@ Rules:
 8. Do not save secrets: passwords, ID, card or account numbers, health details.
 9. Do not save anything the user asks you not to remember.
 10. Return an empty list when the turns have nothing to remember. Most turns have nothing.
-11. When the turns disagree, keep what the latest turn says."""
+11. When the turns disagree, keep what the latest turn says.
+12. The line "The agent that wrote the answer" names an agent. Put in `notes` what the user says about how that agent should do its work: a correction, a default, a format or a scope. Write each note as one short instruction to that agent, in English. List in `about` the names the note mentions. Return no notes when the user's message does not concern that agent's work. Facts about the user stay triples and are never notes. Most turns have no note."""
 
 _user = load_sections(LAYERS / "USER.md", ("user", "profile"))
 USER_SECTION = "\n\n" + _user["user"]

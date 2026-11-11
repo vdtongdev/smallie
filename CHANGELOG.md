@@ -290,3 +290,9 @@ Versions are `major.minor.patch`: the major version stays 0 for now, each minor 
   - Every team-mode request now carries a note to speak as "we" for the team (`TEAM_VOICE`, `make_call_note` in `app/agents/factory.py`); 1-on-1 chats are unchanged
   - Limit: wording only; it lowers the chance of an "I", it doesn't remove it
 - Tooling: `bench_chat` scenario `notes_followup` (a note learned in one chat is followed in the next); `scripts.reindex` also re-embeds notes
+
+## 0.7.1 - Fixes
+- **Fix: in 1-on-1 chats the agents spoke as "we"** (e.g. "we found...", "we can help")
+  - The shared persona (SOUL) told every agent to say "we" for the team's work, and 1-on-1 requests had no note saying otherwise
+  - Every 1-on-1 request now carries a note to speak as "I" (`SOLO_VOICE`, `make_call_note` in `app/agents/factory.py`); SOUL, the orchestrator's `AGENTS.md` and `BOOTSTRAP.md` no longer say "we"; team mode keeps its "we" note (`TEAM_VOICE`)
+  - Limit: wording only; it lowers the chance of a "we", it doesn't remove it

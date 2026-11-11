@@ -157,3 +157,63 @@ def test_a_turn_a_specialist_answered_is_extracted_once_with_its_route(env, monk
 def test_an_orchestrator_turn_is_extracted_with_the_orchestrator_route(env, monkeypatch):
     calls = drive_turn(env, monkeypatch, "orchestrator")
     assert [c["agent"] for c in calls] == ["orchestrator"]
+
+
+# ---------- agent notes through /api/memories ----------
+
+import time  # noqa: E402
+
+from sqlalchemy import select  # noqa: E402
+
+from app.core import graph  # noqa: E402
+from app.core.conversations import create_conversation  # noqa: E402
+from app.core.db import conversations, get_engine  # noqa: E402
+from app.core.graph import AgentNote, Fact  # noqa: E402
+from app.core.snapshot import save_snapshot  # noqa: E402
+
+
+def learn_fact_then_note(user: str) -> None:
+    graph.save_facts(user, [Fact(subject="User", relation="likes", object="tea")], "chat")
+    time.sleep(0.05)  # the Windows clock ticks coarsely: the note must be strictly newer
+    graph.save_notes(user, "sql", [AgentNote(text="Show prices in USD", about=[])])
+
+
+def stored_snapshot(chat: str):
+    with get_engine().connect() as conn:
+        return conn.execute(select(conversations.c.memory_snapshot).where(conversations.c.id == chat)).scalar()
+
+
+@requires_db
+def test_memories_lists_notes_with_their_agent(env):
+    user = env.user()
+    learn_fact_then_note(user)
+    rows = env.client.get("/api/memories").json()
+    assert len(rows) == 2
+    note = next(r for r in rows if r["agent"] == "sql")
+    fact = next(r for r in rows if r["agent"] is None)
+    assert "USD" in note["text"] and "tea" in fact["text"]
+    assert [r["id"] for r in rows] == [note["id"], fact["id"]]  # newest first
+
+
+@requires_db
+def test_deleting_a_note_through_the_api(env):
+    user = env.user()
+    learn_fact_then_note(user)
+    chat = create_conversation(user, "auto", "hi")["id"]
+    time.sleep(0.05)
+    save_snapshot(user, chat, {"user": "", "memories": "x", "recent_chats": ""})
+    assert stored_snapshot(chat) is not None
+    note_id = next(r["id"] for r in env.client.get("/api/memories").json() if r["agent"] == "sql")
+    assert env.client.delete(f"/api/memories/{note_id}").status_code == 204
+    assert [r for r in env.client.get("/api/memories").json() if r["agent"] == "sql"] == []
+    assert stored_snapshot(chat) is None
+
+
+@requires_db
+def test_another_users_note_cannot_be_deleted(env):
+    a = env.user()
+    graph.save_notes(a, "sql", [AgentNote(text="Show prices in USD", about=[])])
+    note_id = graph.list_notes(a)[0]["id"]
+    env.user()  # user B is now the caller
+    assert env.client.delete(f"/api/memories/{note_id}").status_code == 404
+    assert [n["id"] for n in graph.list_notes(a)] == [note_id]

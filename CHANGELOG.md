@@ -272,3 +272,21 @@ Versions are `major.minor.patch`: the major version stays 0 for now, each minor 
 - **Fix: a team write-up was replaced by the specialists' texts joined together**
   - When the write-up orchestrator called `handoff`, the answer became the specialists' texts joined, with no analysis
   - The write-up now runs on an agent without `handoff` or `ask_*` tools; a message that finds nothing can still be handed off
+
+## 0.7.0 - Prompt layer files and agent memory
+- **Prompt layers as Markdown files** (`app/core/layers/`, `app/agents/*/AGENTS.md`, `app/orchestration/BOOTSTRAP.md`)
+  - SOUL, the shared rules (AGENTS), USER, MEMORY, BOOTSTRAP and each agent's own prompt now live in `.md` files loaded at start, instead of Python constants
+  - No behaviour change: every request sends the same prompt bytes as before
+- **Agent memory**: each agent remembers how you want its work done
+  - Tell an agent how you want something (e.g. percentages with one decimal, or what "VN stocks" means to you) and it applies it in later chats without being told again
+  - Notes are kept per user and per agent in the knowledge graph (new `agent` and `note` nodes); each agent sees only its own notes, under a new MEMORY layer (`app/core/layers/MEMORY.md`), which also holds the memories and recent chats moved out of USER
+  - When you correct an earlier instruction, the new note replaces the old one
+  - `GET /api/memories` lists notes beside facts, and `DELETE /api/memories/{id}` deletes one; there is no memories dialog in the app yet
+  - Cost: facts and notes are now extracted after every answered message, not only those the orchestrator answered. That is one more background model call per message a specialist answered (about 1,350 input and 190 output tokens; $0.00022 on `deepseek/deepseek-v4.1-flash`). The reply itself makes the same calls as before
+  - Side effect: profile answers given in a chat a specialist answered are now saved too
+  - Limits: in team mode, and when the orchestrator asks a specialist and writes the answer itself, the note goes to the orchestrator, so the research agent gets no notes of its own yet. Whether models name the note they replace has only been checked on one model
+- **Fix: in team mode the orchestrator said "I" instead of speaking for the team** (e.g. when asked who it is at the start of a chat)
+  - The persona's "'I' for your own part" read as anything it writes itself
+  - Every team-mode request now carries a note to speak as "we" for the team (`TEAM_VOICE`, `make_call_note` in `app/agents/factory.py`); 1-on-1 chats are unchanged
+  - Limit: wording only; it lowers the chance of an "I", it doesn't remove it
+- Tooling: `bench_chat` scenario `notes_followup` (a note learned in one chat is followed in the next); `scripts.reindex` also re-embeds notes

@@ -406,6 +406,33 @@ def test_extract_prompt_explains_replaces():
 
 ---
 
+### Task 9: Fixes from the first real run of `notes_followup`
+
+Added 2026-11-11. Diagnosis: the bench run failed with `StringDataRightTruncation ... character varying(36)` on `INSERT INTO graph_edges`, because `run_scenario` uses `f"bench-{uuid.uuid4()}"` (42 characters) as the thread id and `run_notes_followup` passed it as `conversation_id` (`graph_edges.conversation_id` is `String(36)`). The app passes `create_conversation` ids (36 characters) and is not affected. The same run showed a weakness in the app: `extract_from_turns` saves notes before facts, so any failure in `save_notes` loses that turn's facts too.
+
+Agent: implementer
+
+**Files:**
+- Modify: `scripts/bench_chat.py`, `app/core/graph.py` (`extract_from_turns` only)
+- Test: `tests/test_bench_chat.py`, `tests/test_graph.py`
+
+- [ ] **Step 1: Regression test (already written, uncommitted, failing):** `tests/test_bench_chat.py::test_notes_followup_chat_1s_conversation_id_can_be_saved_with_a_note`. Keep it as it is.
+- [ ] **Step 2: Write the second failing test** in `tests/test_graph.py` (`@requires_db`):
+
+```python
+async def test_a_failure_saving_notes_keeps_the_turns_facts(make_user, embeddings, monkeypatch, caplog):
+    # fake model returns one fact (User holds FPT) and one note; monkeypatch graph.save_notes to raise RuntimeError
+    # kept = await graph.extract_facts(user, "q", "a", [], agent="sql")
+    # -> kept == 1, the fact is in graph.recall_facts(user), nothing raised, and the failure is logged
+```
+
+- [ ] **Step 3: Fix the bench.** In `run_scenario`, the `notes_followup` scenario gets a real conversation row per chat with `create_conversation(user_id, "auto", message)`, as the `bootstrap` branch does, so its thread id is a 36-character id and chat 2 has its own. Other scenarios keep their thread ids.
+- [ ] **Step 4: Fix the order in `extract_from_turns`.** Save the facts first, then the notes; a failure in `save_notes` is caught, logged with `log.exception`, and the function still returns the number of facts kept. A failure in `save_facts` still propagates as today.
+- [ ] **Step 5: Run.** `uv run pytest tests/test_bench_chat.py tests/test_graph.py tests/test_isolation_and_memory.py -q -rs`, then `uv run pytest -q`. Expected: all pass, none skipped.
+- [ ] **Step 6: Commit** `Bench: give notes_followup real conversation ids; keep facts when saving notes fails`.
+
+---
+
 ### Task 7: Measurement
 
 Agent: implementer. **Each run that calls a real model or the embedding API needs the user's yes first; ask before every one.**

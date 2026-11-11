@@ -1,34 +1,31 @@
 import re
+from pathlib import Path
 
 from langchain_core.messages import AnyMessage, HumanMessage
 
-SOUL = (
-    "WHO WE ARE: You are part of smallie, a small team of agents working together in one chat "
-    "on the user's problem. One of us coordinates; the others work with the user's files, the "
-    "stock database, charts and research. Speak as a member of that team: 'we' for the team's "
-    "work, 'I' for your own part. Be warm and direct, like a capable colleague: get to the point, "
-    "say plainly what you don't know, and offer a useful next step when there is one. "
-    "The rules below take precedence over this section."
-)
 
-LANGUAGE_RULE = (
-    "LANGUAGE: Always reply in the language of the user's latest message. "
-    "If they write Vietnamese, answer in natural Vietnamese with correct diacritics; "
-    "if English, answer in English. Sources may be in a different language than the "
-    "question; translate what you found instead of quoting it untranslated."
-)
+def load_prompt(path: Path) -> str:
+    """Read a prompt file as LF text without its final newline."""
+    text = path.read_text(encoding="utf-8-sig")
+    return text[:-1] if text.endswith("\n") else text
 
-MEMORY_RULE = (
-    "MEMORY: Facts about this user from earlier chats and their files are listed below; use them. "
-    "What the user tells you is remembered automatically after your reply, so never say "
-    "you can't remember it. "
-    "Only call `search_memory` if the notes below don't already answer it. "
-    "PAST CHATS: Recent activity from the user's other chats may be listed below. Use it "
-    "only when the user refers to earlier chats or questions (\"what did I ask before?\", "
-    "\"like last time\"); otherwise ignore it. For older or more specific past chats, call "
-    "`search_chat_history`. Past answers may be outdated (e.g. stock prices), so re-check "
-    "data with your tools before reusing it."
-)
+
+def load_sections(path: Path, names: tuple[str, ...]) -> dict[str, str]:
+    """Split a prompt file at `<!-- section: name -->` lines; the names must match exactly."""
+    parts = re.split(r"^<!-- section: ([a-z_]+) -->$", load_prompt(path), flags=re.M)
+    found = parts[1::2]
+    if parts[0].strip() or sorted(found) != sorted(names):
+        raise ValueError(f"{path}: sections {found} do not match {list(names)}")
+    return {name: body.strip("\n") for name, body in zip(found, parts[2::2])}
+
+
+LAYERS = Path(__file__).parent / "layers"
+
+SOUL = load_prompt(LAYERS / "SOUL.md")
+
+_rules = load_sections(LAYERS / "AGENTS.md", ("language", "memory"))
+LANGUAGE_RULE = _rules["language"]
+MEMORY_RULE = _rules["memory"]
 
 # System prompt of the fact extractor (app/core/graph.py, extract_facts); never formatted.
 # Every name in graph.STANDARD must appear in rule 4 (tests/test_graph.py checks it).
@@ -50,26 +47,11 @@ Rules:
 10. Return an empty list when the turns have nothing to remember. Most turns have nothing.
 11. When the turns disagree, keep what the latest turn says."""
 
-USER_SECTION = """
-
-YOU ARE TALKING TO: {user}"""
-
-PROFILE_SECTION = """
-
-WHAT THE USER TOLD YOU ABOUT THEMSELVES:
-{profile}
-
-A stored language preference never changes the reply language: reply in the language of the latest message you answer."""
-
-MEMORIES_SECTION = """
-
-WHAT YOU KNOW ABOUT THIS USER (from earlier chats and their files, newest first; may be empty):
-{memories}"""
-
-RECENT_CHATS_SECTION = """
-
-RECENT ACTIVITY IN THE USER'S OTHER CHATS (most recently used chat first):
-{recent_chats}"""
+_user = load_sections(LAYERS / "USER.md", ("user", "profile", "memories", "recent_chats"))
+USER_SECTION = "\n\n" + _user["user"]
+PROFILE_SECTION = "\n\n" + _user["profile"]
+MEMORIES_SECTION = "\n\n" + _user["memories"]
+RECENT_CHATS_SECTION = "\n\n" + _user["recent_chats"]
 
 _VIETNAMESE = re.compile(r"[ăâđêôơưàáạảãằắặẳẵầấậẩẫèéẹẻẽềếệểễìíịỉĩòóọỏõồốộổỗờớợởỡùúụủũừứựửữỳýỵỷỹ]", re.IGNORECASE)
 
@@ -84,6 +66,11 @@ def reply_language(messages: list[AnyMessage]) -> str:
 
 # HumanMessage.name of the tail note: the per-call text at the end of every model request.
 CALL_NOTE = "call_note"
+
+# Tail note of every team-mode call; never formatted.
+TEAM_VOICE = """TEAM VOICE: The whole team handles this message.
+Say "we" for what the team knows, does, can and cannot do, greetings and introductions included.
+Say "I" only for a step you alone took in this reply, such as a search or query you ran."""
 
 LAST_CALL_NOTE = """LAST STEP FOR THIS MESSAGE. You have no tool calls left, so call no tool.
 Write the answer now, from what you found so far.

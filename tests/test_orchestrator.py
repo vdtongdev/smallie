@@ -10,7 +10,7 @@ from app.agents.research import agent as research_agent
 from app.agents.sql import agent as sql_agent
 from app.api.routes_chat import _events_from
 from app.core.memory import TEAM_MODE, AgentContext
-from app.core.prompts import CALL_NOTE
+from app.core.prompts import CALL_NOTE, SOLO_VOICE
 from app.orchestration import orchestrator as orchestrator_module
 from app.orchestration.prompts import BOOTSTRAP_SECTION
 from app.orchestration.graph import build_assistant
@@ -83,7 +83,7 @@ async def test_handoff_lets_the_specialist_reply_directly(monkeypatch):
     assert not any(e.get("name") == "handoff" for e in events if e["type"] in ("tool_call", "tool_result"))
     assert _streamed(events) == "Apple's market cap is $3T."
     # The specialist saw the user's message, not the orchestrator's tool call.
-    assert [m.content for m in model.prompts[-1][1:]] == ["how big is the most valuable tech company?"]
+    assert [m.content for m in model.prompts[-1][1:]] == ["how big is the most valuable tech company?", SOLO_VOICE]
     messages = await _thread(assistant)
     assert [(type(m), m.name) for m in messages] == [(HumanMessage, None), (AIMessage, "sql_agent")]
 
@@ -103,7 +103,7 @@ async def test_asking_one_specialist_first_becomes_a_handoff(monkeypatch):
     assert "ask_sql" not in [e["name"] for e in events if e["type"] == "tool_call"]
     assert _streamed(events) == "NVIDIA, at $5.5T."
     # The specialist got the user's own message (with the whole chat), not a paraphrase.
-    assert [m.content for m in model.prompts[-1][1:]] == ["which tech company is the most valuable?"]
+    assert [m.content for m in model.prompts[-1][1:]] == ["which tech company is the most valuable?", SOLO_VOICE]
     assert len(model.prompts) == 2  # one orchestrator call, one sql call
 
 
@@ -142,7 +142,7 @@ async def test_delegations_run_in_parallel_and_only_the_write_up_streams(monkeyp
     assert _streamed(events) == "The handbook says $1B [handbook.pdf, p. 2]; the database says $400B."
 
     # The specialists only saw the orchestrator's self-contained question.
-    questions = {p[-1].content for p in model.prompts if "orchestrator" not in p[0].content and "You coordinate the team." not in p[0].content}
+    questions = {p[-2].content for p in model.prompts if "orchestrator" not in p[0].content and "You coordinate the team." not in p[0].content}
     assert questions == {"What revenue does the handbook state?", "What is AAPL's revenue?"}
     # The write-up call got the writing rules; the deciding call didn't.
     orchestrator_prompts = [p for p in model.prompts if "You coordinate the team." in p[0].content]
@@ -397,7 +397,7 @@ async def test_bootstrap_ends_the_tail_on_the_first_turn(monkeypatch):
     assert len(calls) == 2
     for prompt in calls:
         tail = tail_of(prompt)
-        assert tail.endswith(BOOTSTRAP_SECTION)
+        assert tail.endswith(f"{BOOTSTRAP_SECTION}\n\n{SOLO_VOICE}")
         assert "REPLY LANGUAGE" in tail
 
 

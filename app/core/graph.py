@@ -9,6 +9,7 @@ Every query is filtered by user_id. Functions are sync; callers wrap them in asy
 """
 
 import asyncio
+import logging
 import re
 import unicodedata
 import uuid
@@ -22,6 +23,8 @@ from sqlalchemy.orm import aliased
 from app.core.db import documents, get_engine, graph_edges, graph_nodes
 from app.core.llm import ask_structured, get_chat_model, get_embeddings
 from app.core.prompts import EXTRACT_PROMPT
+
+log = logging.getLogger(__name__)
 
 # Cosine similarity at which a new entity name is taken as one already in the graph. Measured on
 # the default embedding model: suffix variants ("Acme Corp"/"ACME Corporation", "Microsoft"/
@@ -586,8 +589,10 @@ async def extract_from_turns(user_id: str, turns: str, callbacks: list, source: 
     update_ = await ask_structured(model, FactUpdate, [SystemMessage(EXTRACT_PROMPT), HumanMessage(turn)], {"callbacks": callbacks})
     if update_ is None or not (update_.facts or update_.notes):
         return 0
+    kept = await asyncio.to_thread(save_facts, user_id, update_.facts, source, conversation_id) if update_.facts else 0
     if agent and update_.notes:
-        await asyncio.to_thread(save_notes, user_id, agent, update_.notes, conversation_id, [i for i, _ in notes])
-    if not update_.facts:
-        return 0
-    return await asyncio.to_thread(save_facts, user_id, update_.facts, source, conversation_id)
+        try:  # the facts are saved already: a failure here must not lose them
+            await asyncio.to_thread(save_notes, user_id, agent, update_.notes, conversation_id, [i for i, _ in notes])
+        except Exception:  # noqa: BLE001
+            log.exception("Saving the agent's notes failed; the turn's facts were kept")
+    return kept

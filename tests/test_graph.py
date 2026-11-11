@@ -860,6 +860,26 @@ async def test_notes_without_a_known_agent_are_dropped_and_facts_kept(make_user,
     assert len(graph.list_facts(user)) == 1
 
 
+@requires_db
+async def test_a_failure_saving_notes_keeps_the_turns_facts(make_user, embeddings, monkeypatch, caplog):
+    user = make_user()
+
+    async def ainvoke(messages, config):
+        return FactUpdate(facts=[Fact(subject="User", relation="holds", object="FPT")],
+                          notes=[AgentNote(text="Round to two decimals")])
+
+    monkeypatch.setattr(graph, "get_chat_model", lambda model=None: SimpleNamespace(
+        with_structured_output=lambda schema, method: SimpleNamespace(ainvoke=ainvoke)))
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("notes table is down")
+
+    monkeypatch.setattr(graph, "save_notes", broken)
+    assert await graph.extract_facts(user, "q", "a", [], agent="sql") == 1
+    assert "FPT" in graph.recall_facts(user)
+    assert "notes table is down" in caplog.text
+
+
 def test_extract_prompt_describes_notes():
     from app.core.prompts import EXTRACT_PROMPT
 

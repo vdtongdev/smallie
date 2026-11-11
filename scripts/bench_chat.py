@@ -347,7 +347,7 @@ async def run_scenario(assistant, store, user_id: str, name: str, run: int, mess
     *before, message = messages or messages_of(name)
     result, timing, usage = Result(scenario=name, run=run), Timing(), UsageCounter()
     config = {"configurable": {"thread_id": f"bench-{uuid.uuid4()}"}, "callbacks": [timing, usage]}
-    if name == "bootstrap":  # bootstrap_ran lives on a conversation row: make one, as POST /api/chat/auto does
+    if name in ("bootstrap", NOTES):  # bootstrap_ran lives on a conversation row, and notes_followup's id is stored in graph_edges (36 characters): make one, as POST /api/chat/auto does
         config["configurable"]["thread_id"] = (await asyncio.to_thread(create_conversation, user_id, "auto", message))["id"]
     try:
         snapshot = await build_snapshot(None, user_id, config["configurable"]["thread_id"])

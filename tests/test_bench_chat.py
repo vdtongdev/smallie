@@ -298,3 +298,26 @@ async def test_notes_followup_not_followed_when_the_answer_ignores_the_note(monk
     monkeypatch.setattr(routes_chat, "extract_facts", extractor)
     result = await bench_chat.run_notes_followup(NotesAssistant(), None, 1)
     assert result.checks["followed"] is False and result.checks["chat2"]["snapshot_note"] is False
+
+
+@requires_db
+async def test_notes_followup_chat_1s_conversation_id_can_be_saved_with_a_note(monkeypatch):
+    """The id the bench hands to extraction must fit graph_edges.conversation_id, as the app's UUID does."""
+    from langchain_core.embeddings import DeterministicFakeEmbedding
+
+    from app.core import graph
+    from app.core.config import get_settings
+
+    async def snapshot(checkpointer, user_id, conversation_id):
+        return {"user": "", "profile": "", "memories": "", "recent_chats": "", "agent_notes": {}}
+
+    async def extractor(user_id, question, answer, callbacks, source="chat", conversation_id=None, agent=None):
+        return graph.save_notes(user_id, agent, [graph.AgentNote(text="Write percentages with one decimal place")],
+                                conversation_id)
+
+    monkeypatch.setattr(graph, "get_embeddings", lambda: DeterministicFakeEmbedding(size=get_settings().embed_dim))
+    monkeypatch.setattr(bench_chat, "build_snapshot", snapshot)
+    monkeypatch.setattr(bench_chat, "recall_notes", lambda user_id: {})
+    monkeypatch.setattr(routes_chat, "extract_facts", extractor)
+    result = await bench_chat.run_notes_followup(NotesAssistant(), None, 1)
+    assert result.error == ""

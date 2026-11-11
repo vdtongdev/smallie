@@ -147,8 +147,7 @@ async def chat(
         if answer:
             extraction = UsageCounter()
             try:
-                await extract_facts(user_id, body.message, answer, [extraction], conversation_id=conversation["id"],
-                                    agent=MESSAGE_ROUTES.get(_answered_by(messages)))
+                await extract_turn(user_id, body.message, answer, _answered_by(messages), conversation["id"], extraction)
             except Exception:  # noqa: BLE001
                 log.exception("Extracting facts failed")
             try:
@@ -165,6 +164,13 @@ async def _chat_input(assistant, config, kind: str, message: str) -> dict | Comm
     if kind == TEAM_MODE and (await assistant.aget_state(config)).interrupts:
         return Command(resume=message)
     return {"messages": [{"role": "user", "content": message}]}
+
+
+async def extract_turn(user_id: str, question: str, answer: str, answered_by: str | None,
+                       conversation_id: str | None, counter: UsageCounter) -> None:
+    """The post-turn extraction: facts, and notes for the agent that wrote the answer (`answered_by` is its message name)."""
+    await extract_facts(user_id, question, answer, [counter], conversation_id=conversation_id,
+                        agent=MESSAGE_ROUTES.get(answered_by))
 
 
 def _answered_by(messages: list) -> str | None:

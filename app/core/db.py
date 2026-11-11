@@ -94,7 +94,7 @@ graph_nodes = Table(
     metadata,
     Column("id", String(36), primary_key=True),
     Column("user_id", String(64), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False),
-    Column("kind", String(8), nullable=False),  # "user" | "file" | "entity"
+    Column("kind", String(8), nullable=False),  # "user" | "file" | "entity" | "agent" | "note"
     Column("name", Text, nullable=False),
     Column("norm", Text, nullable=False),  # graph.normalize(name), for exact matches
     Column("document_id", String(36), ForeignKey("documents.id", ondelete="CASCADE"), unique=True),  # file nodes

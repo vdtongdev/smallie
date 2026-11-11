@@ -54,6 +54,14 @@ MAX_FACTS = 8  # per extraction call (scripts.build_graph sends several turns at
 SEARCH_NODES = 5  # nodes nearest to a search_memory query
 MIN_TEXT_MATCH = 4  # shorter entity names found in a question would scope searches by accident
 EXTRACT_ANSWER_CHARS = 3000  # enough for a questionnaire's conclusion
+RECALL_NOTES = 10  # notes per agent put into its prompt, newest first
+MAX_NOTES = 3  # per extraction call
+NOTE_CHARS = 200
+NOTED = "noted"  # agent -> note
+ABOUT = "about"  # note -> what it mentions (an entity, a file or the User node)
+# Cosine similarity at which a new note is taken as a rewording of one the same agent already has.
+# shortcut: provisional, not measured on the real embedding model yet.
+SAME_NOTE = 0.85
 USER = "User"
 USER_WORDS = frozenset({"user", "the user", "i", "me", "myself"})
 
@@ -88,6 +96,13 @@ class FactUpdate(BaseModel):
         return value[:MAX_FACTS] if isinstance(value, list) else value
 
 
+class AgentNote(BaseModel):
+    """One working note: how this user wants an agent's work done."""
+
+    text: str = Field(min_length=1, max_length=NOTE_CHARS)
+    about: list[str] = Field(default_factory=list)
+
+
 # ---------- nodes ----------
 
 def _node_id(conn: Connection, user_id: str, kind: str, norm: str) -> str | None:
@@ -97,8 +112,8 @@ def _node_id(conn: Connection, user_id: str, kind: str, norm: str) -> str | None
     )).scalar()
 
 
-def _get_or_create(conn: Connection, user_id: str, kind: str, name: str, embedding=None) -> str:
-    norm = normalize(name)
+def _get_or_create(conn: Connection, user_id: str, kind: str, name: str, embedding=None, norm: str | None = None) -> str:
+    norm = norm if norm is not None else normalize(name)
     conn.execute(insert(graph_nodes).values(
         id=str(uuid.uuid4()), user_id=user_id, kind=kind, name=name.strip(), norm=norm, embedding=embedding,
     ).on_conflict_do_nothing(index_elements=["user_id", "kind", "norm"], index_where=graph_nodes.c.document_id.is_(None)))
@@ -151,6 +166,8 @@ def _user_files(conn: Connection, user_id: str) -> dict[str, list[str]]:
 
 
 def _drop_orphans(conn: Connection, user_id: str) -> None:
+    noted = exists().where(graph_edges.c.target_id == graph_nodes.c.id, graph_edges.c.relation == NOTED)
+    conn.execute(delete(graph_nodes).where(graph_nodes.c.user_id == user_id, graph_nodes.c.kind == "note", ~noted))
     linked = exists().where(or_(graph_edges.c.source_id == graph_nodes.c.id, graph_edges.c.target_id == graph_nodes.c.id))
     conn.execute(delete(graph_nodes).where(graph_nodes.c.user_id == user_id, graph_nodes.c.kind == "entity", ~linked))
 
@@ -225,6 +242,52 @@ def save_facts(user_id: str, facts: list[Fact], source: str, conversation_id: st
     return kept
 
 
+def save_notes(user_id: str, agent: str, notes: list[AgentNote], conversation_id: str | None = None) -> int:
+    """Store an agent's working notes (`agent` is a route); returns how many were kept. A note the
+    agent already has (same words, or a rewording at >= SAME_NOTE) is updated, not added again."""
+    notes = [AgentNote(text=n.text.strip(), about=n.about) for n in notes if n.text.strip()]
+    with get_engine().connect() as conn:
+        files = _user_files(conn, user_id)
+    is_entity = lambda name: normalize(name) not in USER_WORDS and normalize(name) not in files  # noqa: E731
+    vectors = _embed([*(n.text for n in notes), *(a.strip() for n in notes for a in n.about if a.strip() and is_entity(a))])
+    with get_engine().begin() as conn:
+        user_node = _user_node(conn, user_id)
+        agent_node = _get_or_create(conn, user_id, "agent", agent)
+
+        def resolve(name: str) -> str:
+            norm = normalize(name)
+            if norm in USER_WORDS:
+                return user_node
+            if norm in files:
+                return _file_node(conn, user_id, files[norm][0])
+            return _entity(conn, user_id, name.strip(), vectors.get(name.strip()))
+
+        for note in notes:
+            norm = f"{agent}:{normalize(note.text)}"
+            node = _node_id(conn, user_id, "note", norm)
+            if node is None:
+                distance = graph_nodes.c.embedding.cosine_distance(vectors[note.text])
+                mine = select(graph_edges.c.target_id).where(
+                    graph_edges.c.user_id == user_id, graph_edges.c.source_id == agent_node, graph_edges.c.relation == NOTED)
+                nearest = conn.execute(select(graph_nodes.c.id, distance.label("distance")).where(
+                    graph_nodes.c.user_id == user_id, graph_nodes.c.kind == "note", graph_nodes.c.embedding.is_not(None),
+                    graph_nodes.c.id.in_(mine)).order_by(distance).limit(1)).first()
+                if nearest and 1 - nearest.distance >= SAME_NOTE:
+                    node = nearest.id
+                    conn.execute(update(graph_nodes).where(graph_nodes.c.id == node).values(
+                        name=note.text, norm=norm, embedding=vectors[note.text]))
+                    conn.execute(delete(graph_edges).where(
+                        graph_edges.c.user_id == user_id, graph_edges.c.source_id == node, graph_edges.c.relation == ABOUT))
+                else:
+                    node = _get_or_create(conn, user_id, "note", note.text, vectors[note.text], norm=norm)
+            _link(conn, user_id, agent_node, NOTED, node, "chat", conversation_id=conversation_id)
+            targets = {resolve(a) for a in note.about if a.strip()} or {user_node}
+            for target in targets:
+                _link(conn, user_id, node, ABOUT, target, "chat", conversation_id=conversation_id)
+        _drop_orphans(conn, user_id)
+    return len(notes)
+
+
 def card_text(filename: str, summary: str | None) -> str:
     return f"{filename}: {summary}" if summary else filename
 
@@ -271,13 +334,14 @@ def save_card(user_id: str, document_id: str, summary: str, entities: list[str])
 # ---------- reading ----------
 
 _S, _T = aliased(graph_nodes), aliased(graph_nodes)
+_NOTE_KINDS = ("agent", "note")  # nodes that are no part of the facts
 
 
 def _facts_query(user_id: str):
     return (select(graph_edges.c.id, graph_edges.c.relation, graph_edges.c.source, graph_edges.c.created_at,
                    _S.c.name.label("subject"), _T.c.name.label("object"))
             .join(_S, _S.c.id == graph_edges.c.source_id).join(_T, _T.c.id == graph_edges.c.target_id)
-            .where(graph_edges.c.user_id == user_id))
+            .where(graph_edges.c.user_id == user_id, _S.c.kind.not_in(_NOTE_KINDS), _T.c.kind.not_in(_NOTE_KINDS)))
 
 
 def _line(row) -> str:
@@ -308,7 +372,7 @@ def search_facts(user_id: str, query: str) -> str:
     embedding = get_embeddings().embed_query(query)
     with get_engine().connect() as conn:
         nearest = select(graph_nodes.c.id).where(
-            graph_nodes.c.user_id == user_id, graph_nodes.c.embedding.is_not(None),
+            graph_nodes.c.user_id == user_id, graph_nodes.c.embedding.is_not(None), graph_nodes.c.kind != "note",
         ).order_by(graph_nodes.c.embedding.cosine_distance(embedding)).limit(SEARCH_NODES).scalar_subquery()
         rows = conn.execute(_facts_query(user_id).where(
             or_(graph_edges.c.source_id.in_(nearest), graph_edges.c.target_id.in_(nearest)))
@@ -321,7 +385,41 @@ def list_facts(user_id: str) -> list[dict]:
     with get_engine().connect() as conn:
         rows = conn.execute(_facts_query(user_id).where(graph_edges.c.source != "document")
                             .order_by(graph_edges.c.updated_at.desc())).all()
-    return [{"id": r.id, "text": _line(r), "source": r.source, "created_at": r.created_at} for r in rows]
+    return [{"id": r.id, "text": _line(r), "source": r.source, "created_at": r.created_at, "agent": None} for r in rows]
+
+
+def _notes_query(user_id: str, *columns):
+    agent, note = aliased(graph_nodes), aliased(graph_nodes)
+    return (select(*(c(agent, note) for c in columns))
+            .select_from(graph_edges).join(agent, agent.c.id == graph_edges.c.source_id)
+            .join(note, note.c.id == graph_edges.c.target_id)
+            .where(graph_edges.c.user_id == user_id, graph_edges.c.relation == NOTED,
+                   agent.c.kind == "agent", note.c.kind == "note"))
+
+
+def recall_notes(user_id: str, limit: int = RECALL_NOTES) -> dict[str, str]:
+    """Each agent's newest notes (route -> bullet list); agents without notes are absent."""
+    rank = lambda a, n: func.row_number().over(  # noqa: E731
+        partition_by=a.c.name, order_by=(graph_edges.c.updated_at.desc(), graph_edges.c.id)).label("rank")
+    inner = _notes_query(user_id, lambda a, n: a.c.name.label("agent"), lambda a, n: n.c.name.label("text"),
+                         lambda a, n: graph_edges.c.updated_at.label("at"), rank).subquery()
+    with get_engine().connect() as conn:
+        rows = conn.execute(select(inner.c.agent, inner.c.text).where(inner.c.rank <= limit)
+                            .order_by(inner.c.agent, inner.c.at.desc(), inner.c.rank)).all()
+    notes: dict[str, list[str]] = {}
+    for row in rows:
+        notes.setdefault(row.agent, []).append(f"- {row.text}")
+    return {agent: "\n".join(lines) for agent, lines in notes.items()}
+
+
+def list_notes(user_id: str) -> list[dict]:
+    """The agents' notes, for /api/memories; `id` is the `noted` edge's id."""
+    query = _notes_query(user_id, lambda a, n: graph_edges.c.id, lambda a, n: n.c.name.label("text"),
+                         lambda a, n: graph_edges.c.source, lambda a, n: graph_edges.c.created_at,
+                         lambda a, n: a.c.name.label("agent")).order_by(graph_edges.c.updated_at.desc())
+    with get_engine().connect() as conn:
+        rows = conn.execute(query).all()
+    return [{"id": r.id, "text": r.text, "source": r.source, "created_at": r.created_at, "agent": r.agent} for r in rows]
 
 
 def delete_fact(user_id: str, edge_id: str) -> bool:
@@ -408,7 +506,8 @@ async def extract_from_turns(user_id: str, turns: str, callbacks: list, source: 
             files = conn.execute(select(documents.c.filename).where(
                 documents.c.user_id == user_id, documents.c.status != "failed")).scalars()
             relations = conn.execute(select(graph_edges.c.relation).distinct().where(
-                graph_edges.c.user_id == user_id, graph_edges.c.source != "document")).scalars()
+                graph_edges.c.user_id == user_id, graph_edges.c.source != "document",
+                graph_edges.c.relation.not_in((NOTED, ABOUT)))).scalars()
             return list(files), sorted(set(relations) - STANDARD)
 
     files, relations = await asyncio.to_thread(known)

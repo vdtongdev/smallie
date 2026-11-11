@@ -51,7 +51,7 @@ def reembed_graph(dims: int) -> int:
     """Resize graph_nodes.embedding and re-embed every entity name."""
     with get_engine().begin() as conn:
         conn.execute(text(f"ALTER TABLE graph_nodes ALTER COLUMN embedding TYPE vector({int(dims)}) USING NULL"))
-        rows = conn.execute(select(graph_nodes.c.id, graph_nodes.c.name).where(graph_nodes.c.kind == "entity")).all()
+        rows = conn.execute(select(graph_nodes.c.id, graph_nodes.c.name).where(graph_nodes.c.kind.in_(("entity", "note")))).all()
         for start in range(0, len(rows), 64):
             batch = rows[start:start + 64]
             for (node_id, _), vector in zip(batch, get_embeddings().embed_documents([name for _, name in batch])):

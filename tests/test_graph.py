@@ -12,7 +12,7 @@ from sqlalchemy import delete, func, select, update
 from app.core import graph
 from app.core.config import get_settings
 from app.core.db import documents, get_engine, graph_edges, graph_nodes, init_db, users
-from app.core.graph import Fact, FactUpdate
+from app.core.graph import AgentNote, Fact, FactUpdate
 from tests.conftest import requires_db
 
 
@@ -663,3 +663,381 @@ def test_bench_copies_admin_settings(make_user, monkeypatch):
     with get_engine().connect() as conn:
         row = conn.execute(select(model_settings).where(model_settings.c.user_id == bench)).one()
     assert (row.base_url, row.model, row.api_key) == ("http://x/v1", "m", "token")
+
+
+# ---------- agent notes ----------
+
+def edge_target_kinds(user_id: str, relation: str) -> list[str]:
+    with get_engine().connect() as conn:
+        return sorted(conn.execute(select(graph_nodes.c.kind).join(
+            graph_edges, graph_edges.c.target_id == graph_nodes.c.id).where(
+            graph_edges.c.user_id == user_id, graph_edges.c.relation == relation)).scalars())
+
+
+@requires_db
+def test_a_note_becomes_agent_and_note_nodes_with_edges(make_user, embeddings):
+    user = make_user()
+    assert graph.save_notes(user, "sql", [AgentNote(text="Limit queries to one exchange", about=["HOSE"])], "c1") == 1
+    assert node_names(user, "agent") == ["sql"]
+    assert node_names(user, "note") == ["Limit queries to one exchange"]
+    assert node_names(user) == ["HOSE"]
+    assert count(graph_edges, user, graph_edges.c.relation == "noted", graph_edges.c.conversation_id == "c1") == 1
+    assert count(graph_edges, user, graph_edges.c.relation == "about") == 1
+
+
+@requires_db
+def test_a_note_about_nothing_or_about_the_user_links_the_user_node(make_user, embeddings):
+    user = make_user()
+    graph.save_notes(user, "sql", [AgentNote(text="Answer briefly"), AgentNote(text="Show prices in VND", about=["the user"])])
+    assert node_names(user) == []  # no entity called "the user" or "User"
+    assert edge_target_kinds(user, "about") == ["user", "user"]
+
+
+@requires_db
+def test_a_note_about_a_file_links_its_file_node(make_user, embeddings):
+    user = make_user()
+    add_document(user, "plan.pdf")
+    graph.save_notes(user, "docs", [AgentNote(text="Quote the plan's headings", about=["plan.pdf"])])
+    assert edge_target_kinds(user, "about") == ["file"]
+    assert node_names(user) == []
+
+
+@requires_db
+def test_a_reworded_note_replaces_the_old_one(make_user, embeddings):
+    user = make_user()
+    embeddings.aliases = {"Use HOSE only": "Limit queries to one exchange"}
+    graph.save_notes(user, "sql", [AgentNote(text="Limit queries to one exchange", about=["HOSE"])])
+    graph.save_notes(user, "sql", [AgentNote(text="Use HOSE only", about=["HNX"])])
+    assert node_names(user, "note") == ["Use HOSE only"]
+    assert count(graph_edges, user, graph_edges.c.relation == "noted") == 1
+    assert count(graph_edges, user, graph_edges.c.relation == "about") == 1  # the old about edge is gone
+    assert node_names(user) == ["HNX"]  # HOSE lost its last edge
+
+
+@requires_db
+def test_the_same_note_again_takes_the_new_about_edges(make_user, embeddings):
+    user = make_user()
+    graph.save_notes(user, "sql", [AgentNote(text="Round to two decimals", about=["HOSE"])])
+    graph.save_notes(user, "sql", [AgentNote(text="Round to two decimals", about=["HNX"])])
+    assert node_names(user, "note") == ["Round to two decimals"]
+    assert count(graph_edges, user, graph_edges.c.relation == "about") == 1
+    assert node_names(user) == ["HNX"]  # HOSE lost its last edge
+
+
+@requires_db
+def test_a_different_note_is_added(make_user, embeddings):
+    user = make_user()
+    graph.save_notes(user, "sql", [AgentNote(text="Limit queries to one exchange"), AgentNote(text="Round to two decimals")])
+    assert node_names(user, "note") == ["Limit queries to one exchange", "Round to two decimals"]
+    assert count(graph_edges, user, graph_edges.c.relation == "noted") == 2
+
+
+@requires_db
+def test_the_same_note_again_is_kept_once(make_user, embeddings):
+    user = make_user()
+    graph.save_notes(user, "sql", [AgentNote(text="Round to two decimals")])
+    graph.save_notes(user, "sql", [AgentNote(text="round to two decimals.")])
+    assert node_names(user, "note") == ["Round to two decimals"]
+    assert count(graph_edges, user, graph_edges.c.relation == "noted") == 1
+
+
+@requires_db
+def test_two_agents_keep_their_own_copy_of_the_same_note(make_user, embeddings):
+    user = make_user()
+    text = "Prefer short answers"
+    graph.save_notes(user, "sql", [AgentNote(text=text)])
+    graph.save_notes(user, "chart", [AgentNote(text=text)])
+    assert node_names(user, "note") == [text, text]
+    sql_edge = next(n["id"] for n in graph.list_notes(user) if n["agent"] == "sql")
+    assert graph.delete_fact(user, sql_edge) is True
+    assert graph.recall_notes(user) == {"chart": f"- {text}"}
+
+
+@requires_db
+def test_recall_notes_is_per_agent_newest_first_and_capped(make_user, embeddings):
+    user = make_user()
+    for i in range(12):
+        graph.save_notes(user, "sql", [AgentNote(text=f"sql rule number {i} about {'x' * i}")])
+    graph.save_notes(user, "chart", [AgentNote(text="chart rule")])
+    notes = graph.recall_notes(user)
+    assert set(notes) == {"sql", "chart"}
+    lines = notes["sql"].splitlines()
+    assert len(lines) == graph.RECALL_NOTES == 10
+    assert lines[0] == f"- sql rule number 11 about {'x' * 11}"
+    assert lines[-1] == f"- sql rule number 2 about {'x' * 2}"
+    assert notes["chart"] == "- chart rule"
+
+
+@requires_db
+def test_notes_are_scoped_per_user(make_user, embeddings):
+    user, other = make_user(), make_user()
+    graph.save_notes(user, "sql", [AgentNote(text="Round to two decimals")])
+    assert graph.recall_notes(other) == {}
+    assert graph.list_notes(other) == []
+    assert len(graph.recall_notes(user)) == 1
+
+
+@requires_db
+def test_deleting_a_note_removes_its_node(make_user, embeddings):
+    user, other = make_user(), make_user()
+    graph.save_notes(user, "sql", [AgentNote(text="Round to two decimals", about=["HOSE"])])
+    graph.save_notes(other, "sql", [AgentNote(text="Round to two decimals", about=["HOSE"])])
+    edge = graph.list_notes(user)[0]["id"]
+    assert graph.delete_fact(user, edge) is True
+    assert node_names(user, "note") == []
+    assert count(graph_edges, user, graph_edges.c.relation == "about") == 0
+    assert node_names(user) == []
+    assert node_names(other, "note") == ["Round to two decimals"]  # the other user's rows are untouched
+    assert count(graph_edges, other) == 2
+
+
+@requires_db
+def test_notes_never_show_up_as_facts(make_user, embeddings):
+    user = make_user()
+    graph.save_facts(user, [Fact(subject="User", relation="holds", object="FPT")], "chat")
+    graph.save_notes(user, "sql", [AgentNote(text="Round to two decimals")])  # about nothing: an edge at the User node
+    seen = [graph.recall_facts(user), graph.recall_profile(user)[0], graph.search_facts(user, "Round to two decimals"),
+            graph.search_facts(user, "FPT")]
+    for text in seen:
+        assert "Round to two decimals" not in text
+        assert "noted" not in text and "about" not in text
+    assert "User holds FPT" in seen[0]
+    assert [r["text"] for r in graph.list_facts(user)] == ["User holds FPT"]
+    assert all(r["agent"] is None for r in graph.list_facts(user))
+    notes = graph.list_notes(user)
+    assert [n["agent"] for n in notes] == ["sql"] and notes[0]["text"] == "Round to two decimals"
+
+
+@requires_db
+def test_notes_do_not_change_the_relations_offered_to_the_extractor(make_user, embeddings, monkeypatch):
+    import asyncio
+    user = make_user()
+    graph.save_notes(user, "sql", [AgentNote(text="Round to two decimals")])
+    seen = []
+
+    async def ask(model, schema, messages, config):
+        seen.append(messages[1].content)
+
+    monkeypatch.setattr(graph, "ask_structured", ask)
+    monkeypatch.setattr(graph, "get_chat_model", lambda user_id: None)
+    asyncio.run(graph.extract_from_turns(user, "User: hi", []))
+    assert "noted" not in seen[0] and "about" not in seen[0]
+
+
+def test_fact_update_parses_without_notes_and_keeps_three():
+    assert FactUpdate.model_validate({"facts": []}).notes == []
+    assert len(FactUpdate.model_validate({"notes": [{"text": f"n{i}"} for i in range(5)]}).notes) == 3
+    with pytest.raises(ValidationError):
+        AgentNote(text="x" * 201)
+
+
+def fake_extractor(monkeypatch, seen):
+    async def ainvoke(messages, config):
+        seen.append(messages[1].content)
+        return FactUpdate(facts=[Fact(subject="User", relation="risk_tolerance", object="balanced")],
+                          notes=[AgentNote(text="Round to two decimals")])
+
+    monkeypatch.setattr(graph, "get_chat_model", lambda model=None: SimpleNamespace(
+        with_structured_output=lambda schema, method: SimpleNamespace(ainvoke=ainvoke)))
+
+
+@requires_db
+async def test_extract_facts_saves_notes_under_the_answering_agent(make_user, embeddings, monkeypatch):
+    user = make_user()
+    seen = []
+    fake_extractor(monkeypatch, seen)
+    assert await graph.extract_facts(user, "q", "a", [], agent="sql") == 1
+    assert graph.recall_notes(user) == {"sql": "- Round to two decimals"}
+    assert "sql" in seen[0].split("User: q")[0]  # the message names the agent before the turn
+
+
+@requires_db
+async def test_notes_without_a_known_agent_are_dropped_and_facts_kept(make_user, embeddings, monkeypatch):
+    user = make_user()
+    fake_extractor(monkeypatch, [])
+    assert await graph.extract_facts(user, "q", "a", []) == 1
+    assert graph.recall_notes(user) == {}
+    assert len(graph.list_facts(user)) == 1
+
+
+@requires_db
+async def test_a_failure_saving_notes_keeps_the_turns_facts(make_user, embeddings, monkeypatch, caplog):
+    user = make_user()
+
+    async def ainvoke(messages, config):
+        return FactUpdate(facts=[Fact(subject="User", relation="holds", object="FPT")],
+                          notes=[AgentNote(text="Round to two decimals")])
+
+    monkeypatch.setattr(graph, "get_chat_model", lambda model=None: SimpleNamespace(
+        with_structured_output=lambda schema, method: SimpleNamespace(ainvoke=ainvoke)))
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("notes table is down")
+
+    monkeypatch.setattr(graph, "save_notes", broken)
+    assert await graph.extract_facts(user, "q", "a", [], agent="sql") == 1
+    assert "FPT" in graph.recall_facts(user)
+    assert "notes table is down" in caplog.text
+
+
+def test_extract_prompt_describes_notes():
+    from app.core.prompts import EXTRACT_PROMPT
+
+    assert "notes" in EXTRACT_PROMPT
+    assert "{" not in EXTRACT_PROMPT and "}" not in EXTRACT_PROMPT
+
+
+# ---------- the extractor names the note a new note replaces ----------
+
+def note_texts(user: str, agent: str) -> list[str]:
+    return [line[2:] for line in graph.recall_notes(user).get(agent, "").splitlines()]
+
+
+def test_replaces_accepts_a_number_and_ignores_anything_else():
+    assert AgentNote(text="x", replaces=2).replaces == 2
+    assert AgentNote(text="x", replaces="2").replaces == 2
+    for bad in (0, -1, "second", 1.5, None, [1]):
+        assert AgentNote(text="x", replaces=bad).replaces is None
+
+
+def test_a_bad_replaces_value_never_raises():
+    for bad in ("²", "①", "٣", "1e3", "+2", " ", "", True, False, float("nan"), float("inf"), {}, b"2"):
+        assert AgentNote(text="x", replaces=bad).replaces is None
+    parsed = FactUpdate.model_validate({"facts": [{"subject": "User", "relation": "holds", "object": "FPT"}],
+                                        "notes": [{"text": "x", "replaces": "²"}]})
+    assert len(parsed.facts) == 1 and parsed.notes[0].replaces is None
+
+
+@requires_db
+def test_a_note_replaces_the_one_the_extractor_named(make_user, embeddings):
+    user = make_user()
+    graph.save_notes(user, "sql", [AgentNote(text="Sort results by date ascending")])
+    graph.save_notes(user, "sql", [AgentNote(text="Limit results to 50 rows")])
+    ids = [i for i, _ in graph.current_notes(user, "sql")]  # newest first: limit, sort
+    graph.save_notes(user, "sql", [AgentNote(text="Sort results by date descending", replaces=2)], current=ids)
+    assert note_texts(user, "sql") == ["Sort results by date descending", "Limit results to 50 rows"]
+    assert count(graph_edges, user, graph_edges.c.relation == "noted") == 2
+
+
+@requires_db
+def test_current_notes_match_recall_notes(make_user, embeddings):
+    user = make_user()
+    for text in ("first rule", "second rule", "third rule"):
+        graph.save_notes(user, "sql", [AgentNote(text=text)])
+    graph.save_notes(user, "chart", [AgentNote(text="chart rule")])
+    assert [t for _, t in graph.current_notes(user, "sql")] == note_texts(user, "sql") == ["third rule", "second rule", "first rule"]
+    assert [t for _, t in graph.current_notes(user, "sql", limit=2)] == ["third rule", "second rule"]
+    assert graph.current_notes(make_user(), "sql") == []
+
+
+@requires_db
+def test_replaces_outside_the_list_adds_a_note(make_user, embeddings):
+    user = make_user()
+    graph.save_notes(user, "sql", [AgentNote(text="Sort results by date ascending")])
+    ids = [i for i, _ in graph.current_notes(user, "sql")]
+    graph.save_notes(user, "sql", [AgentNote(text="Limit results to 50 rows", replaces=5)], current=ids)
+    assert sorted(note_texts(user, "sql")) == ["Limit results to 50 rows", "Sort results by date ascending"]
+
+
+@requires_db
+def test_replaces_cannot_touch_another_agents_or_users_note(make_user, embeddings):
+    user, other = make_user(), make_user()
+    graph.save_notes(user, "chart", [AgentNote(text="Use dark colours")])
+    graph.save_notes(other, "sql", [AgentNote(text="Show prices in VND")])
+    chart_id = graph.current_notes(user, "chart")[0][0]
+    other_id = graph.current_notes(other, "sql")[0][0]
+    graph.save_notes(user, "sql", [AgentNote(text="Sort results by date ascending", replaces=1)], current=[chart_id])
+    graph.save_notes(user, "sql", [AgentNote(text="Limit results to 50 rows", replaces=1)], current=[other_id])
+    assert note_texts(user, "chart") == ["Use dark colours"]
+    assert note_texts(other, "sql") == ["Show prices in VND"]
+    assert sorted(note_texts(user, "sql")) == ["Limit results to 50 rows", "Sort results by date ascending"]
+
+
+@requires_db
+def test_replaces_without_a_list_is_ignored(make_user, embeddings):
+    user = make_user()
+    graph.save_notes(user, "sql", [AgentNote(text="Sort results by date ascending")])
+    graph.save_notes(user, "sql", [AgentNote(text="Limit results to 50 rows", replaces=1)])
+    assert sorted(note_texts(user, "sql")) == ["Limit results to 50 rows", "Sort results by date ascending"]
+
+
+@requires_db
+def test_same_text_wins_and_the_named_note_is_removed(make_user, embeddings):
+    user = make_user()
+    graph.save_notes(user, "sql", [AgentNote(text="Sort results by date ascending")])  # A
+    graph.save_notes(user, "sql", [AgentNote(text="Limit results to 50 rows")])  # B
+    ids = [i for i, _ in graph.current_notes(user, "sql")]  # [B, A]
+    graph.save_notes(user, "sql", [AgentNote(text="sort results by date ascending", replaces=1)], current=ids)
+    assert note_texts(user, "sql") == ["Sort results by date ascending"]
+    assert node_names(user, "note") == ["Sort results by date ascending"]
+    assert count(graph_edges, user, graph_edges.c.relation == "noted") == 1
+
+
+@requires_db
+def test_two_notes_naming_the_same_number_one_takes_it_and_one_is_added(make_user, embeddings):
+    user = make_user()
+    graph.save_notes(user, "sql", [AgentNote(text="Sort results by date ascending")])
+    ids = [i for i, _ in graph.current_notes(user, "sql")]
+    graph.save_notes(user, "sql", [AgentNote(text="Sort results by date descending", replaces=1),
+                                   AgentNote(text="Limit results to 50 rows", replaces=1)], current=ids)
+    assert sorted(note_texts(user, "sql")) == ["Limit results to 50 rows", "Sort results by date descending"]
+
+
+@requires_db
+def test_different_instructions_are_both_kept_below_the_threshold(make_user, embeddings):
+    user = make_user()
+    graph.save_notes(user, "sql", [AgentNote(text="Round prices to two decimals")])
+    graph.save_notes(user, "sql", [AgentNote(text="Show dates as day, month, year")])
+    assert len(note_texts(user, "sql")) == 2
+
+
+def recording_extractor(monkeypatch, seen, note):
+    async def ainvoke(messages, config):
+        seen.append(messages[1].content)
+        return FactUpdate(notes=[note])
+
+    monkeypatch.setattr(graph, "get_chat_model", lambda model=None: SimpleNamespace(
+        with_structured_output=lambda schema, method: SimpleNamespace(ainvoke=ainvoke)))
+
+
+@requires_db
+async def test_the_extractor_sees_the_agents_notes_numbered(make_user, embeddings, monkeypatch):
+    user = make_user()
+    graph.save_notes(user, "sql", [AgentNote(text="Sort results by date ascending")])
+    graph.save_notes(user, "sql", [AgentNote(text="Limit results to 50 rows")])
+    graph.save_notes(user, "chart", [AgentNote(text="Use dark colours")])
+    seen = []
+    recording_extractor(monkeypatch, seen, AgentNote(text="Sort results by date descending", replaces=2))
+    await graph.extract_facts(user, "q", "a", [], agent="sql")
+    head = seen[0].split("User: q")[0]
+    assert "1. Limit results to 50 rows\n2. Sort results by date ascending\n" in head
+    assert "Use dark colours" not in seen[0]
+    assert note_texts(user, "sql") == ["Sort results by date descending", "Limit results to 50 rows"]
+
+
+@requires_db
+async def test_note_text_with_braces_reaches_the_extractor(make_user, embeddings, monkeypatch):
+    user = make_user()
+    graph.save_notes(user, "sql", [AgentNote(text="Return a {column} header")])
+    seen = []
+    recording_extractor(monkeypatch, seen, AgentNote(text="Return no header", replaces=1))
+    await graph.extract_facts(user, "q", "a", [], agent="sql")
+    assert "1. Return a {column} header" in seen[0]
+    assert note_texts(user, "sql") == ["Return no header"]
+
+
+@requires_db
+async def test_no_notes_list_without_an_agent_or_without_notes(make_user, embeddings, monkeypatch):
+    user = make_user()
+    graph.save_notes(user, "sql", [AgentNote(text="Sort results by date ascending")])
+    seen = []
+    recording_extractor(monkeypatch, seen, AgentNote(text="Limit results to 50 rows"))
+    await graph.extract_facts(user, "q", "a", [])
+    await graph.extract_facts(make_user(), "q", "a", [], agent="sql")
+    assert all("1. " not in message for message in seen) and len(seen) == 2
+
+
+def test_extract_prompt_explains_replaces():
+    from app.core.prompts import EXTRACT_PROMPT
+
+    assert "replaces" in EXTRACT_PROMPT and "{" not in EXTRACT_PROMPT

@@ -450,6 +450,7 @@ def build_research_workflow():
         tools=[*mcp_tools, search_documents, run_sql, make_load_skill_tool(RESEARCHER_SKILLS)],
         middleware=[cite_by_id],
         max_model_calls=get_settings().research_max_model_calls,
+        route="research",
     )
 
     async def gather(state: ResearchState, runtime: Runtime[AgentContext]) -> dict:

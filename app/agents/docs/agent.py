@@ -63,7 +63,7 @@ def make_mentions(stems: list[str]):
 
 
 def build_docs_agent():
-    return build_agent(name="docs_agent", system_prompt=DOCS_SYSTEM, tools=[search_documents])
+    return build_agent(name="docs_agent", system_prompt=DOCS_SYSTEM, tools=[search_documents], route="docs")
 
 
 SPEC = AgentSpec(

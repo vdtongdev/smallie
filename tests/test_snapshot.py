@@ -24,7 +24,7 @@ from app.core.db import conversations, documents, get_engine, init_db, users
 from app.core.graph import Fact
 from app.core.memory import AgentContext
 from app.core.model_settings import ModelSettings
-from app.core.snapshot import chat_snapshot, clear_snapshots, save_snapshot
+from app.core.snapshot import build_snapshot, chat_snapshot, clear_snapshots, save_snapshot
 from tests.conftest import requires_db
 from tests.scripted import scripted
 
@@ -204,6 +204,24 @@ async def test_saved_snapshot_without_profile_is_rebuilt(env):
         conn.execute(update(conversations).where(conversations.c.id == chat).values(updated_at=text("now()")))
     snapshot = await chat_snapshot(None, user, get_conversation(user, chat))
     assert "profile" in snapshot and snapshot["memories"] == ""
+
+
+async def test_snapshot_carries_each_agents_notes(env):
+    user = env.user()
+    chat = create_conversation(user, "auto", "hi")["id"]
+    graph.save_notes(user, "sql", [graph.AgentNote(text="Show prices in USD")])
+    snapshot = await build_snapshot(None, user, chat)
+    assert snapshot["agent_notes"] == {"sql": "- Show prices in USD"}
+
+
+async def test_a_snapshot_saved_before_agent_notes_is_rebuilt(env):
+    user = env.user()
+    chat = create_conversation(user, "auto", "hi")["id"]
+    save_snapshot(user, chat, {"user": "", "profile": "", "memories": "- old", "recent_chats": ""})
+    with get_engine().begin() as conn:
+        conn.execute(update(conversations).where(conversations.c.id == chat).values(updated_at=text("now()")))
+    snapshot = await chat_snapshot(None, user, get_conversation(user, chat))
+    assert "agent_notes" in snapshot and snapshot["memories"] == ""
 
 
 def ran(chat: str) -> bool:

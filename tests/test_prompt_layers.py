@@ -1,5 +1,6 @@
 """The system prompt shows the user's profile facts apart from other memories."""
 
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from app.agents import factory
@@ -92,3 +93,68 @@ async def test_team_voice_leaves_system_prompt_unchanged(monkeypatch):
     team = (await _request(monkeypatch, agent=TEAM_MODE))[0].content
     alone = (await _request(monkeypatch))[0].content
     assert team == alone
+
+
+SQL_NOTE, CHART_NOTE = "- SQL NOTE", "- CHART NOTE"
+
+
+async def test_an_agent_sees_only_its_own_notes(monkeypatch):
+    model = scripted(AIMessage("ok"))
+    monkeypatch.setattr(factory, "get_chat_model", lambda *a, **k: model)
+    agent = factory.build_agent(name="t", system_prompt="x", tools=[], route="sql")
+    context = AgentContext(user_id="u", memories="- MEM", agent_notes={"sql": SQL_NOTE, "chart": CHART_NOTE})
+    await agent.ainvoke({"messages": [HumanMessage("go")]}, context=context)
+    system = model.prompts[0][0].content
+    assert SQL_NOTE in system and CHART_NOTE not in system
+    assert system.index(SQL_NOTE) < system.index("- MEM")  # before the memories section
+
+
+async def test_no_notes_leaves_the_prompt_unchanged(monkeypatch):
+    async def system_for(**context):
+        model = scripted(AIMessage("ok"))
+        monkeypatch.setattr(factory, "get_chat_model", lambda *a, **k: model)
+        agent = factory.build_agent(name="t", system_prompt="x", tools=[], route="sql")
+        await agent.ainvoke({"messages": [HumanMessage("go")]}, context=AgentContext(user_id="u", **context))
+        return model.prompts[0][0].content
+
+    assert await system_for(agent_notes={}) == await system_for(agent_notes={"chart": CHART_NOTE})
+    assert "YOUR NOTES" not in await system_for(agent_notes={})
+
+
+async def test_note_with_braces_renders_literally(monkeypatch):
+    model = scripted(AIMessage("ok"))
+    monkeypatch.setattr(factory, "get_chat_model", lambda *a, **k: model)
+    agent = factory.build_agent(name="t", system_prompt="x", tools=[], route="sql")
+    note = "- use {year} and {0} and }{ in dates"
+    await agent.ainvoke({"messages": [HumanMessage("go")]},
+                        context=AgentContext(user_id="u", agent_notes={"sql": note}))
+    assert note in model.prompts[0][0].content
+
+
+@pytest.mark.parametrize("route, message", [
+    ("docs", "what is in my file?"), ("sql", "AAPL?"), ("chart", "draw it"),
+    ("research", "research this"), ("orchestrator", "write a short poem"),
+])
+async def test_every_agent_passes_its_route(monkeypatch, route, message):
+    from langgraph.checkpoint.memory import InMemorySaver
+    from langgraph.store.memory import InMemoryStore
+
+    from app.agents.docs import agent as docs_agent
+    from app.agents.research import agent as research_agent
+    from app.agents.sql import agent as sql_agent
+    from app.orchestration.graph import build_assistant
+    from tests.conftest import local_agents
+    from tests.scripted import PROMPT_PHRASES
+
+    model = scripted(*[AIMessage("ok") for _ in range(6)])
+    monkeypatch.setattr(factory, "get_chat_model", lambda *a, **k: model)
+    monkeypatch.setattr(sql_agent, "describe_schema", lambda: "")
+    monkeypatch.setattr(research_agent, "describe_schema", lambda: "")
+    monkeypatch.setattr(docs_agent, "document_names", lambda user_id: [])
+    assistant = build_assistant(InMemorySaver(), InMemoryStore(), agents=local_agents())
+    context = AgentContext(user_id="u", agent="auto" if route == "orchestrator" else route,
+                           agent_notes={route: "- MINE"})
+    await assistant.ainvoke({"messages": [HumanMessage(message)]}, {"configurable": {"thread_id": "t"}},
+                            context=context)
+    systems = [p[0].content for p in model.prompts if PROMPT_PHRASES[route] in p[0].content]
+    assert systems and all("- MINE" in s for s in systems)

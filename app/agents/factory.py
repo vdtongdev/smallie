@@ -31,7 +31,7 @@ from app.core.config import get_settings
 from app.core.llm import get_chat_model, pick_model, placeholder_model
 from app.core.memory import MEMORY_TOOLS, TEAM_MODE, TOOL_SOURCE, AgentContext
 from app.core.model_settings import load_settings
-from app.core.prompts import CALL_NOTE, LAST_CALL_NOTE, MEMORIES_SECTION, PROFILE_SECTION, RECENT_CHATS_SECTION, SAME_RESULT, TEAM_VOICE, USER_SECTION, reply_language
+from app.core.prompts import CALL_NOTE, LAST_CALL_NOTE, MEMORIES_SECTION, NOTES_SECTION, PROFILE_SECTION, RECENT_CHATS_SECTION, SAME_RESULT, TEAM_VOICE, USER_SECTION, reply_language
 
 log = logging.getLogger(__name__)
 
@@ -248,13 +248,15 @@ def build_agent(
     tail: Callable[[ModelRequest], str] | None = None,
     middleware: Sequence[AgentMiddleware] = (),
     last_call_writes: bool = True,
+    route: str = "",
 ):
     """An agent with the given tools plus long-term memory tools and a memory-aware prompt.
 
     Leave checkpointer/store unset when the agent runs as a subgraph of the assistant
     (app/orchestration/graph.py); it then uses the parent graph's. `prompt_extra(request)` is appended to the prompt on every model call;
     `tail(request)` is added as the last message of every model call (not saved);
-    `middleware` runs after the built-in ones.
+    `middleware` runs after the built-in ones. `route` is the agent's route: the notes saved under it
+    (`context.agent_notes`) join the prompt.
     """
 
     @dynamic_prompt
@@ -265,6 +267,8 @@ def build_agent(
             prompt += USER_SECTION.format(user=context.user)
         if context.profile:
             prompt += PROFILE_SECTION.format(profile=context.profile)
+        if notes := context.agent_notes.get(route):
+            prompt += NOTES_SECTION.format(notes=notes)
         prompt += MEMORIES_SECTION.format(memories=context.memories or "(nothing yet)")
         if context.recent_chats:
             prompt += RECENT_CHATS_SECTION.format(recent_chats=context.recent_chats)

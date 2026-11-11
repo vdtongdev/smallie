@@ -8,7 +8,8 @@ import app.agents.research.prompts
 import app.agents.sql.prompts
 import app.core.prompts
 import app.orchestration.prompts
-from app.core.prompts import load_prompt, load_sections
+from app.core.prompts import (MEMORIES_SECTION, MEMORY_RULE, NOTES_SECTION, RECENT_CHATS_SECTION, load_prompt,
+                              load_sections)
 
 
 def test_load_prompt_drops_one_trailing_newline(tmp_path):
@@ -48,7 +49,7 @@ def test_load_sections_rejects_missing_duplicate_or_stray(tmp_path):
 
 ORCHESTRATION = Path(app.orchestration.prompts.__file__).parent
 LAYERS = Path(app.core.prompts.__file__).parent / "layers"
-LAYER_FILES = [LAYERS / "SOUL.md", LAYERS / "AGENTS.md", LAYERS / "USER.md",
+LAYER_FILES = [LAYERS / "SOUL.md", LAYERS / "AGENTS.md", LAYERS / "USER.md", LAYERS / "MEMORY.md",
                ORCHESTRATION / "AGENTS.md", ORCHESTRATION / "BOOTSTRAP.md"]
 LAYER_FILES += [Path(module.__file__).parent / "AGENTS.md" for module in (
     app.agents.docs.prompts, app.agents.sql.prompts, app.agents.chart.prompts, app.agents.research.prompts)]
@@ -62,3 +63,23 @@ def test_every_layer_file_exists_without_blank_edges():
     for path in LAYER_FILES:
         text = path.read_text(encoding="utf-8")
         assert not text.startswith(chr(10)) and text.endswith(chr(10)) and not text.endswith(chr(10) * 2), path
+
+
+def test_memory_layer_has_its_own_file():
+    sections = load_sections(LAYERS / "MEMORY.md", ("notes", "memories", "recent_chats"))
+    assert set(sections) == {"notes", "memories", "recent_chats"}
+    load_sections(LAYERS / "USER.md", ("user", "profile"))  # raises if memories/recent_chats are still there
+
+
+def test_moved_sections_keep_their_bytes():
+    assert MEMORIES_SECTION == '\n\nWHAT YOU KNOW ABOUT THIS USER (from earlier chats and their files, newest first; may be empty):\n{memories}'
+    assert RECENT_CHATS_SECTION == "\n\nRECENT ACTIVITY IN THE USER'S OTHER CHATS (most recently used chat first):\n{recent_chats}"
+
+
+def test_notes_section_has_one_slot():
+    assert NOTES_SECTION.startswith("\n\n")
+    assert NOTES_SECTION.format(notes="- x").count("- x") == 1
+
+
+def test_memory_rule_tells_agents_to_follow_their_notes():
+    assert "NOTES" in MEMORY_RULE

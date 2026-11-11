@@ -16,8 +16,7 @@ from app.agents.artifacts import artifacts_from
 from app.agents.base import TOOL_RESULT_PREVIEW
 from app.agents.registry import ROUTES, SILENT_STEPS, STEPS
 from app.agents.remote import RUN_NODE, as_message
-from app.orchestration.orchestrator import HANDOFF
-from app.orchestration.router import ORCHESTRATOR
+from app.orchestration.orchestrator import HANDOFF, MESSAGE_ROUTES
 from app.core.auth import get_current_user
 from app.core.config import get_settings
 from app.core.conversations import add_conversation_usage, create_conversation, get_conversation, touch_conversation
@@ -145,12 +144,10 @@ async def chat(
                 await save_turn(store, user_id, conversation, body.message, answer)
             except Exception:  # noqa: BLE001
                 log.exception("Saving chat history failed")
-        # Only the orchestrator's turns: plain data lookups (sql, chart, docs) rarely say anything
-        # about the user and would cost an extra model call each.
-        if answer and _answered_by(messages) == ORCHESTRATOR:
+        if answer:
             extraction = UsageCounter()
             try:
-                await extract_facts(user_id, body.message, answer, [extraction], conversation_id=conversation["id"])
+                await extract_turn(user_id, body.message, answer, _answered_by(messages), conversation["id"], extraction)
             except Exception:  # noqa: BLE001
                 log.exception("Extracting facts failed")
             try:
@@ -167,6 +164,13 @@ async def _chat_input(assistant, config, kind: str, message: str) -> dict | Comm
     if kind == TEAM_MODE and (await assistant.aget_state(config)).interrupts:
         return Command(resume=message)
     return {"messages": [{"role": "user", "content": message}]}
+
+
+async def extract_turn(user_id: str, question: str, answer: str, answered_by: str | None,
+                       conversation_id: str | None, counter: UsageCounter) -> None:
+    """The post-turn extraction: facts, and notes for the agent that wrote the answer (`answered_by` is its message name)."""
+    await extract_facts(user_id, question, answer, [counter], conversation_id=conversation_id,
+                        agent=MESSAGE_ROUTES.get(answered_by))
 
 
 def _answered_by(messages: list) -> str | None:

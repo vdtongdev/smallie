@@ -105,7 +105,7 @@ This file describes `main` plus the 0.4.0 remote agents (section 10) and the 0.5
 2. **Authentication and context**
    - Verify the session cookie → `user_id`
    - Load or create the conversation
-   - Take the chat's memory snapshot (`chat_snapshot`, section 8): the saved one while the chat was active within `MEMORY_SNAPSHOT_MINUTES`, else a new one (newest 20 facts, last turns of the 3 most recent other chats, the profile) that is saved on the chat
+   - Take the chat's memory snapshot (`chat_snapshot`, section 8): the saved one while the chat was active within `MEMORY_SNAPSHOT_MINUTES`, else a new one (newest 20 facts, each agent's notes, last turns of the 3 most recent other chats, the profile) that is saved on the chat
    - Build `AgentContext(user_id, user, profile, memories, recent_chats, bootstrap, agent=kind, ...)` from the snapshot (also `notes`, `mentioned`, `sources`, `failed`)
 3. **Stream start**
    - Begin the SSE stream and emit a `conversation` event with id + title
@@ -154,9 +154,9 @@ This file describes `main` plus the 0.4.0 remote agents (section 10) and the 0.5
    - A specialist's reply stays in the thread with its tool calls and results (so "plot that" finds the table later). When the orchestrator answers, only its final message enters the thread; what it asked specialists streams to the UI but stays out of later prompts.
    - The checkpointer saves the thread
 10. **Background: fact extraction** (after the response is sent)
-    - Only when the orchestrator answered (`_answered_by(messages)`)
-    - One model call extracts facts from the question + answer
-    - Facts are saved to the knowledge graph (with dedup + embedding search)
+    - After every finished turn with an answer, whichever agent wrote it; paused turns are skipped
+    - One model call extracts facts and agent notes from the question + answer
+    - Facts are saved to the knowledge graph (with dedup + embedding search); notes are saved under the agent that wrote the answer (`_answered_by(messages)` mapped through `MESSAGE_ROUTES`)
 
 ---
 
@@ -447,14 +447,15 @@ One-node StateGraph:
 
 **Knowledge graph** (plain Postgres tables, not a graph database):
 
-- `graph_nodes`: the User node, entity nodes, file nodes (kind, name, normalized name, embedding)
+- `graph_nodes`: the User node, entity nodes, file nodes (kind, name, normalized name, embedding), plus `agent` nodes (one per user and agent route) and `note` nodes (the note text, embedded)
 - `graph_edges`: relations between nodes (e.g. `works_at`, `interested_in`, `studied_at`), with provenance (`chat`, `document`, `import`) and timestamps
+- Agent notes: `agent -[noted]-> note` (this agent learned the note) and `note -[about]-> entity, file or the User node` (what it mentions; an empty `about` links the User node). A note's normalized name is `<route>:<text>`, so two agents never share a note node. Each agent sees only its own notes, the newest 10 (`recall_notes`)
 
 **Extraction**
 
-1. After an orchestrator turn, `extract_facts(question, answer)` runs as a background task
-2. One model call with structured output (up to 8 facts)
-3. The model sees the user's files + relations already in the graph (to reuse their names)
+1. After every finished turn with an answer, `extract_facts(question, answer, agent=...)` runs as a background task
+2. One model call with structured output: up to 8 facts, and up to 3 notes (each at most 200 characters) for the agent that wrote the answer
+3. The model sees the user's files + relations already in the graph (to reuse their names), and the answering agent's current notes, numbered; when a new note corrects or restates one, it names that note's number in `replaces`, so the old note is replaced. Embedding similarity (≥ 0.96) only catches near-identical wording
 4. Pydantic validates: relations are snake_case, known wordings map to a standard relation ("is_named" → "has_name")
 
 **Deduplication**
@@ -471,6 +472,9 @@ One-node StateGraph:
 - `recall_profile(user_id)`: the profile relations (`PROFILE`: name, place, work, role, risk tolerance, investment horizon, language, goal, preferences), the newest 20 of them, listed in `PROFILE` order; it also returns which relations are present (for BOOTSTRAP)
 - `recall_facts(user_id)`: the newest 20 other facts at the User node (profile relations excluded)
 - Part of the chat's memory snapshot (below): passed to every agent as `AgentContext.profile` and `AgentContext.memories`, added to its prompt as `PROFILE_SECTION` and `MEMORIES_SECTION`
+- `recall_notes(user_id)`: each agent's newest 10 notes, passed as `AgentContext.agent_notes` and rendered by that agent only, as `NOTES_SECTION`
+- Notes never appear in `recall_profile`, `recall_facts`, `search_memory` or the fact list: the readers skip edges with an `agent` or `note` node at either end
+- `GET /api/memories` lists facts and notes together (a note row carries its `agent`); `DELETE /api/memories/{id}` deletes either and clears the user's snapshots. No UI calls it yet
 
 **Search**
 
@@ -482,9 +486,9 @@ One-node StateGraph:
 
 The memory part of a chat's prompt (profile, facts, other chats) is frozen per chat, so the prompt prefix stays the same across the chat's turns and the provider's prompt cache can reuse it (`app/core/snapshot.py`).
 
-- Saved on the conversation row: `memory_snapshot` (jsonb, keys `user`, `profile`, `memories`, `recent_chats`, `bootstrap`) and `snapshot_at`
-- `chat_snapshot` reuses the saved snapshot while the chat's last turn is within `MEMORY_SNAPSHOT_MINUTES` (default 60) and the saved snapshot has a `profile` key (older ones are rebuilt); otherwise it builds one (`build_snapshot`) and saves it
-- Deleting a fact, a file or a conversation calls `clear_snapshots(user_id)`: every chat of that user rebuilds its snapshot on the next turn
+- Saved on the conversation row: `memory_snapshot` (jsonb, keys `user`, `profile`, `memories`, `agent_notes`, `recent_chats`, `bootstrap`) and `snapshot_at`
+- `chat_snapshot` reuses the saved snapshot while the chat's last turn is within `MEMORY_SNAPSHOT_MINUTES` (default 60) and the saved snapshot has `profile` and `agent_notes` keys (older ones are rebuilt); otherwise it builds one (`build_snapshot`) and saves it
+- Deleting a fact, a note, a file or a conversation calls `clear_snapshots(user_id)`: every chat of that user rebuilds its snapshot on the next turn
 - Race rule: a snapshot whose build started before or at a clear is not saved, because it may hold the deleted data
 - Facts learned during a chat are already in its history, so the snapshot does not need them until it is rebuilt
 
@@ -495,7 +499,6 @@ While the profile lacks a role (`has_role` or `works_at`) or a goal (`has_goal`)
 - `bootstrap_due` (`app/core/snapshot.py`) decides it once per snapshot, in `build_snapshot`: on while the profile is missing and either this chat already ran it (`conversations.bootstrap_ran`) or fewer than `BOOTSTRAP_CHATS` of the user's chats ran it (default 3; 0 turns it off)
 - `save_snapshot` sets `bootstrap_ran` when it saves a snapshot with `bootstrap` on. `clear_snapshots` leaves it alone, so deleting a fact, file or chat does not restart onboarding; deleting a chat frees one of the slots
 - The orchestrator's tail note ends with `BOOTSTRAP_SECTION` on every call of a chat's first turn while `context.bootstrap` is set (`compose_section`, `is_first_turn`: no `AIMessage` before the latest visible user message). The question is asked at most once per chat by code, since later turns never get the text. The system prompt is the same with and without onboarding. A chat whose first turn a specialist answered is not asked, but it still counts toward `BOOTSTRAP_CHATS`. Specialists never get it. `bench_chat` runs onboarding only in its `bootstrap` scenario
-- Known gap: facts are extracted only from turns the orchestrator answered, so an answer given in a turn that a specialist answers is not saved
 
 ### Cross-Chat Memory
 
@@ -555,14 +558,14 @@ Each model request is laid out from the most stable part to the least stable, so
 2. `SOUL`, the start of the static prompt of the orchestrator, docs, sql and chart agents (the same for every user)
 3. the rest of the agent's static prompt, ending with `LANGUAGE_RULE` and `MEMORY_RULE`
 4. USER: the account name (`USER_SECTION`) and the profile (`PROFILE_SECTION`, when there is one)
-5. MEMORY: other facts (`MEMORIES_SECTION`) and recent chats (`RECENT_CHATS_SECTION`), from the chat's memory snapshot (section 8)
+5. MEMORY: this agent's notes (`NOTES_SECTION`, when it has any), other facts (`MEMORIES_SECTION`) and recent chats (`RECENT_CHATS_SECTION`), from the chat's memory snapshot (section 8)
 6. the mode-stable extra (`prompt_extra`, e.g. the researcher's sources, skills and schema)
 7. the thread's messages
 8. the tail note: per-call text added as the last message (`build_agent(tail=...)`, `make_call_note`), never saved; on the orchestrator's first turn of an onboarding chat it ends with `BOOTSTRAP_SECTION`
 
 Items 2 to 6 are the system prompt. While the snapshot is fresh they stay the same across a chat's turns, so the provider's cache can reuse them. The tail note holds what changes per call or per day: the orchestrator's notes, reply language and (while composing) the format rules (`compose_section`), the chart agent's tables (`tables_section`), the researcher's date (`TODAY_NOTE`), and on a chat's first turn with onboarding the question (`BOOTSTRAP_SECTION`, last). The `prompt_extra` in item 6 comes after the memory sections in the code, so a new snapshot changes what follows it too.
 
-The prompt text lives in Markdown files, so it can be edited without touching Python: `SOUL` in `app/core/layers/SOUL.md`; the shared rules (`LANGUAGE_RULE`, `MEMORY_RULE`) in `app/core/layers/AGENTS.md`, split into sections; USER and MEMORY in `app/core/layers/USER.md`, split into sections; the orchestrator and its onboarding in `app/orchestration/AGENTS.md` and `app/orchestration/BOOTSTRAP.md`; each specialist's system prompt in `app/agents/<name>/AGENTS.md` (the researcher has no `SOUL`). The Python loaders in `app/core/prompts.py` read each file once at import and build the same constants as before, so the request layout above does not change. Under `uvicorn --reload`, edits to `.md` files restart the server.
+The prompt text lives in Markdown files, so it can be edited without touching Python: `SOUL` in `app/core/layers/SOUL.md`; the shared rules (`LANGUAGE_RULE`, `MEMORY_RULE`) in `app/core/layers/AGENTS.md`, split into sections; USER in `app/core/layers/USER.md` (sections `user`, `profile`); MEMORY in `app/core/layers/MEMORY.md` (sections `notes`, `memories`, `recent_chats`); the orchestrator and its onboarding in `app/orchestration/AGENTS.md` and `app/orchestration/BOOTSTRAP.md`; each specialist's system prompt in `app/agents/<name>/AGENTS.md` (the researcher has no `SOUL`). The Python loaders in `app/core/prompts.py` read each file once at import and build the same constants as before, so the request layout above does not change. Under `uvicorn --reload`, edits to `.md` files restart the server.
 
 ### Hidden Messages
 
@@ -585,7 +588,7 @@ Every agent prompt ends with `LANGUAGE_RULE` + `MEMORY_RULE`:
   - prefer handoff (saves the orchestrator's write-up call)
   - cap tool results (data doesn't bloat prompts)
   - `no_repeats` middleware (no loops)
-  - fact extraction only after orchestrator turns, not after plain lookups
+  - fact extraction is one background call per finished turn, so it adds a call to every message a specialist answered (the cost of agent notes)
 
 ---
 

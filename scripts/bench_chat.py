@@ -37,7 +37,9 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
 
 from app.agents.registry import AGENTS
-from app.api.routes_chat import _events_from
+from app.api.routes_chat import _answered_by, _events_from, extract_turn
+from app.core.graph import recall_notes
+from app.orchestration.orchestrator import MESSAGE_ROUTES
 from app.core.config import get_settings
 from sqlalchemy import func, text
 
@@ -103,7 +105,12 @@ SCENARIOS = {
     # Two messages on one thread under a fresh user with no facts: the first reply should end with an onboarding question, the second not.
     "bootstrap": (["Why is the sky blue?", "Give me a tip for keeping a desk tidy."],
                   "a new user: the first reply asks one question, the next asks none"),
+    # Chat 1 (a fresh user) ends with a data question plus an instruction; after it the app's extraction runs; then NOTES_CHAT2 in a new chat.
+    "notes_followup": (["What is AAPL's dividend yield?",
+                        "And what is MSFT's dividend yield? From now on, always write percentages with exactly one decimal place, like 2.5%."],
+                       "agent notes: a correction in one chat is followed in the next"),
 }
+NOTES_CHAT2 = "What is KO's dividend yield?"
 EXPECTED = {  # team scenario -> agents that must / may take part
     "team": {"required": ["sql"], "optional": ["research"]},
     "team_research": {"required": ["research"], "optional": []},
@@ -160,7 +167,10 @@ class Result:
     calls: list[Call] = field(default_factory=list)  # timed calls made in this process
     answer: str = ""
     earlier_answers: list[str] = field(default_factory=list)  # replies to the setup turns (bootstrap scenario)
-    checks: dict = field(default_factory=dict)  # bootstrap scenario: bootstrap_ok, language
+    checks: dict = field(default_factory=dict)  # bootstrap scenario: bootstrap_ok, language; notes_followup: see run_notes_followup
+    answered_by: str | None = None  # notes_followup: name of the message that holds the final answer
+    conversation_id: str = ""  # notes_followup: the thread id of this message's chat
+    agent_notes: dict = field(default_factory=dict)  # notes_followup: the notes this chat's snapshot carried (route -> bullets)
     charts: list[str] = field(default_factory=list)  # charts drawn: "type: title (series x points)"
     error: str = ""
     team: dict = field(default_factory=dict)  # the answer's workspace (team scenarios)
@@ -292,16 +302,59 @@ class Timing(AsyncCallbackHandler):
         call.seconds, call.error = round(time.perf_counter() - start, 2), type(error).__name__
 
 
-async def run_scenario(assistant, store, user_id: str, name: str, run: int) -> Result:
-    *before, message = messages_of(name)
+NOTES = "notes_followup"
+PERCENT = re.compile(r"(\d+)(?:\.(\d+))?\s*%")
+
+
+def followed_one_decimal(answer: str) -> bool:
+    """The answer has a percentage and every percentage has exactly one decimal place."""
+    found = [m.group(2) or "" for m in PERCENT.finditer(answer)]
+    return bool(found) and all(len(decimals) == 1 for decimals in found)
+
+
+async def run_notes_followup(assistant, store, run: int) -> Result:
+    """Chat 1 as a fresh user, the app's extraction after it (one call), then chat 2 as a new chat of the same user.
+    The result is chat 2's; `checks` holds chat 1's numbers, the extraction's tokens, the notes saved and `followed`."""
+    user_id = await create_bench_user()
+    try:
+        first = await run_scenario(assistant, store, user_id, NOTES, run)
+        if first.error:
+            return first
+        extraction = UsageCounter()
+        skipped = {} if first.answer else {"skipped": "chat 1 had no answer"}  # the app extracts only `if answer:`
+        try:  # exactly the app's post-turn call, awaited
+            if first.answer:
+                await extract_turn(user_id, messages_of(NOTES)[-1], first.answer, first.answered_by, first.conversation_id, extraction)
+        except Exception as exc:  # noqa: BLE001
+            first.error = f"extraction failed: {type(exc).__name__}: {str(exc)[:200]}"
+            return first
+        saved = await asyncio.to_thread(recall_notes, user_id)
+        second = await run_scenario(assistant, store, user_id, NOTES, run, messages=[NOTES_CHAT2])
+        agent_1, agent_2 = MESSAGE_ROUTES.get(first.answered_by), MESSAGE_ROUTES.get(second.answered_by)
+        second.checks = {
+            "chat1": {"agent": agent_1, "model_calls": first.model_calls, "total": first.total},
+            "extraction": {k: v for k, v in extraction.totals().items() if k != "by_model"},
+            "notes_saved": saved,
+            "chat2": {"agent": agent_2, "model_calls": second.model_calls, "total": second.total,
+                      "snapshot_note": bool(agent_2 and second.agent_notes.get(agent_2))},
+            "followed": followed_one_decimal(second.answer), **skipped}
+        return second
+    finally:  # its conversations, settings and graph rows go with the user (ON DELETE CASCADE)
+        delete_user_row(user_id)
+
+
+async def run_scenario(assistant, store, user_id: str, name: str, run: int, messages: list[str] | None = None) -> Result:
+    *before, message = messages or messages_of(name)
     result, timing, usage = Result(scenario=name, run=run), Timing(), UsageCounter()
     config = {"configurable": {"thread_id": f"bench-{uuid.uuid4()}"}, "callbacks": [timing, usage]}
-    if name == "bootstrap":  # bootstrap_ran lives on a conversation row: make one, as POST /api/chat/auto does
+    if name in ("bootstrap", NOTES):  # bootstrap_ran lives on a conversation row, and notes_followup's id is stored in graph_edges (36 characters): make one, as POST /api/chat/auto does
         config["configurable"]["thread_id"] = (await asyncio.to_thread(create_conversation, user_id, "auto", message))["id"]
     try:
         snapshot = await build_snapshot(None, user_id, config["configurable"]["thread_id"])
         if name == "bootstrap":
             await asyncio.to_thread(save_snapshot, user_id, config["configurable"]["thread_id"], snapshot)
+        result.agent_notes = snapshot.get("agent_notes", {})
+        result.conversation_id = config["configurable"]["thread_id"]
         context = AgentContext(user_id=user_id, **{**snapshot, "bootstrap": snapshot.get("bootstrap", False) and onboards(name)}, agent="team" if name.startswith("team") else "auto")
         for earlier in before:  # setup turns, not measured; same context so the measured turn can reuse their prefix
             state = await assistant.ainvoke({"messages": [{"role": "user", "content": earlier}]},
@@ -339,6 +392,8 @@ async def run_scenario(assistant, store, user_id: str, name: str, run: int) -> R
                                   for c in event["charts"]]
         if not result.answer and not synthesized and first_spoke:
             result.answer = first_spoke
+        if name == NOTES:
+            result.answered_by = _answered_by((await assistant.aget_state(config)).values["messages"])
         if name in EXPECTED:  # the answer carries the workspace
             last = (await assistant.aget_state(config)).values["messages"][-1]
             result.team = last.additional_kwargs.get("team", {})
@@ -509,7 +564,8 @@ async def main(args) -> None:
                 doc_ids = [await upload_fixture(store, user_id, *f) for f in FIXTURES.get(name, [])]
                 bench_user = await create_bench_user() if name == "bootstrap" else None
                 try:
-                    results.append(await run_scenario(assistant, store, bench_user or user_id, name, run))
+                    results.append(await run_notes_followup(assistant, store, run) if name == NOTES
+                                   else await run_scenario(assistant, store, bench_user or user_id, name, run))
                     if name in EXPECTED and not results[-1].error:
                         score(name, results[-1])
                         if args.ablate:

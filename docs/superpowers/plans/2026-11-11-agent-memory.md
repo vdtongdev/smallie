@@ -333,6 +333,79 @@ Load `writing-llm-document` for the two `.claude/rules` files. No tests.
 
 ---
 
+### Task 8: The extractor names the note it replaces
+
+Added 2026-11-11 after Task 7 Step 1 found that embedding similarity cannot tell a reworded note from a different one (spec section 2, "Duplicates and corrections", and section 3, `replaces`). Runs before the rest of Task 7.
+
+Agent: implementer
+
+**Files:**
+- Modify: `app/core/graph.py`, `app/core/prompts.py` (`EXTRACT_PROMPT` rule 12 only)
+- Test: `tests/test_graph.py`
+
+**Interfaces:**
+- `AgentNote.replaces: int | None = None`, with a `mode="before"` validator that turns anything that is not a whole number >= 1 (also a numeric string is accepted as its number) into `None`.
+- `current_notes(user_id: str, agent: str, limit: int = RECALL_NOTES) -> list[tuple[str, str]]`: (note node id, text) of this agent's notes for this user, newest first by the `noted` edge's `updated_at`; the same notes and order as `recall_notes(user_id)[agent]`.
+- `save_notes(user_id, agent, notes, conversation_id=None, current: list[str] | None = None) -> int`: `current` is the list of note node ids in the order they were shown to the extractor; `note.replaces == n` means `current[n - 1]`.
+- `SAME_NOTE = 0.96`, with the measured ranges from the spec in its comment (model `baai/bge-m3`, date 2026-11-11, "re-measure after changing the embedding model").
+
+- [ ] **Step 1: Write the failing tests** in `tests/test_graph.py` (`@requires_db` except the schema test; `make_user`, `embeddings`; texts get unrelated fake vectors unless aliased):
+
+```python
+def test_replaces_accepts_a_number_and_ignores_anything_else():
+    assert AgentNote(text="x", replaces=2).replaces == 2
+    assert AgentNote(text="x", replaces="2").replaces == 2
+    for bad in (0, -1, "second", 1.5, None, [1]):
+        assert AgentNote(text="x", replaces=bad).replaces is None
+
+
+def test_a_note_replaces_the_one_the_extractor_named(make_user, embeddings):
+    # save "Sort results by date ascending" then "Limit results to 50 rows" for "sql"
+    # ids = [i for i, _ in graph.current_notes(user, "sql")]            # newest first: [limit, sort]
+    # save_notes(user, "sql", [AgentNote(text="Sort results by date descending", replaces=2)], current=ids)
+    # -> recall_notes(user)["sql"] lists exactly "Sort results by date descending" (now newest) and "Limit results to 50 rows"
+
+def test_replaces_outside_the_list_adds_a_note(make_user, embeddings):
+    # one existing note; replaces=5 with current=ids -> two notes, nothing raises
+
+def test_replaces_cannot_touch_another_agents_or_users_note(make_user, embeddings):
+    # current holds the id of chart's note, and in a second case of another user's sql note;
+    # save for "sql" with replaces=1 -> that other note is unchanged and sql has the new note as an added one
+
+def test_replaces_without_a_list_is_ignored(make_user, embeddings):
+    # replaces=1, current=None -> the note is added
+
+def test_same_text_wins_and_the_named_note_is_removed(make_user, embeddings):
+    # notes A and B exist; save text equal to A with replaces pointing at B -> only A is left
+
+def test_different_instructions_are_both_kept_below_the_threshold(make_user, embeddings):
+    # two unrelated-vector texts, no replaces -> two notes (the embedding backstop does not merge them)
+
+async def test_the_extractor_sees_the_agents_notes_numbered(make_user, embeddings, monkeypatch):
+    # two sql notes and one chart note exist; fake model records its messages and returns a note with replaces=1
+    # await graph.extract_facts(user, "q", "a", [], agent="sql")
+    # -> the human message lists the two sql notes as "1. <newest>" and "2. <older>", not the chart note;
+    #    afterwards sql still has two notes and the newest one is the returned text
+
+async def test_no_notes_list_without_an_agent(make_user, embeddings, monkeypatch):
+    # agent=None -> the human message holds no numbered notes list
+
+def test_extract_prompt_explains_replaces():
+    assert "replaces" in EXTRACT_PROMPT and "{" not in EXTRACT_PROMPT
+```
+
+- [ ] **Step 2: Run.** `uv run pytest tests/test_graph.py -q`. Expected: the new tests FAIL.
+- [ ] **Step 3: Implement.**
+  - `current_notes`, built on the existing notes query.
+  - `extract_from_turns`: when `agent` is set, read `current_notes` in the same `asyncio.to_thread(known)` call, add the numbered list to the human message under one heading line (names go into the message, never a template), and pass `current=[ids]` to `save_notes`.
+  - `save_notes`: the order of the spec's "Duplicates and corrections" bullet. A named id is used only if it is a note node this agent of this user `noted` (check in SQL with `user_id` and the agent node). Two notes of one call naming the same number: the first takes it, the second is added.
+  - `EXTRACT_PROMPT` rule 12 (load `writing-llm-document` first): add that the message may list the agent's current notes, numbered; set `replaces` to the number of the note that a new note corrects or restates; do not return a current note that still holds unchanged. No example values, no braces.
+  - `SAME_NOTE = 0.96` and its comment.
+- [ ] **Step 4: Run.** `uv run pytest tests/test_graph.py tests/test_isolation_and_memory.py tests/test_snapshot.py -q -rs`, then `uv run pytest -q`. Expected: only the known fresh-database failures.
+- [ ] **Step 5: Commit** `Let the extractor name the note a new note replaces`.
+
+---
+
 ### Task 7: Measurement
 
 Agent: implementer. **Each run that calls a real model or the embedding API needs the user's yes first; ask before every one.**
@@ -341,7 +414,7 @@ Agent: implementer. **Each run that calls a real model or the embedding API need
 - Modify: `app/core/graph.py` (`SAME_NOTE` and its comment), `scripts/bench_chat.py` (new scenario)
 - Test: `tests/test_bench_chat.py`
 
-- [ ] **Step 1: `SAME_NOTE`.** With a scratchpad script (not committed), embed with the real embedding model at least 10 pairs of notes that give the same instruction in other words and 10 pairs that differ but share a topic, print each pair's cosine similarity, and set `SAME_NOTE` between the two groups. Write the measured ranges in the constant's comment, as `SAME_ENTITY` has. If the groups overlap, stop and report the numbers.
+- [x] **Step 1: `SAME_NOTE`.** Done 2026-11-11: the groups overlap (numbers in spec section 2), which led to Task 8. Original step: With a scratchpad script (not committed), embed with the real embedding model at least 10 pairs of notes that give the same instruction in other words and 10 pairs that differ but share a topic, print each pair's cosine similarity, and set `SAME_NOTE` between the two groups. Write the measured ranges in the constant's comment, as `SAME_ENTITY` has. If the groups overlap, stop and report the numbers.
 - [ ] **Step 2: Baseline.** `uv run python -m scripts.bench_chat` on `origin/main` (a second worktree or the main checkout, untouched) and keep the output.
 - [ ] **Step 3: Scenario.** Add a `bench_chat` scenario with two chats of one fresh user: in chat 1 the user asks the sql agent a question and corrects how it should work; chat 2 asks a question the correction applies to. The check: after chat 1, `recall_notes(user)` has a `sql` entry; chat 2's answer follows it. Add its name to the scenario list test in `tests/test_bench_chat.py`.
 - [ ] **Step 4: After run.** Rebuild the agent containers from the worktree (`docker compose -p smallie up -d --build --no-deps docs sql research chart`, through WSL, WARP and SoftEther off) and check the new code is inside one (`docker exec smallie-sql-1 grep -n "agent_notes" /deps/smallie/app/agents/factory.py`). Run `bench_chat` on the branch.

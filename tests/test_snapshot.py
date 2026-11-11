@@ -24,7 +24,7 @@ from app.core.db import conversations, documents, get_engine, init_db, users
 from app.core.graph import Fact
 from app.core.memory import AgentContext
 from app.core.model_settings import ModelSettings
-from app.core.snapshot import build_snapshot, chat_snapshot,clear_snapshots, save_snapshot
+from app.core.snapshot import build_snapshot, chat_snapshot, clear_snapshots, save_snapshot
 from tests.conftest import requires_db
 from tests.scripted import scripted
 

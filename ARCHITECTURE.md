@@ -105,7 +105,7 @@ This file describes `main` plus the 0.4.0 remote agents (section 10) and the 0.5
 2. **Authentication and context**
    - Verify the session cookie → `user_id`
    - Load or create the conversation
-   - Take the chat's memory snapshot (`chat_snapshot`, section 8): the saved one while the chat was active within `MEMORY_SNAPSHOT_MINUTES`, else a new one (newest 20 facts, last turns of the 3 most recent other chats, the profile) that is saved on the chat
+   - Take the chat's memory snapshot (`chat_snapshot`, section 8): the saved one while the chat was active within `MEMORY_SNAPSHOT_MINUTES`, else a new one (newest 20 facts, each agent's notes, last turns of the 3 most recent other chats, the profile) that is saved on the chat
    - Build `AgentContext(user_id, user, profile, memories, recent_chats, bootstrap, agent=kind, ...)` from the snapshot (also `notes`, `mentioned`, `sources`, `failed`)
 3. **Stream start**
    - Begin the SSE stream and emit a `conversation` event with id + title

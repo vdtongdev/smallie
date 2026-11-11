@@ -12,7 +12,7 @@
 import asyncio
 import uuid
 from contextlib import AsyncExitStack
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from langchain.tools import ToolRuntime, tool
@@ -54,6 +54,7 @@ class AgentContext:
     failed: str = ""  # route that already gave up on the latest message (the orchestrator's fallback)
     deny_tools: tuple[str, ...] = ()  # tools hidden from the agent and refused if called (team mode: charts have one drawer)
     tier: str = "standard"  # model slot for this run: small, standard or strong (a tier, never a model name or key)
+    agent_notes: dict[str, str] = field(default_factory=dict)  # route -> that agent's notes as bullets; each agent renders its own
 
 
 def memory_namespace(user_id: str) -> tuple[str, ...]:

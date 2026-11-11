@@ -125,6 +125,24 @@ async def test_tier_reaches_the_agent_server():
     assert remote.calls[0]["context"]["tier"] == "strong"
 
 
+async def test_agent_notes_travel_to_the_agent_server(monkeypatch):
+    from app.agents import factory, server
+    from tests.scripted import scripted
+
+    context = AgentContext(user_id="u-7", agent_notes={"sql": "- x"})
+    remote = FakeRemote(output={"messages": [HUMAN]})
+    await agent(remote).node({"messages": [as_message(HUMAN)]}, {}, SimpleNamespace(context=context))
+    sent = remote.calls[0]["context"]
+    assert sent["agent_notes"] == {"sql": "- x"}
+
+    # The server side: the run node gets the request's context dict and the agent builds its prompt from it.
+    model = scripted(AIMessage("ok"))
+    monkeypatch.setattr(factory, "get_chat_model", lambda *a, **k: model)
+    inner = factory.build_agent(name="sql_agent", system_prompt="x", tools=[], route="sql")
+    await server.reporting_graph(inner).ainvoke({"messages": [HumanMessage("hi", id="u1")]}, context=sent)
+    assert "- x" in model.prompts[0][0].content
+
+
 def test_remote_keeps_fallback_metadata():
     fallback = {"from_model": "tiny", "category": "model_not_found"}
     message = as_message({"type": "ai", "content": "hi", "response_metadata": {"fallback": fallback}})

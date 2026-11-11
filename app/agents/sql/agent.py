@@ -53,7 +53,7 @@ def build_sql_agent():
     system_prompt = SQL_SYSTEM.format(
         sql_rules=SQL_RULES, language_rule=LANGUAGE_RULE, memory_rule=MEMORY_RULE, schema=describe_schema()
     )
-    return build_agent(name="sql_agent", system_prompt=system_prompt, tools=[run_sql])
+    return build_agent(name="sql_agent", system_prompt=system_prompt, tools=[run_sql], route="sql")
 
 
 SPEC = AgentSpec(

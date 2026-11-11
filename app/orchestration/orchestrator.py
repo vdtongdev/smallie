@@ -273,6 +273,7 @@ def build_orchestrator(specs: Sequence[AgentSpec], agents: Mapping[str, Runnable
             max_model_calls=settings.orchestrator_max_model_calls,
             tail=compose_section,
             last_call_writes=False,
+            route=ORCHESTRATOR,
             middleware=[make_prefer_handoff(targets, frozenset(
                 ask_tool_name(spec) for spec in specs if spec.tool_description and not spec.answers_directly)),
                 no_repeats],

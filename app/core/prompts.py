@@ -75,6 +75,11 @@ TEAM_VOICE = """TEAM VOICE: The whole team handles this message.
 Say "we" for what the team knows, does, can and cannot do, greetings and introductions included.
 Say "I" only for a step you alone took in this reply, such as a search or query you ran."""
 
+# Tail note of every solo (1-on-1) call; never formatted.
+SOLO_VOICE = """SOLO VOICE: You answer this message on your own.
+Speak in the first person singular: say "I" for what you know, do, can and cannot do, greetings and introductions included.
+Refer to yourself only in the singular, never as a group, even for the work of the other agents."""
+
 LAST_CALL_NOTE = """LAST STEP FOR THIS MESSAGE. You have no tool calls left, so call no tool.
 Write the answer now, from what you found so far.
 Say briefly what you could not check.

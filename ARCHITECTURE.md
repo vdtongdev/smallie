@@ -216,7 +216,7 @@ The "front door" agent. Answers general questions itself, asks specialists as to
 ### System Prompt Includes
 
 - Today's date
-- The team voice (`SOUL`, first in the prompt) and the "we" rule; on a chat's first turn while the snapshot asks for it, the onboarding question (`BOOTSTRAP_SECTION`, at the end of the tail note, not the system prompt; see Onboarding in section 8)
+- The persona (`SOUL`, first in the prompt; voice-neutral, the voice comes from the tail note); on a chat's first turn while the snapshot asks for it, the onboarding question (`BOOTSTRAP_SECTION`, at the end of the tail note, not the system prompt; see Onboarding in section 8)
 - The available specialists and how to use them (`ask_docs`, `handoff`, ...)
 - Web search availability (Wikipedia alongside every web search)
 - Per-request notes, in the tail note of every call (not the system prompt):
@@ -224,7 +224,7 @@ The "front door" agent. Answers general questions itself, asks specialists as to
   - the user's file names + summaries
   - the agent that gave the previous answer
   - which agents the message mentions, when it mentions several
-  - in team mode, `TEAM_VOICE`: say "we" for the team, "I" only for a step you alone took
+  - the voice: in team mode `TEAM_VOICE` (say "we" for the team, "I" only for a step you alone took), otherwise `SOLO_VOICE` (say "I", never "we")
 
 ### Tool Set
 

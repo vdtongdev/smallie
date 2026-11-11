@@ -46,7 +46,7 @@ Rules:
 9. Do not save anything the user asks you not to remember.
 10. Return an empty list when the turns have nothing to remember. Most turns have nothing.
 11. When the turns disagree, keep what the latest turn says.
-12. The line "The agent that wrote the answer" names an agent. Put in `notes` what the user says about how that agent should do its work: a correction, a default, a format or a scope. Write each note as one short instruction to that agent, in English. List in `about` the names the note mentions. Return no notes when the user's message does not concern that agent's work. Facts about the user stay triples and are never notes. Most turns have no note."""
+12. The line "The agent that wrote the answer" names an agent. Put in `notes` what the user says about how that agent should do its work: a correction, a default, a format or a scope. Write each note as one short instruction to that agent, in English. List in `about` the names the note mentions. Return no notes when the user's message does not concern that agent's work. The message may also list that agent's current notes, numbered. When a new note corrects or restates one of them, set `replaces` on the new note to that note's number. Do not return a current note that still holds unchanged. Facts about the user stay triples and are never notes. Most turns have no note."""
 
 _user = load_sections(LAYERS / "USER.md", ("user", "profile"))
 USER_SECTION = "\n\n" + _user["user"]

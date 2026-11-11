@@ -60,8 +60,12 @@ NOTE_CHARS = 200
 NOTED = "noted"  # agent -> note
 ABOUT = "about"  # note -> what it mentions (an entity, a file or the User node)
 # Cosine similarity at which a new note is taken as a rewording of one the same agent already has.
-# shortcut: provisional, not measured on the real embedding model yet.
-SAME_NOTE = 0.85
+# Only a backstop: the extractor names the note a new one replaces (`AgentNote.replaces`), because
+# embeddings cannot tell a rewording from a different instruction. Measured on baai/bge-m3, 31 pairs,
+# 2026-11-11: rewordings 0.71-0.97, different instructions on one topic 0.72-0.95, unrelated notes
+# 0.43-0.59. The groups overlap, so the cut-off sits above the different-instruction range.
+# shortcut: tuned for one model, re-measure after changing OPENROUTER_EMBED_MODEL.
+SAME_NOTE = 0.96
 USER = "User"
 USER_WORDS = frozenset({"user", "the user", "i", "me", "myself"})
 
@@ -89,6 +93,17 @@ class AgentNote(BaseModel):
 
     text: str = Field(min_length=1, max_length=NOTE_CHARS)
     about: list[str] = Field(default_factory=list)
+    replaces: int | None = Field(default=None, description="Number of the listed current note that this note corrects or restates.")
+
+    @field_validator("replaces", mode="before")
+    @classmethod
+    def whole_number(cls, value):
+        # A bad value must not throw away the whole reply: it becomes "replaces nothing".
+        if isinstance(value, str) and value.strip().isdigit():
+            value = int(value)
+        if isinstance(value, float) and value.is_integer():
+            value = int(value)
+        return value if isinstance(value, int) and not isinstance(value, bool) and value >= 1 else None
 
 
 class FactUpdate(BaseModel):
@@ -250,10 +265,14 @@ def save_facts(user_id: str, facts: list[Fact], source: str, conversation_id: st
     return kept
 
 
-def save_notes(user_id: str, agent: str, notes: list[AgentNote], conversation_id: str | None = None) -> int:
-    """Store an agent's working notes (`agent` is a route); returns how many were kept. A note the
-    agent already has (same words, or a rewording at >= SAME_NOTE) is updated, not added again."""
-    notes = [AgentNote(text=n.text.strip(), about=n.about) for n in notes if n.text.strip()]
+def save_notes(user_id: str, agent: str, notes: list[AgentNote], conversation_id: str | None = None,
+               current: list[str] | None = None) -> int:
+    """Store an agent's working notes (`agent` is a route); returns how many were kept. `current` is
+    the note node ids in the order the extractor saw them, so `replaces == n` names `current[n - 1]`.
+    A note is matched, in order, to: the note with the same words; the note it names in `replaces`
+    (only one this agent of this user has); the nearest note of the agent at >= SAME_NOTE; else it
+    is added. A matched note is updated in place, not added again."""
+    notes = [AgentNote(text=n.text.strip(), about=n.about, replaces=n.replaces) for n in notes if n.text.strip()]
     with get_engine().connect() as conn:
         files = _user_files(conn, user_id)
     is_entity = lambda name: normalize(name) not in USER_WORDS and normalize(name) not in files  # noqa: E731
@@ -261,6 +280,9 @@ def save_notes(user_id: str, agent: str, notes: list[AgentNote], conversation_id
     with get_engine().begin() as conn:
         user_node = _user_node(conn, user_id)
         agent_node = _get_or_create(conn, user_id, "agent", agent)
+        mine = select(graph_edges.c.target_id).where(
+            graph_edges.c.user_id == user_id, graph_edges.c.source_id == agent_node, graph_edges.c.relation == NOTED)
+        taken: set[str] = set()
 
         def resolve(name: str) -> str:
             norm = normalize(name)
@@ -270,18 +292,36 @@ def save_notes(user_id: str, agent: str, notes: list[AgentNote], conversation_id
                 return _file_node(conn, user_id, files[norm][0])
             return _entity(conn, user_id, name.strip(), vectors.get(name.strip()))
 
+        def named(note: AgentNote) -> str | None:
+            if not current or not note.replaces or note.replaces > len(current):
+                return None
+            node = current[note.replaces - 1]
+            if node in taken or not conn.execute(select(graph_nodes.c.id).where(
+                    graph_nodes.c.id == node, graph_nodes.c.user_id == user_id, graph_nodes.c.kind == "note",
+                    graph_nodes.c.id.in_(mine))).first():
+                return None
+            taken.add(node)
+            return node
+
         for note in notes:
             norm = f"{agent}:{normalize(note.text)}"
             node = _node_id(conn, user_id, "note", norm)
-            if node is None:
-                distance = graph_nodes.c.embedding.cosine_distance(vectors[note.text])
-                mine = select(graph_edges.c.target_id).where(
-                    graph_edges.c.user_id == user_id, graph_edges.c.source_id == agent_node, graph_edges.c.relation == NOTED)
-                nearest = conn.execute(select(graph_nodes.c.id, distance.label("distance")).where(
-                    graph_nodes.c.user_id == user_id, graph_nodes.c.kind == "note", graph_nodes.c.embedding.is_not(None),
-                    graph_nodes.c.id.in_(mine)).order_by(distance).limit(1)).first()
-                if nearest and 1 - nearest.distance >= SAME_NOTE:
-                    node = nearest.id
+            replaced = named(note)
+            if node is not None:
+                if replaced and replaced != node:  # the same words win; the note the model named is dropped
+                    conn.execute(delete(graph_edges).where(
+                        graph_edges.c.user_id == user_id, graph_edges.c.source_id == agent_node,
+                        graph_edges.c.relation == NOTED, graph_edges.c.target_id == replaced))
+            else:
+                if replaced is None:
+                    distance = graph_nodes.c.embedding.cosine_distance(vectors[note.text])
+                    nearest = conn.execute(select(graph_nodes.c.id, distance.label("distance")).where(
+                        graph_nodes.c.user_id == user_id, graph_nodes.c.kind == "note", graph_nodes.c.embedding.is_not(None),
+                        graph_nodes.c.id.in_(mine)).order_by(distance).limit(1)).first()
+                    if nearest and 1 - nearest.distance >= SAME_NOTE:
+                        replaced = nearest.id
+                if replaced:
+                    node = replaced
                     conn.execute(update(graph_nodes).where(graph_nodes.c.id == node).values(
                         name=note.text, norm=norm, embedding=vectors[note.text]))
                 else:
@@ -420,6 +460,17 @@ def recall_notes(user_id: str, limit: int = RECALL_NOTES) -> dict[str, str]:
     return {agent: "\n".join(lines) for agent, lines in notes.items()}
 
 
+def current_notes(user_id: str, agent: str, limit: int = RECALL_NOTES) -> list[tuple[str, str]]:
+    """(note node id, text) of the agent's newest notes, the same ones in the same order as `recall_notes`."""
+    inner = _notes_query(user_id, lambda a, n: n.c.id.label("id"), lambda a, n: n.c.name.label("text"),
+                         lambda a, n: a.c.name.label("agent"), lambda a, n: graph_edges.c.updated_at.label("at"),
+                         lambda a, n: graph_edges.c.id.label("edge")).subquery()
+    with get_engine().connect() as conn:
+        rows = conn.execute(select(inner.c.id, inner.c.text).where(inner.c.agent == agent)
+                            .order_by(inner.c.at.desc(), inner.c.edge).limit(limit)).all()
+    return [(r.id, r.text) for r in rows]
+
+
 def list_notes(user_id: str) -> list[dict]:
     """The agents' notes, for /api/memories; `id` is the `noted` edge's id."""
     query = _notes_query(user_id, lambda a, n: graph_edges.c.id, lambda a, n: n.c.name.label("text"),
@@ -511,27 +562,30 @@ async def extract_from_turns(user_id: str, turns: str, callbacks: list, source: 
                              conversation_id: str | None = None, agent: str | None = None) -> int:
     """One extraction call over `turns` (one or more formatted chat turns); returns facts kept.
     Notes are saved under `agent` only when it is set."""
-    def known() -> tuple[list[str], list[str]]:
+    def known() -> tuple[list[str], list[str], list[tuple[str, str]]]:
         with get_engine().connect() as conn:
             files = conn.execute(select(documents.c.filename).where(
                 documents.c.user_id == user_id, documents.c.status != "failed")).scalars()
             relations = conn.execute(select(graph_edges.c.relation).distinct().where(
                 graph_edges.c.user_id == user_id, graph_edges.c.source != "document",
                 graph_edges.c.relation.not_in((NOTED, ABOUT)))).scalars()
-            return list(files), sorted(set(relations) - STANDARD)
+            files, relations = list(files), sorted(set(relations) - STANDARD)
+        return files, relations, current_notes(user_id, agent) if agent else []
 
-    files, relations = await asyncio.to_thread(known)
+    files, relations, notes = await asyncio.to_thread(known)
     # Names go into the message, not a template: file names may contain braces.
     turn = (f"The user's files: {', '.join(files)}\n" if files else "") + \
         (f"Relations already in the user's graph: {', '.join(relations)}\n" if relations else "") + \
         (f"The agent that wrote the answer: {agent}\n" if agent else "") + \
+        (("The agent's current notes, newest first:\n" + "\n".join(f"{i}. {text}" for i, (_, text) in enumerate(notes, 1)) + "\n")
+         if notes else "") + \
         ("\n" if files or relations or agent else "") + turns
     model = await asyncio.to_thread(get_chat_model, user_id)
     update_ = await ask_structured(model, FactUpdate, [SystemMessage(EXTRACT_PROMPT), HumanMessage(turn)], {"callbacks": callbacks})
     if update_ is None or not (update_.facts or update_.notes):
         return 0
     if agent and update_.notes:
-        await asyncio.to_thread(save_notes, user_id, agent, update_.notes, conversation_id)
+        await asyncio.to_thread(save_notes, user_id, agent, update_.notes, conversation_id, [i for i, _ in notes])
     if not update_.facts:
         return 0
     return await asyncio.to_thread(save_facts, user_id, update_.facts, source, conversation_id)

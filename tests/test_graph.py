@@ -865,3 +865,151 @@ def test_extract_prompt_describes_notes():
 
     assert "notes" in EXTRACT_PROMPT
     assert "{" not in EXTRACT_PROMPT and "}" not in EXTRACT_PROMPT
+
+
+# ---------- the extractor names the note a new note replaces ----------
+
+def note_texts(user: str, agent: str) -> list[str]:
+    return [line[2:] for line in graph.recall_notes(user).get(agent, "").splitlines()]
+
+
+def test_replaces_accepts_a_number_and_ignores_anything_else():
+    assert AgentNote(text="x", replaces=2).replaces == 2
+    assert AgentNote(text="x", replaces="2").replaces == 2
+    for bad in (0, -1, "second", 1.5, None, [1]):
+        assert AgentNote(text="x", replaces=bad).replaces is None
+
+
+@requires_db
+def test_a_note_replaces_the_one_the_extractor_named(make_user, embeddings):
+    user = make_user()
+    graph.save_notes(user, "sql", [AgentNote(text="Sort results by date ascending")])
+    graph.save_notes(user, "sql", [AgentNote(text="Limit results to 50 rows")])
+    ids = [i for i, _ in graph.current_notes(user, "sql")]  # newest first: limit, sort
+    graph.save_notes(user, "sql", [AgentNote(text="Sort results by date descending", replaces=2)], current=ids)
+    assert note_texts(user, "sql") == ["Sort results by date descending", "Limit results to 50 rows"]
+    assert count(graph_edges, user, graph_edges.c.relation == "noted") == 2
+
+
+@requires_db
+def test_current_notes_match_recall_notes(make_user, embeddings):
+    user = make_user()
+    for text in ("first rule", "second rule", "third rule"):
+        graph.save_notes(user, "sql", [AgentNote(text=text)])
+    graph.save_notes(user, "chart", [AgentNote(text="chart rule")])
+    assert [t for _, t in graph.current_notes(user, "sql")] == note_texts(user, "sql") == ["third rule", "second rule", "first rule"]
+    assert [t for _, t in graph.current_notes(user, "sql", limit=2)] == ["third rule", "second rule"]
+    assert graph.current_notes(make_user(), "sql") == []
+
+
+@requires_db
+def test_replaces_outside_the_list_adds_a_note(make_user, embeddings):
+    user = make_user()
+    graph.save_notes(user, "sql", [AgentNote(text="Sort results by date ascending")])
+    ids = [i for i, _ in graph.current_notes(user, "sql")]
+    graph.save_notes(user, "sql", [AgentNote(text="Limit results to 50 rows", replaces=5)], current=ids)
+    assert sorted(note_texts(user, "sql")) == ["Limit results to 50 rows", "Sort results by date ascending"]
+
+
+@requires_db
+def test_replaces_cannot_touch_another_agents_or_users_note(make_user, embeddings):
+    user, other = make_user(), make_user()
+    graph.save_notes(user, "chart", [AgentNote(text="Use dark colours")])
+    graph.save_notes(other, "sql", [AgentNote(text="Show prices in VND")])
+    chart_id = graph.current_notes(user, "chart")[0][0]
+    other_id = graph.current_notes(other, "sql")[0][0]
+    graph.save_notes(user, "sql", [AgentNote(text="Sort results by date ascending", replaces=1)], current=[chart_id])
+    graph.save_notes(user, "sql", [AgentNote(text="Limit results to 50 rows", replaces=1)], current=[other_id])
+    assert note_texts(user, "chart") == ["Use dark colours"]
+    assert note_texts(other, "sql") == ["Show prices in VND"]
+    assert sorted(note_texts(user, "sql")) == ["Limit results to 50 rows", "Sort results by date ascending"]
+
+
+@requires_db
+def test_replaces_without_a_list_is_ignored(make_user, embeddings):
+    user = make_user()
+    graph.save_notes(user, "sql", [AgentNote(text="Sort results by date ascending")])
+    graph.save_notes(user, "sql", [AgentNote(text="Limit results to 50 rows", replaces=1)])
+    assert sorted(note_texts(user, "sql")) == ["Limit results to 50 rows", "Sort results by date ascending"]
+
+
+@requires_db
+def test_same_text_wins_and_the_named_note_is_removed(make_user, embeddings):
+    user = make_user()
+    graph.save_notes(user, "sql", [AgentNote(text="Sort results by date ascending")])  # A
+    graph.save_notes(user, "sql", [AgentNote(text="Limit results to 50 rows")])  # B
+    ids = [i for i, _ in graph.current_notes(user, "sql")]  # [B, A]
+    graph.save_notes(user, "sql", [AgentNote(text="sort results by date ascending", replaces=1)], current=ids)
+    assert note_texts(user, "sql") == ["Sort results by date ascending"]
+    assert node_names(user, "note") == ["Sort results by date ascending"]
+    assert count(graph_edges, user, graph_edges.c.relation == "noted") == 1
+
+
+@requires_db
+def test_two_notes_naming_the_same_number_one_takes_it_and_one_is_added(make_user, embeddings):
+    user = make_user()
+    graph.save_notes(user, "sql", [AgentNote(text="Sort results by date ascending")])
+    ids = [i for i, _ in graph.current_notes(user, "sql")]
+    graph.save_notes(user, "sql", [AgentNote(text="Sort results by date descending", replaces=1),
+                                   AgentNote(text="Limit results to 50 rows", replaces=1)], current=ids)
+    assert sorted(note_texts(user, "sql")) == ["Limit results to 50 rows", "Sort results by date descending"]
+
+
+@requires_db
+def test_different_instructions_are_both_kept_below_the_threshold(make_user, embeddings):
+    user = make_user()
+    graph.save_notes(user, "sql", [AgentNote(text="Round prices to two decimals")])
+    graph.save_notes(user, "sql", [AgentNote(text="Show dates as day, month, year")])
+    assert len(note_texts(user, "sql")) == 2
+
+
+def recording_extractor(monkeypatch, seen, note):
+    async def ainvoke(messages, config):
+        seen.append(messages[1].content)
+        return FactUpdate(notes=[note])
+
+    monkeypatch.setattr(graph, "get_chat_model", lambda model=None: SimpleNamespace(
+        with_structured_output=lambda schema, method: SimpleNamespace(ainvoke=ainvoke)))
+
+
+@requires_db
+async def test_the_extractor_sees_the_agents_notes_numbered(make_user, embeddings, monkeypatch):
+    user = make_user()
+    graph.save_notes(user, "sql", [AgentNote(text="Sort results by date ascending")])
+    graph.save_notes(user, "sql", [AgentNote(text="Limit results to 50 rows")])
+    graph.save_notes(user, "chart", [AgentNote(text="Use dark colours")])
+    seen = []
+    recording_extractor(monkeypatch, seen, AgentNote(text="Sort results by date descending", replaces=2))
+    await graph.extract_facts(user, "q", "a", [], agent="sql")
+    head = seen[0].split("User: q")[0]
+    assert "1. Limit results to 50 rows\n2. Sort results by date ascending\n" in head
+    assert "Use dark colours" not in seen[0]
+    assert note_texts(user, "sql") == ["Sort results by date descending", "Limit results to 50 rows"]
+
+
+@requires_db
+async def test_note_text_with_braces_reaches_the_extractor(make_user, embeddings, monkeypatch):
+    user = make_user()
+    graph.save_notes(user, "sql", [AgentNote(text="Return a {column} header")])
+    seen = []
+    recording_extractor(monkeypatch, seen, AgentNote(text="Return no header", replaces=1))
+    await graph.extract_facts(user, "q", "a", [], agent="sql")
+    assert "1. Return a {column} header" in seen[0]
+    assert note_texts(user, "sql") == ["Return no header"]
+
+
+@requires_db
+async def test_no_notes_list_without_an_agent_or_without_notes(make_user, embeddings, monkeypatch):
+    user = make_user()
+    graph.save_notes(user, "sql", [AgentNote(text="Sort results by date ascending")])
+    seen = []
+    recording_extractor(monkeypatch, seen, AgentNote(text="Limit results to 50 rows"))
+    await graph.extract_facts(user, "q", "a", [])
+    await graph.extract_facts(make_user(), "q", "a", [], agent="sql")
+    assert all("1. " not in message for message in seen) and len(seen) == 2
+
+
+def test_extract_prompt_explains_replaces():
+    from app.core.prompts import EXTRACT_PROMPT
+
+    assert "replaces" in EXTRACT_PROMPT and "{" not in EXTRACT_PROMPT

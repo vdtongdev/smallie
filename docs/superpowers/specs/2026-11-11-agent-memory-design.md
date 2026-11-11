@@ -17,7 +17,7 @@ Two parts:
 - **Extraction runs on every finished turn**, not only turns the orchestrator answered. Cost: one more background model call per message a specialist answered. Rejected: a keyword check for corrections (misses notes); orchestrator turns only (most notes would never be learned).
 - **Storage: note nodes in the graph** (approach A). Rejected: a text column on an agent -> User edge (not linked to entities); a separate `agent_notes` table (graph untouched).
 - **Each agent sees only its own notes.** The orchestrator does not see the specialists' notes.
-- **Notes are listed and deletable in the memories dialog.**
+- **Notes are listed and deletable through `/api/memories`.** Amended 2026-11-11: the app has no memories dialog (the API has no UI caller), so this branch changes the API only; a dialog is its own item.
 - **Version:** ships in `0.7.0` with the prompt layer files.
 
 ## 1. Layer files
@@ -43,6 +43,8 @@ app/core/layers/
 | `agent` | user and agent route (`orchestrator`, `docs`, `sql`, `chart`, `research`) | the route | none |
 | `note` | note | the note text | of the text |
 
+A note's `norm` is `<route>:<normalized text>`, so two agents never share a note node (the unique index is on user, kind and `norm`).
+
 | Edge | Meaning | Carries |
 |---|---|---|
 | `agent -[noted]-> note` | this agent learned this note | `source = chat`, `conversation_id` |
@@ -55,7 +57,7 @@ Rules:
 - **Duplicates:** before a note is saved, the nearest note of the same agent and user is looked up by embedding. At or above `SAME_NOTE` the old note's text, embedding and `about` edges are replaced and its `noted` edge is refreshed (newest wins); below it a new note node is made. `SAME_NOTE` is a constant in `app/core/graph.py`, measured like `SAME_ENTITY` (section 7) and re-measured after the embedding model changes.
 - **Recall:** `recall_notes(user_id)` returns `{agent: bullets}`, the newest `RECALL_NOTES` (10) notes per agent by the `noted` edge's `updated_at`. SQL only, no model or embedding call.
 - **Cleanup:** `_drop_orphans` also deletes a `note` node with no `noted` edge. An entity that only a note's `about` edge links stays, since it is linked.
-- **Existing readers stay unchanged in what they return:** `recall_profile`, `recall_facts` and `list_facts`' fact rows already filter on edges at the User node or on `source`; each is checked so `noted` and `about` edges never show up as facts. `_keep_one_edge` never touches `noted` or `about` edges.
+- **Existing readers stay unchanged in what they return.** Today they would show note edges (`recall_facts` takes any edge at the User node, `list_facts` any edge not from a document, `search_facts` any node with an embedding), so `_facts_query` leaves out every edge with an `agent` or `note` node at either end, `search_facts` picks its nearest nodes among non-note nodes, and the extractor's list of relations already in the graph leaves out `noted` and `about`. `_keep_one_edge` runs only for fact pairs and never sees a note edge.
 - `scripts.reindex` re-embeds note nodes together with entities.
 
 ## 3. Extraction
@@ -63,7 +65,8 @@ Rules:
 One call, as today; it returns notes beside facts.
 
 - `FactUpdate` gains `notes: list[AgentNote] = []`. `AgentNote` has `text: str` and `about: list[str] = []`. Every new field has a default, so a reply without `notes` still parses. Pydantic limits: at most 3 notes per call, a note at most 200 characters.
-- The model never names the agent. `remember_turn` (`app/api/routes_chat.py`) passes `_answered_by(messages)` to `extract_facts`; the extractor's human message says which agent wrote the answer, and code saves the notes under that agent. A name that is not a registered route or the orchestrator saves no notes. In team mode the answer is the orchestrator's, so team-mode notes are the orchestrator's.
+- The model never names the agent. `remember_turn` (`app/api/routes_chat.py`) maps `_answered_by(messages)` (an `AIMessage.name` such as `sql_agent`) to its route through `MESSAGE_ROUTES` (`app/orchestration/orchestrator.py`) and passes the route to `extract_facts`; the extractor's human message says which agent wrote the answer, and code saves the notes under that route. A name with no route saves facts but no notes.
+- Known limit: notes go to the agent that wrote the final answer. In team mode, and when the orchestrator asks a specialist as a tool and writes the answer itself (research always works this way), the notes are the orchestrator's. The research agent therefore gets no notes of its own for now.
 - `remember_turn` drops the `== ORCHESTRATOR` condition: extraction runs after every finished turn with an answer. Paused turns are still skipped. Extraction stays best effort and its tokens still go into the usage totals.
 - `EXTRACT_PROMPT` gains a rule for notes: a note says how the user wants this agent to do its work (a correction, a default, a format, a scope), written as an instruction to the agent in English; facts about the user stay triples; most turns have no note. Final wording follows `writing-llm-document`. The prompt stays unformatted.
 - `save_facts` keeps its signature for facts; a new `save_notes(user_id, agent, notes, conversation_id)` writes the nodes and edges of section 2 in one transaction, through `asyncio.to_thread`.
@@ -75,14 +78,14 @@ One call, as today; it returns notes beside facts.
 - `build_snapshot` (`app/core/snapshot.py`) adds `agent_notes: {agent: bullets}` from `recall_notes`, run through `asyncio.to_thread`.
 - `chat_snapshot` treats a saved snapshot without the `agent_notes` key as stale and rebuilds it, as it does for `profile`. No migration.
 - `AgentContext` gains `agent_notes: dict[str, str]` (empty by default). The name `notes` is taken: it holds the orchestrator's per-request notes. `routes_chat` and `scripts.bench_chat` fill it from the snapshot; agent servers receive it with the rest of the context.
-- `build_agent` renders `NOTES_SECTION` with the entry of the agent it builds. The plan names how `build_agent` learns its agent's route (it has the system prompt today, not the name).
+- `build_agent` gains a keyword `route: str = ""` and renders `NOTES_SECTION` with `context.agent_notes.get(route)`. Each `agent.py` passes its `SPEC` route, the orchestrator passes `ORCHESTRATOR`.
 - Notes learned in a chat reach that chat's prompt when its snapshot is next rebuilt (after `MEMORY_SNAPSHOT_MINUTES` without a turn), and every new chat at once. Within the chat the correction is in the history, as with facts.
 
-## 5. Memories API and UI
+## 5. Memories API
 
 - `GET /api/memories` lists notes beside facts. A note row has the `noted` edge's id, the note text, `agent` (the route) and `created_at`; fact rows gain `agent: null`.
-- `DELETE /api/memories/{id}` on a `noted` edge deletes the note node (its edges cascade), drops orphans and calls `clear_snapshots(user_id)`. Checked by `user_id`, like facts.
-- The memories dialog (`app/static/`) shows the agent's label on a note row; new strings in English and Vietnamese in `i18n.js`.
+- `DELETE /api/memories/{id}` on a `noted` edge deletes the edge; orphan cleanup then deletes the note node (its `about` edges cascade), and `clear_snapshots(user_id)` runs. Checked by `user_id`, like facts.
+- No UI change: nothing in `app/static/` calls `/api/memories` today.
 
 ## 6. Tests
 
@@ -119,4 +122,4 @@ DB tests create and delete only their own test users' rows (the dev database is 
 - `search_memory` matching note text directly; notes are reached through the entities they are about.
 - The orchestrator reading the specialists' notes.
 - Agents saving notes through a tool.
-- Editing a note's text in the UI (delete only).
+- A memories dialog in the UI, and editing a note's text.

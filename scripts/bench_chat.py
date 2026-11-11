@@ -169,6 +169,7 @@ class Result:
     earlier_answers: list[str] = field(default_factory=list)  # replies to the setup turns (bootstrap scenario)
     checks: dict = field(default_factory=dict)  # bootstrap scenario: bootstrap_ok, language; notes_followup: see run_notes_followup
     answered_by: str | None = None  # notes_followup: name of the message that holds the final answer
+    conversation_id: str = ""  # notes_followup: the thread id of this message's chat
     agent_notes: dict = field(default_factory=dict)  # notes_followup: the notes this chat's snapshot carried (route -> bullets)
     charts: list[str] = field(default_factory=list)  # charts drawn: "type: title (series x points)"
     error: str = ""
@@ -320,8 +321,10 @@ async def run_notes_followup(assistant, store, run: int) -> Result:
         if first.error:
             return first
         extraction = UsageCounter()
+        skipped = {} if first.answer else {"skipped": "chat 1 had no answer"}  # the app extracts only `if answer:`
         try:  # exactly the app's post-turn call, awaited
-            await extract_turn(user_id, messages_of(NOTES)[-1], first.answer, first.answered_by, None, extraction)
+            if first.answer:
+                await extract_turn(user_id, messages_of(NOTES)[-1], first.answer, first.answered_by, first.conversation_id, extraction)
         except Exception as exc:  # noqa: BLE001
             first.error = f"extraction failed: {type(exc).__name__}: {str(exc)[:200]}"
             return first
@@ -334,7 +337,7 @@ async def run_notes_followup(assistant, store, run: int) -> Result:
             "notes_saved": saved,
             "chat2": {"agent": agent_2, "model_calls": second.model_calls, "total": second.total,
                       "snapshot_note": bool(agent_2 and second.agent_notes.get(agent_2))},
-            "followed": followed_one_decimal(second.answer)}
+            "followed": followed_one_decimal(second.answer), **skipped}
         return second
     finally:  # its conversations, settings and graph rows go with the user (ON DELETE CASCADE)
         delete_user_row(user_id)
@@ -351,6 +354,7 @@ async def run_scenario(assistant, store, user_id: str, name: str, run: int, mess
         if name == "bootstrap":
             await asyncio.to_thread(save_snapshot, user_id, config["configurable"]["thread_id"], snapshot)
         result.agent_notes = snapshot.get("agent_notes", {})
+        result.conversation_id = config["configurable"]["thread_id"]
         context = AgentContext(user_id=user_id, **{**snapshot, "bootstrap": snapshot.get("bootstrap", False) and onboards(name)}, agent="team" if name.startswith("team") else "auto")
         for earlier in before:  # setup turns, not measured; same context so the measured turn can reuse their prefix
             state = await assistant.ainvoke({"messages": [{"role": "user", "content": earlier}]},

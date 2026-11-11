@@ -224,6 +224,67 @@ async def test_notes_followup_scripted_run(monkeypatch):
         bench_chat.delete_user_row(other)
 
 
+class SilentFirstChat(NotesAssistant):
+    """Chat 1's measured turn (the second call) has no text, as a real model once returned."""
+
+    def reply(self, context):
+        super().reply(context)
+        if len(self.contexts) == 2:
+            self.text = ""
+
+
+@requires_db
+async def test_notes_followup_skips_extraction_when_chat_1_has_no_answer(monkeypatch):
+    calls, seen = [], {}
+
+    async def snapshot(checkpointer, user_id, conversation_id):
+        seen["user"] = user_id
+        return {"user": "", "profile": "", "memories": "", "recent_chats": "", "agent_notes": {}}
+
+    async def extractor(*args, **kwargs):
+        calls.append(args)
+        return 0
+
+    monkeypatch.setattr(bench_chat, "build_snapshot", snapshot)
+    monkeypatch.setattr(bench_chat, "recall_notes", lambda user_id: {})
+    monkeypatch.setattr(routes_chat, "extract_facts", extractor)
+    assistant = SilentFirstChat()
+    result = await bench_chat.run_notes_followup(assistant, None, 1)
+    assert result.error == ""
+    assert calls == []
+    assert result.checks["extraction"]["model_calls"] == 0 and result.checks["extraction"]["input_tokens"] == 0
+    assert result.checks["extraction"]["output_tokens"] == 0
+    assert result.checks["skipped"]
+    assert len(assistant.contexts) == 3 and result.answer == "The yield is 3.14%."  # chat 2 still ran
+    with get_engine().connect() as conn:
+        assert conn.execute(select(func.count()).select_from(users).where(users.c.id == seen["user"])).scalar() == 0
+
+
+@requires_db
+async def test_notes_followup_extraction_gets_chat_1s_conversation_id(monkeypatch):
+    calls, threads = [], []
+
+    class Recording(NotesAssistant):
+        async def astream(self, input, *, config, context, **kwargs):
+            threads.append(config["configurable"]["thread_id"])
+            async for event in super().astream(input, config=config, context=context, **kwargs):
+                yield event
+
+    async def snapshot(checkpointer, user_id, conversation_id):
+        return {"user": "", "profile": "", "memories": "", "recent_chats": "", "agent_notes": {}}
+
+    async def extractor(user_id, question, answer, callbacks, source="chat", conversation_id=None, agent=None):
+        calls.append(conversation_id)
+        return 0
+
+    monkeypatch.setattr(bench_chat, "build_snapshot", snapshot)
+    monkeypatch.setattr(bench_chat, "recall_notes", lambda user_id: {})
+    monkeypatch.setattr(routes_chat, "extract_facts", extractor)
+    await bench_chat.run_notes_followup(Recording(), None, 1)
+    assert len(calls) == 1 and isinstance(calls[0], str) and calls[0]
+    assert calls[0] == threads[0]
+
+
 @requires_db
 async def test_notes_followup_not_followed_when_the_answer_ignores_the_note(monkeypatch):
     async def snapshot(checkpointer, user_id, conversation_id):

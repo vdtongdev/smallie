@@ -880,6 +880,14 @@ def test_replaces_accepts_a_number_and_ignores_anything_else():
         assert AgentNote(text="x", replaces=bad).replaces is None
 
 
+def test_a_bad_replaces_value_never_raises():
+    for bad in ("²", "①", "٣", "1e3", "+2", " ", "", True, False, float("nan"), float("inf"), {}, b"2"):
+        assert AgentNote(text="x", replaces=bad).replaces is None
+    parsed = FactUpdate.model_validate({"facts": [{"subject": "User", "relation": "holds", "object": "FPT"}],
+                                        "notes": [{"text": "x", "replaces": "²"}]})
+    assert len(parsed.facts) == 1 and parsed.notes[0].replaces is None
+
+
 @requires_db
 def test_a_note_replaces_the_one_the_extractor_named(make_user, embeddings):
     user = make_user()

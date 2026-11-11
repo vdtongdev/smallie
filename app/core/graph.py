@@ -99,11 +99,13 @@ class AgentNote(BaseModel):
     @classmethod
     def whole_number(cls, value):
         # A bad value must not throw away the whole reply: it becomes "replaces nothing".
-        if isinstance(value, str) and value.strip().isdigit():
-            value = int(value)
-        if isinstance(value, float) and value.is_integer():
-            value = int(value)
-        return value if isinstance(value, int) and not isinstance(value, bool) and value >= 1 else None
+        try:
+            if isinstance(value, str):
+                digits = value.strip()
+                value = int(digits) if digits and all(c in "0123456789" for c in digits) else None
+            return value if isinstance(value, int) and not isinstance(value, bool) and value >= 1 else None
+        except Exception:
+            return None
 
 
 class FactUpdate(BaseModel):

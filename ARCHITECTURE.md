@@ -455,7 +455,7 @@ One-node StateGraph:
 
 1. After every finished turn with an answer, `extract_facts(question, answer, agent=...)` runs as a background task
 2. One model call with structured output: up to 8 facts, and up to 3 notes (each at most 200 characters) for the agent that wrote the answer
-3. The model sees the user's files + relations already in the graph (to reuse their names)
+3. The model sees the user's files + relations already in the graph (to reuse their names), and the answering agent's current notes, numbered; when a new note corrects or restates one, it names that note's number in `replaces`, so the old note is replaced. Embedding similarity (≥ 0.96) only catches near-identical wording
 4. Pydantic validates: relations are snake_case, known wordings map to a standard relation ("is_named" → "has_name")
 
 **Deduplication**

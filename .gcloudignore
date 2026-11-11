@@ -19,4 +19,4 @@ cloudrun.agent*.yaml
 CLAUDE.local.md
 .agents/
 .codex/
-AGENTS.md
+/AGENTS.md

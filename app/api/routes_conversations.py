@@ -49,6 +49,11 @@ async def remove(conversation_id: str, request: Request, user_id: str = Depends(
     await asyncio.to_thread(clear_snapshots, user_id)
 
 
+def user_messages(messages: list) -> int:
+    """How many user messages the history shows."""
+    return sum(1 for m in map(_serialize, messages) if m and m["role"] == "user")
+
+
 def _serialize(message) -> dict | None:
     if isinstance(message, HumanMessage):
         return {"role": "user", "content": message.text}

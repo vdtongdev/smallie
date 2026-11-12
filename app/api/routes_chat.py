@@ -19,7 +19,9 @@ from app.agents.remote import RUN_NODE, as_message
 from app.orchestration.orchestrator import HANDOFF, MESSAGE_ROUTES
 from app.core.auth import get_current_user
 from app.core.config import get_settings
-from app.core.conversations import add_conversation_usage, create_conversation, get_conversation, touch_conversation
+from app.api.routes_conversations import user_messages
+from app.core.conversations import (add_conversation_usage, create_conversation, get_conversation, save_turn_activity,
+                                    touch_conversation)
 from app.core.llm import NoModelSettings, pick_model, pick_tier
 from app.core.model_settings import load_settings
 from app.core.graph import extract_facts
@@ -37,6 +39,35 @@ UI_EVENTS = TEAM_EVENTS | {"model_fallback"}  # custom events the UI gets, in a 
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=8000)
     conversation_id: str | None = None
+
+
+SKIPPED_EVENTS = frozenset({"usage", "done", "conversation"})  # not part of a reply's saved display events
+
+
+def _keep(shown: list[dict], event: dict) -> None:
+    """Add a streamed event to the reply's saved events: a run of tokens is one empty marker, a tool result is cut."""
+    kind = event.get("type")
+    if kind in SKIPPED_EVENTS:
+        return
+    if kind == "token":
+        marker = {"type": "token", "text": "", **({"agent": event["agent"]} if "agent" in event else {})}
+        if not shown or shown[-1] != marker:
+            shown.append(marker)
+    elif kind == "tool_result":
+        shown.append({**event, "content": event.get("content", "")[:TOOL_RESULT_PREVIEW]})
+    else:
+        shown.append(event)
+
+
+def _activity_turn(n_before: int | None, n_after: int | None, resumed: bool) -> int | None:
+    """The user message (1-based) a reply's events belong to; None when nothing should be saved."""
+    if n_before is None or n_after is None:
+        return None
+    if n_after > n_before:
+        return n_after
+    if resumed and n_before >= 1:  # a resumed team turn answers the message it paused on
+        return n_before
+    return None
 
 
 _NO_MODEL = {"type": "error", "code": "no_model", "message": "Set your API key in Settings to start chatting."}
@@ -75,6 +106,14 @@ async def chat(
 
     async def events():
         nonlocal finished
+        shown: list[dict] = []  # what the reply showed, saved for reloads
+        n_before = None  # stays None when the graph never runs
+        resumed = False
+
+        def out(event: dict) -> str:
+            _keep(shown, event)
+            return _sse(event)
+
         yield _sse({"type": "conversation", "id": conversation["id"], "title": conversation["title"]})
         settings = None
         try:
@@ -85,8 +124,14 @@ async def chat(
             if kind != TEAM_MODE:  # a 1v1 reply is a medium task
                 tier = pick_tier("medium", settings.profile)
                 model, tier_used, reason = pick_model(settings, tier)
-                yield _sse({"type": "routing", "difficulty": "medium", "profile": settings.profile,
+                yield out({"type": "routing", "difficulty": "medium", "profile": settings.profile,
                             "tier": tier_used, "model": model, "reason": reason})
+            try:  # the saved activity is best effort: a failed read never stops the reply
+                before = await assistant.aget_state(config)
+                n_before = user_messages(before.values.get("messages", []))
+                resumed = kind == TEAM_MODE and bool(before.interrupts)
+            except Exception:  # noqa: BLE001
+                log.exception("Reading the thread before the reply failed")
             snapshot = await chat_snapshot(request.app.state.checkpointer, user_id, conversation)
             stream = assistant.astream(
                 await _chat_input(assistant, config, kind, body.message),
@@ -96,19 +141,19 @@ async def chat(
                 subgraphs=True,
             )
             async for event in _events_from(stream):
-                yield _sse(event)
+                yield out(event)
             finished = True
         except NoModelSettings:
-            yield _sse(_NO_MODEL)
+            yield out(_NO_MODEL)
         except openai.RateLimitError:
-            yield _sse({"type": "error", "code": "rate_limit",
+            yield out({"type": "error", "code": "rate_limit",
                         "message": f"Your model server ({_host(settings)}) is rate limiting or out of credit."})
         except openai.AuthenticationError:
-            yield _sse({"type": "error", "code": "auth",
+            yield out({"type": "error", "code": "auth",
                         "message": f"Your model server ({_host(settings)}) rejected the API key. Check it in Settings."})
         except Exception as exc:  # noqa: BLE001 - surface the failure to the UI
             log.exception("Agent run failed")
-            yield _sse({"type": "error", "code": "internal", "message": str(exc)[:500]})
+            yield out({"type": "error", "code": "internal", "message": str(exc)[:500]})
         finally:
             await asyncio.to_thread(touch_conversation, conversation["id"])
             try:  # failed and cut-off runs still spent tokens
@@ -121,6 +166,13 @@ async def chat(
                     saved = await asyncio.to_thread(add_conversation_usage, user_id, conversation["id"], usage.totals())
                 except Exception:  # noqa: BLE001 - usage is best effort
                     log.exception("Saving the chat's token usage failed")
+            if n_before is not None:
+                try:
+                    n_after = user_messages((await assistant.aget_state(config)).values.get("messages", []))
+                    if turn := _activity_turn(n_before, n_after, resumed):
+                        await asyncio.to_thread(save_turn_activity, user_id, conversation["id"], turn, shown)
+                except Exception:  # noqa: BLE001 - the saved activity is best effort
+                    log.exception("Saving the turn's activity failed")
         if saved:
             yield _sse({"type": "usage", **saved})
         yield _sse({"type": "done"})

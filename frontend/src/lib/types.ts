@@ -11,3 +11,50 @@ export interface MarketStatus {
   last_trade_date: string | null
   updated_at: string | null
 }
+
+export type ChatEvent = { type: string; [k: string]: unknown }
+
+export type ConversationEvent = { type: 'conversation'; id: string }
+export type RoutingEvent = {
+  type: 'routing'
+  difficulty: string
+  profile: string
+  tier: string
+  model: string
+  reason: string
+}
+export type ModelFallbackEvent = {
+  type: 'model_fallback'
+  from_model: string
+  to_model?: string
+  category: string
+  agent?: string
+}
+export type AgentEvent = { type: 'agent'; name: string }
+export type StepEvent = { type: 'step'; agent: string; name: string }
+export type FallbackEvent = { type: 'fallback' }
+export type TokenEvent = { type: 'token'; text: string; agent?: string; task?: string }
+export type ToolCallEvent = {
+  type: 'tool_call'
+  name: string
+  args: Record<string, unknown>
+  agent?: string
+  task?: string
+}
+export type ToolResultEvent = {
+  type: 'tool_result'
+  name: string
+  content: string
+  charts?: unknown[]
+  agent?: string
+  task?: string
+}
+export type UsageEvent = {
+  type: 'usage'
+  reply: unknown
+  chat: unknown
+  reply_by_model?: unknown
+  chat_by_model?: unknown
+}
+export type ErrorEvent = { type: 'error'; message: string; code?: string }
+export type DoneEvent = { type: 'done' }

@@ -15,7 +15,9 @@ beforeEach(() => {
     vitest.fn(async (url: string) =>
       url === '/api/me'
         ? new Response(JSON.stringify(me), { status: 200 })
-        : new Response(JSON.stringify({ stocks: 1, last_trade_date: null, updated_at: null }), { status: 200 }),
+        : ['/api/documents', '/api/conversations', '/api/agents'].includes(url)
+          ? new Response('[]', { status: 200 })
+          : new Response(JSON.stringify({ stocks: 1, last_trade_date: null, updated_at: null }), { status: 200 }),
     ),
   )
 })

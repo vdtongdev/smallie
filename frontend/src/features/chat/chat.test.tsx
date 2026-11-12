@@ -179,3 +179,44 @@ test('a chart id that appears twice in one chat renders once', async () => {
   await screen.findByText('fin')
   expect(screen.getAllByText('Sales')).toHaveLength(1)
 })
+
+test('a 401 from the chat stream shows the login screen', async () => {
+  installFetch({ 'POST /api/chat/auto': () => json({ detail: 'Not authenticated' }, 401) })
+  renderApp()
+  await userEvent.type(await input(), 'q{Enter}')
+  expect(await screen.findByRole('button', { name: en.login })).toBeInTheDocument()
+})
+
+test('the conversation list is reloaded when a send finishes', async () => {
+  const calls = installFetch({ 'POST /api/chat/auto': () => sseResponse([{ type: 'token', text: 'ok' }, { type: 'done' }]) })
+  renderApp()
+  const lists = () => calls.filter((c) => c.method === 'GET' && c.url === '/api/conversations').length
+  await input()
+  await waitFor(() => expect(lists()).toBe(1)) // the mount load
+  const before = lists()
+  await userEvent.type(await input(), 'q{Enter}')
+  await screen.findByText('ok')
+  await waitFor(() => expect(lists()).toBeGreaterThan(before))
+})
+
+test('the Usage button stays hidden when all usage is zero and there is no reply', async () => {
+  installFetch({
+    'POST /api/chat/auto': () =>
+      sseResponse([
+        { type: 'token', text: 'zero' },
+        { type: 'usage', reply: null, chat: { input_tokens: 0, output_tokens: 0, cached_tokens: 0 } },
+        { type: 'done' },
+      ]),
+  })
+  renderApp()
+  await userEvent.type(await input(), 'q{Enter}')
+  await screen.findByText('zero')
+  await waitFor(() => expect(screen.getByRole('button', { name: en.send })).not.toBeDisabled())
+  expect(screen.queryByRole('button', { name: en.usage })).toBeNull()
+})
+
+test('the documents panel is mounted in the logged-in shell', async () => {
+  installFetch()
+  renderApp()
+  expect(await screen.findByText(en.upload)).toBeInTheDocument()
+})

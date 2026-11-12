@@ -14,7 +14,7 @@ export function useAgents() {
     api<AgentInfo[]>('/agents')
       .catch(() => [] as AgentInfo[])
       .then((list) => {
-        if (alive && Array.isArray(list)) setAgents(Object.fromEntries(list.map((a) => [a.route, a])))
+        if (alive) setAgents(Object.fromEntries(list.map((a) => [a.route, a])))
       })
     return () => {
       alive = false

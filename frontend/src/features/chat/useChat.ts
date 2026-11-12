@@ -35,8 +35,7 @@ export function useChat() {
   )
 
   const loadConversations = useCallback(async () => {
-    const list = await api<Conversation[]>('/conversations').catch(() => [] as Conversation[])
-    const items = Array.isArray(list) ? list : []
+    const items = await api<Conversation[]>('/conversations').catch(() => [] as Conversation[])
     kinds.current = new Map(items.map((c) => [c.id, c.kind]))
     setConversations(items)
   }, [])
@@ -75,7 +74,7 @@ export function useChat() {
         return
       }
       if (currentRef.current !== id) return // the user switched away while this loaded
-      setTurns(turnsFromHistory(Array.isArray(messages) ? messages : []))
+      setTurns(turnsFromHistory(messages))
       const loaded = await api<Usage>(`/conversations/${id}/usage`).catch(() => null)
       if (currentRef.current === id) setUsage(loaded)
     },

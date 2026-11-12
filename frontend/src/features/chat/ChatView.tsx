@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { useLang } from '@/i18n'
 import type { Usage } from '@/lib/types'
@@ -23,9 +23,12 @@ export default function ChatView({ chat, draft, onOpenSettings }: Props) {
   const labels = useAgents()
   const [usageOpen, setUsageOpen] = useState(false)
   // The index, not the turn: every stream event makes a new turn object, and the dialog follows the live one.
-  const [activityIdx, setActivityIdx] = useState<number | null>(null)
-  const [activityOpen, setActivityOpen] = useState(false)
-  const activityTurn = activityIdx === null ? undefined : chat.turns[activityIdx]
+  // It belongs to one chat: another chat's turns, or a shorter list, close it.
+  const [activity, setActivity] = useState<{ idx: number; chatId: string | null } | null>(null)
+  const activityTurn = activity && activity.chatId === chat.currentId ? chat.turns[activity.idx] : undefined
+  useEffect(() => {
+    if (activity && !activityTurn) setActivity(null)
+  }, [activity, activityTurn])
   const showUsage = hasUsage(chat.usage)
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
@@ -34,8 +37,8 @@ export default function ChatView({ chat, draft, onOpenSettings }: Props) {
         loadError={chat.loadError}
         labels={labels}
         onOpenActivity={(turn) => {
-          setActivityIdx(chat.turns.indexOf(turn))
-          setActivityOpen(true)
+          const idx = chat.turns.indexOf(turn)
+          if (idx >= 0) setActivity({ idx, chatId: chat.currentId })
         }}
         onOpenSettings={onOpenSettings}
       />
@@ -48,7 +51,7 @@ export default function ChatView({ chat, draft, onOpenSettings }: Props) {
         )}
       </div>
       {activityTurn && (
-        <ActivityDialog turn={activityTurn} open={activityOpen} onOpenChange={setActivityOpen} />
+        <ActivityDialog turn={activityTurn} open onOpenChange={(o) => !o && setActivity(null)} />
       )}
       <UsageDialog usage={chat.usage} open={usageOpen && showUsage} onOpenChange={setUsageOpen} />
     </div>

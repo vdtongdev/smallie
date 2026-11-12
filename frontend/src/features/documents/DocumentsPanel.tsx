@@ -35,8 +35,7 @@ export function DocumentsPanel() {
   const load = useCallback(async () => {
     clearTimeout(timer.current)
     const mine = ++seq.current
-    const got = await api<Doc[]>('/documents').catch(() => [] as Doc[])
-    const list = Array.isArray(got) ? got : []
+    const list = await api<Doc[]>('/documents').catch(() => [] as Doc[])
     if (!alive.current || mine !== seq.current) return
     setDocs(list)
     if (list.some((d) => d.status === 'processing')) timer.current = setTimeout(load, POLL_MS)

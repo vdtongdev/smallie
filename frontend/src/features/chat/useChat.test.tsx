@@ -217,3 +217,25 @@ test('the remembered conversation reopens after login', async () => {
   await waitFor(() => expect(result.current.turns.map((t) => t.user)).toEqual(['earlier']))
   expect(result.current.currentId).toBe('A')
 })
+
+test('open does nothing while a reply streams', async () => {
+  const g = gate()
+  const calls = installFetch({
+    'GET /api/conversations': () => json([{ id: 'A', title: 'a', kind: 'auto' }]),
+    'POST /api/chat/auto': async () => {
+      await g.wait
+      return sseResponse([{ type: 'conversation', id: 'c1' }, { type: 'done' }])
+    },
+  })
+  const { result } = await setup()
+  let first!: Promise<void>
+  act(() => {
+    first = result.current.send('one')
+  })
+  await waitFor(() => expect(result.current.busy).toBe(true))
+  await act(() => result.current.open('A'))
+  expect(calls.some((c) => c.url === '/api/conversations/A/messages')).toBe(false)
+  expect(result.current.currentId).toBe(null)
+  g.release()
+  await act(() => first)
+})

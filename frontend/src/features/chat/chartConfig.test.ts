@@ -93,6 +93,9 @@ describe('chartConfig line', () => {
     expect(y.title).toEqual({ display: true, text: 'Y', color: '#000002' })
     expect(y.ticks.callback(1500000)).toBe('1.5M')
   })
+  it('a null y tick reads as an en dash, like charts.js', () => {
+    expect(cfg(base).options.scales.y.ticks.callback(null)).toBe('–')
+  })
   it('empty axis labels hide the title', () => {
     expect(cfg({ ...base, x_label: '' }).options.scales.x.title.display).toBe(false)
   })

@@ -137,7 +137,7 @@ export function chartConfig(spec: ChartSpec, colors: ChartColors, lang: Lang): C
           y: {
             ...axis(spec.y_label),
             beginAtZero: spec.type !== 'line' && spec.type !== 'scatter',
-            ticks: { color: muted, callback: (v: unknown) => formatValue(Number(v), lang, true) },
+            ticks: { color: muted, callback: (v: unknown) => formatValue(v as number | null, lang, true) },
           },
         }
 

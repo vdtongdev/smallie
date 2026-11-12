@@ -79,3 +79,5 @@ export type Usage = {
   reply_by_model?: Record<string, ModelUsage>
   chat_by_model?: Record<string, ModelUsage>
 }
+
+export type Conversation = { id: string; title: string; kind: 'auto' | 'team' }

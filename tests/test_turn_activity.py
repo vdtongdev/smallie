@@ -223,3 +223,65 @@ def test_user_messages_counts_what_history_shows():
     messages = [HumanMessage(content="a"), AIMessage(content="b"), ToolMessage(content="c", name="t", tool_call_id="1"),
                 HumanMessage(content="d")]
     assert user_messages(messages) == 2
+
+
+def _history_request(messages, interrupts=()):
+    async def aget_state(config):
+        return SimpleNamespace(values={"messages": messages}, interrupts=list(interrupts))
+
+    return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(assistant=SimpleNamespace(aget_state=aget_state))))
+
+
+async def test_history_attaches_activity_to_the_right_user_message(monkeypatch):
+    from app.api import routes_conversations
+
+    monkeypatch.setattr(routes_conversations, "get_conversation", lambda user_id, cid: {"id": cid})
+    events = [{"type": "agent", "name": "sql"}]
+    monkeypatch.setattr(routes_conversations, "get_turn_activity", lambda user_id, cid: {2: events})
+    request = _history_request([HumanMessage(content="q1"), AIMessage(content="a1"),
+                                HumanMessage(content="q2"), AIMessage(content="a2")])
+    shown = await routes_conversations.messages("c1", request, "u1")
+    assert shown[0]["activity"] is None
+    assert shown[2]["activity"] == events
+    assert "activity" not in shown[1] and "activity" not in shown[3]
+
+
+async def test_history_reads_activity_for_the_caller_only(monkeypatch):
+    from app.api import routes_conversations
+
+    seen = []
+    monkeypatch.setattr(routes_conversations, "get_conversation", lambda user_id, cid: {"id": cid})
+    monkeypatch.setattr(routes_conversations, "get_turn_activity", lambda user_id, cid: seen.append(user_id) or {})
+    await routes_conversations.messages("c1", _history_request([HumanMessage(content="q")]), "u1")
+    assert seen == ["u1"]
+
+
+@requires_db
+def test_messages_endpoint_returns_saved_activity(env):
+    from fastapi.testclient import TestClient
+
+    from app.api.main import app
+    from app.core.auth import get_current_user
+
+    user = env.user()
+    chat = create_conversation(user, "auto", "hi")["id"]
+    events = [{"type": "agent", "name": "sql"}, {"type": "token", "text": ""}]
+    save_turn_activity(user, chat, 1, events)
+
+    async def aget_state(config):
+        return SimpleNamespace(values={"messages": [HumanMessage(content="hi")]}, interrupts=[])
+
+    had = hasattr(app.state, "assistant")
+    old = getattr(app.state, "assistant", None)
+    app.state.assistant = SimpleNamespace(aget_state=aget_state)
+    app.dependency_overrides[get_current_user] = lambda: user
+    try:
+        res = TestClient(app).get(f"/api/conversations/{chat}/messages")
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        if had:
+            app.state.assistant = old
+        else:
+            del app.state.assistant
+    assert res.status_code == 200
+    assert res.json()[0]["activity"] == events

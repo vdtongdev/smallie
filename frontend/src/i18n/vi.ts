@@ -42,6 +42,7 @@ export const vi: Record<I18nKey, string> = {
   settingsKeySaved: "Đã lưu key. Để trống ô này để giữ nguyên.",
   settingsNone: "Chưa lưu máy chủ model nào.",
   delete: "Xoá",
+  cancel: "Huỷ",
   noConversations: "Chưa có cuộc trò chuyện",
   noDocuments: "Chưa có tài liệu nào.",
   status_processing: "đang xử lý…",

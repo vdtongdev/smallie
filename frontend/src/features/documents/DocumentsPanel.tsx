@@ -6,6 +6,7 @@ import { Alert } from '@/components/ui/alert'
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogFooter,
   AlertDialogTitle,
@@ -14,7 +15,7 @@ import {
 import { buttonVariants } from '@/components/ui/button'
 
 type Doc = {
-  id: number
+  id: string
   filename: string
   status: 'processing' | 'ready' | 'failed'
   chunk_count: number
@@ -29,11 +30,13 @@ export function DocumentsPanel() {
   const [error, setError] = useState('')
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const alive = useRef(true)
+  const seq = useRef(0)
 
   const load = useCallback(async () => {
     clearTimeout(timer.current)
+    const mine = ++seq.current
     const list = await api<Doc[]>('/documents').catch(() => [] as Doc[])
-    if (!alive.current) return
+    if (!alive.current || mine !== seq.current) return
     setDocs(list)
     if (list.some((d) => d.status === 'processing')) timer.current = setTimeout(load, POLL_MS)
   }, [])
@@ -59,7 +62,7 @@ export function DocumentsPanel() {
     await load()
   }
 
-  async function remove(id: number) {
+  async function remove(id: string) {
     setError('')
     await api(`/documents/${id}`, { method: 'DELETE' }).catch((err: Error) => setError(err.message))
     await load()
@@ -91,6 +94,7 @@ export function DocumentsPanel() {
               <AlertDialogContent>
                 <AlertDialogTitle>{t('confirmDelete')}</AlertDialogTitle>
                 <AlertDialogFooter>
+                  <AlertDialogCancel>{t('cancel')}</AlertDialogCancel>
                   <AlertDialogAction onClick={() => void remove(d.id)}>{t('delete')}</AlertDialogAction>
                 </AlertDialogFooter>
               </AlertDialogContent>

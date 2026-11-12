@@ -4,16 +4,17 @@ import { LanguageProvider } from '@/i18n'
 import { en } from '@/i18n/en'
 import { DocumentsPanel } from './DocumentsPanel'
 
-type Doc = { id: number; filename: string; status: string; chunk_count: number; error: string | null }
+type Doc = { id: string; filename: string; status: string; chunk_count: number; error: string | null }
 let docs: Doc[]
 let calls: { method: string; url: string; init?: RequestInit }[]
+let gates: Promise<void>[]
 let failNext: { status: number; detail: string } | null
 
 const json = (status: number, body?: unknown) =>
   new Response(body === undefined ? null : JSON.stringify(body), { status })
 
 const doc = (over: Partial<Doc> = {}): Doc => ({
-  id: 1,
+  id: 'd1',
   filename: 'a.pdf',
   status: 'ready',
   chunk_count: 7,
@@ -28,6 +29,7 @@ beforeEach(() => {
   docs = []
   calls = []
   failNext = null
+  gates = []
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string, init?: RequestInit) => {
@@ -38,7 +40,11 @@ beforeEach(() => {
         failNext = null
         return json(f.status, { detail: f.detail })
       }
-      if (method === 'GET' && url === '/api/documents') return json(200, docs)
+      if (method === 'GET' && url === '/api/documents') {
+        const snapshot = docs
+        await gates.shift()
+        return json(200, snapshot)
+      }
       if (method === 'POST' && url === '/api/documents') return json(200, {})
       if (method === 'DELETE') {
         docs = docs.filter((d) => url.endsWith(`/${d.id}`) === false)
@@ -77,7 +83,7 @@ async function mount() {
 test('lists documents with status badges', async () => {
   docs = [
     doc(),
-    doc({ id: 2, filename: 'b.docx', status: 'failed', chunk_count: 0, error: 'bad file' }),
+    doc({ id: 'd2', filename: 'b.docx', status: 'failed', chunk_count: 0, error: 'bad file' }),
   ]
   await mount()
   expect(screen.getByText('a.pdf')).toBeTruthy()
@@ -138,7 +144,7 @@ test('delete asks for confirmation, then deletes and reloads', async () => {
   expect(calls.some((c) => c.method === 'DELETE')).toBe(false)
   fireEvent.click(screen.getByRole('button', { name: en.delete }))
   await flush()
-  expect(calls.find((c) => c.method === 'DELETE')!.url).toBe('/api/documents/1')
+  expect(calls.find((c) => c.method === 'DELETE')!.url).toBe('/api/documents/d1')
   expect(screen.getByText(en.noDocuments)).toBeTruthy()
 })
 
@@ -167,4 +173,38 @@ test('an upload error shows a destructive alert', async () => {
   fireEvent.change(input, { target: { files: [new File(['x'], 'a.txt')] } })
   await flush()
   expect(screen.getByRole('alert').textContent).toContain('Only PDF or DOCX')
+})
+
+test('Cancel closes the delete confirmation without deleting', async () => {
+  docs = [doc()]
+  await mount()
+  fireEvent.click(screen.getByRole('button', { name: `${en.delete} a.pdf` }))
+  await flush()
+  fireEvent.click(screen.getByRole('button', { name: en.cancel }))
+  await flush()
+  expect(screen.queryByText(en.confirmDelete)).toBeNull()
+  expect(calls.some((c) => c.method === 'DELETE')).toBe(false)
+})
+
+test('a reload during an in-flight poll: the newer list wins and one timer remains', async () => {
+  docs = [doc({ status: 'processing', chunk_count: 0 })]
+  await mount()
+  let releasePoll!: () => void
+  let releaseReload!: () => void
+  gates = [
+    new Promise<void>((r) => (releasePoll = r)),
+    new Promise<void>((r) => (releaseReload = r)),
+  ]
+  await tick(2000) // poll fetch in flight, sees "processing"
+  docs = [doc()]
+  fireEvent.change(screen.getByLabelText(en.upload), { target: { files: [new File(['x'], 'a.pdf')] } })
+  await flush() // upload done, reload in flight, sees "ready"
+  releaseReload()
+  await tick(100)
+  releasePoll() // the older poll answers last
+  await tick(100)
+  expect(screen.getByText(`${en.status_ready} · 7 ${en.chunks}`)).toBeTruthy()
+  const before = listCalls()
+  await tick(6000) // nothing is processing: no timer may remain
+  expect(listCalls()).toBe(before)
 })

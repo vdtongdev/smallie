@@ -1,0 +1,119 @@
+{
+  "name": "general",
+  "message": "What is a P/E ratio? Answer in one sentence.",
+  "events": [
+    {
+      "type": "conversation",
+      "id": "027e881f-5c57-45e2-8d23-05f9cf8a18cc",
+      "title": "What is a P/E ratio? Answer in one sentence."
+    },
+    {
+      "type": "routing",
+      "difficulty": "medium",
+      "profile": "balanced",
+      "tier": "standard",
+      "model": "baidu/ernie-5.5-flash-preview:free",
+      "reason": "standard model"
+    },
+    {
+      "type": "agent",
+      "name": "sql"
+    },
+    {
+      "type": "token",
+      "text": "The P/E ratio is a stock's share price divided by its earnings per share — how much investors pay for each dollar of a company's annual profit (trailing P/E uses the past 12 months, forward P/E uses the next 12 months' estimate)."
+    },
+    {
+      "type": "usage",
+      "reply": {
+        "input_tokens": 2246,
+        "cached_tokens": 0,
+        "output_tokens": 120
+      },
+      "chat": {
+        "input_tokens": 2246,
+        "output_tokens": 120,
+        "cached_tokens": 0
+      },
+      "reply_by_model": {
+        "baidu/ernie-5.5-flash-preview:free": {
+          "model_calls": 1,
+          "input_tokens": 2246,
+          "cached_tokens": 0,
+          "output_tokens": 120
+        }
+      },
+      "chat_by_model": {
+        "baidu/ernie-5.5-flash-preview:free": {
+          "model_calls": 1,
+          "input_tokens": 2246,
+          "cached_tokens": 0,
+          "output_tokens": 120
+        }
+      }
+    },
+    {
+      "type": "done"
+    }
+  ],
+  "history": [
+    {
+      "role": "user",
+      "content": "What is a P/E ratio? Answer in one sentence.",
+      "activity": [
+        {
+          "tier": "standard",
+          "type": "routing",
+          "model": "baidu/ernie-5.5-flash-preview:free",
+          "reason": "standard model",
+          "profile": "balanced",
+          "difficulty": "medium"
+        },
+        {
+          "name": "sql",
+          "type": "agent"
+        },
+        {
+          "text": "",
+          "type": "token"
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "agent": "sql",
+      "content": "The P/E ratio is a stock's share price divided by its earnings per share — how much investors pay for each dollar of a company's annual profit (trailing P/E uses the past 12 months, forward P/E uses the next 12 months' estimate).",
+      "team": null,
+      "tool_calls": [],
+      "charts": []
+    }
+  ],
+  "usage": {
+    "reply": {
+      "input_tokens": 2246,
+      "cached_tokens": 0,
+      "output_tokens": 120
+    },
+    "chat": {
+      "input_tokens": 2246,
+      "output_tokens": 120,
+      "cached_tokens": 0
+    },
+    "reply_by_model": {
+      "baidu/ernie-5.5-flash-preview:free": {
+        "model_calls": 1,
+        "input_tokens": 2246,
+        "cached_tokens": 0,
+        "output_tokens": 120
+      }
+    },
+    "chat_by_model": {
+      "baidu/ernie-5.5-flash-preview:free": {
+        "model_calls": 1,
+        "input_tokens": 2246,
+        "cached_tokens": 0,
+        "output_tokens": 120
+      }
+    }
+  }
+}

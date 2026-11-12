@@ -1,0 +1,119 @@
+{
+  "name": "fallback",
+  "message": "What does my contract say about termination?",
+  "events": [
+    {
+      "type": "conversation",
+      "id": "4fc9b2f9-f712-4734-a510-b8c52e26626c",
+      "title": "What does my contract say about termination?"
+    },
+    {
+      "type": "routing",
+      "difficulty": "medium",
+      "profile": "balanced",
+      "tier": "standard",
+      "model": "baidu/ernie-5.5-flash-preview:free",
+      "reason": "standard model"
+    },
+    {
+      "type": "agent",
+      "name": "orchestrator"
+    },
+    {
+      "type": "token",
+      "text": "I don't have any of your files to look at right now — nothing has been uploaded to this chat, so I can't tell you what your contract says about termination. If you upload the contract (PDF or DOCX), I'll pull out the termination clauses, notice periods and any penalties for you.\n\nWhat kind of work do you do? That would help me flag the clauses that matter most for your situation."
+    },
+    {
+      "type": "usage",
+      "reply": {
+        "input_tokens": 4402,
+        "cached_tokens": 0,
+        "output_tokens": 204
+      },
+      "chat": {
+        "input_tokens": 4402,
+        "output_tokens": 204,
+        "cached_tokens": 0
+      },
+      "reply_by_model": {
+        "baidu/ernie-5.5-flash-preview:free": {
+          "model_calls": 1,
+          "input_tokens": 4402,
+          "cached_tokens": 0,
+          "output_tokens": 204
+        }
+      },
+      "chat_by_model": {
+        "baidu/ernie-5.5-flash-preview:free": {
+          "model_calls": 1,
+          "input_tokens": 4402,
+          "cached_tokens": 0,
+          "output_tokens": 204
+        }
+      }
+    },
+    {
+      "type": "done"
+    }
+  ],
+  "history": [
+    {
+      "role": "user",
+      "content": "What does my contract say about termination?",
+      "activity": [
+        {
+          "tier": "standard",
+          "type": "routing",
+          "model": "baidu/ernie-5.5-flash-preview:free",
+          "reason": "standard model",
+          "profile": "balanced",
+          "difficulty": "medium"
+        },
+        {
+          "name": "orchestrator",
+          "type": "agent"
+        },
+        {
+          "text": "",
+          "type": "token"
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "agent": "orchestrator",
+      "content": "I don't have any of your files to look at right now — nothing has been uploaded to this chat, so I can't tell you what your contract says about termination. If you upload the contract (PDF or DOCX), I'll pull out the termination clauses, notice periods and any penalties for you.\n\nWhat kind of work do you do? That would help me flag the clauses that matter most for your situation.",
+      "team": null,
+      "tool_calls": [],
+      "charts": []
+    }
+  ],
+  "usage": {
+    "reply": {
+      "input_tokens": 4402,
+      "cached_tokens": 0,
+      "output_tokens": 204
+    },
+    "chat": {
+      "input_tokens": 4402,
+      "output_tokens": 204,
+      "cached_tokens": 0
+    },
+    "reply_by_model": {
+      "baidu/ernie-5.5-flash-preview:free": {
+        "model_calls": 1,
+        "input_tokens": 4402,
+        "cached_tokens": 0,
+        "output_tokens": 204
+      }
+    },
+    "chat_by_model": {
+      "baidu/ernie-5.5-flash-preview:free": {
+        "model_calls": 1,
+        "input_tokens": 4402,
+        "cached_tokens": 0,
+        "output_tokens": 204
+      }
+    }
+  }
+}

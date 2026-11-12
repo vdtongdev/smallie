@@ -11,6 +11,7 @@ from sqlalchemy import (
     DateTime,
     Engine,
     ForeignKey,
+    Identity,
     Index,
     Integer,
     MetaData,
@@ -57,6 +58,18 @@ conversations = Table(
     Column("bootstrap_ran", Boolean, nullable=False, server_default="false"),  # onboarding ran in this chat (app/core/snapshot.py)
     Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
     Column("updated_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
+)
+
+turn_activity = Table(
+    "turn_activity",
+    metadata,
+    Column("id", BigInteger, Identity(), primary_key=True),
+    Column("user_id", String(64), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False),
+    Column("conversation_id", String(36), ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False),
+    Column("turn", Integer, nullable=False),  # 1-based index of the user message the events belong to
+    Column("events", JSONB, nullable=False),  # the reply's display events, as streamed
+    Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
+    Index("ix_turn_activity_conversation_turn", "conversation_id", "turn"),
 )
 
 model_settings = Table(

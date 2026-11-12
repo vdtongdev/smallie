@@ -40,8 +40,10 @@ test('defaults to English and shows the Vietnamese toggle', () => {
 test('toggle switches to Vietnamese and remembers it', async () => {
   vitest.stubGlobal(
     'fetch',
-    vitest.fn(async () =>
-      new Response(JSON.stringify({ user_id: 'u1', name: 'An', username: 'an', is_admin: false, max_accounts: 10 }), { status: 200 }),
+    vitest.fn(async (url: string) =>
+      url === '/api/me'
+        ? new Response(JSON.stringify({ user_id: 'u1', name: 'An', username: 'an', is_admin: false, max_accounts: 10 }), { status: 200 })
+        : new Response('[]', { status: 200 }),
     ),
   )
   renderApp()

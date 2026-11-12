@@ -181,6 +181,7 @@ async def test_messages_show_a_pending_question(monkeypatch):
     from app.api import routes_conversations
 
     monkeypatch.setattr(routes_conversations, "get_conversation", lambda user_id, cid: {"id": cid})
+    monkeypatch.setattr(routes_conversations, "get_turn_activity", lambda user_id, cid: {})
     snapshot = SimpleNamespace(values={"messages": [HumanMessage("compare revenue")]},
                                interrupts=[SimpleNamespace(value={"question": "Which company?"})])
 
@@ -189,7 +190,7 @@ async def test_messages_show_a_pending_question(monkeypatch):
 
     request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(assistant=SimpleNamespace(aget_state=aget_state))))
     shown = await routes_conversations.messages("c1", request, "u1")
-    assert shown[0] == {"role": "user", "content": "compare revenue"}
+    assert shown[0] == {"role": "user", "content": "compare revenue", "activity": None}
     assert shown[1] == {"role": "assistant", "agent": "orchestrator", "content": "Which company?", "pending": True,
                         "team": None, "tool_calls": [], "charts": []}
     snapshot.interrupts = []

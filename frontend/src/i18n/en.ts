@@ -40,6 +40,7 @@ export const en = {
   settingsKeySaved: "Key saved. Leave the field empty to keep it.",
   settingsNone: "No model server saved yet.",
   delete: "Delete",
+  cancel: "Cancel",
   noConversations: "No chats yet",
   noDocuments: "No documents uploaded yet.",
   status_processing: "indexing…",

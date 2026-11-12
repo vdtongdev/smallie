@@ -36,3 +36,8 @@ export function postJson(path: string, body: unknown): Promise<Response> {
     body: JSON.stringify(body),
   })
 }
+
+/** For the one call that streams with `fetch` instead of `api`: a 401 there logs out like any other. */
+export function unauthorized(): void {
+  onUnauthorized()
+}

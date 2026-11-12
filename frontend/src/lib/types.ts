@@ -58,3 +58,24 @@ export type UsageEvent = {
 }
 export type ErrorEvent = { type: 'error'; message: string; code?: string }
 export type DoneEvent = { type: 'done' }
+
+export type ChartSpec = {
+  id: string
+  type: 'line' | 'bar' | 'area' | 'pie' | 'scatter'
+  title: string
+  x_label: string
+  y_label: string
+  labels: (string | number)[]
+  series: { name: string; values: (number | null)[] }[]
+  downsampled_from?: number | null
+  table_id?: string | null
+}
+
+export type UsagePart = { input_tokens: number; output_tokens: number; cached_tokens: number | null }
+export type ModelUsage = UsagePart & { model_calls: number }
+export type Usage = {
+  reply: UsagePart | null
+  chat: UsagePart
+  reply_by_model?: Record<string, ModelUsage>
+  chat_by_model?: Record<string, ModelUsage>
+}

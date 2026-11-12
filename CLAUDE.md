@@ -4,7 +4,7 @@ Guidance for Claude Code in this repository.
 
 ## What this is
 
-FastAPI app hosting LangChain agents (`create_agent`) behind an orchestrator, with a plain HTML/JS UI (`app/static/`, chat view plus a Readme dialog opened from the header, EN/VI toggle in `i18n.js`). The **orchestrator** answers general questions, hands a message to one specialist, or asks several as tools and writes the answer. Specialists: **docs**, **sql**, **chart**, **research**, each its own agent server. Chat calls go to each user's own OpenAI-compatible server, set in the app's Settings (`get_chat_model(user_id)` in `app/core/llm.py`, saved in `model_settings`); embeddings go to OpenRouter on the operator's `EMBED_API_KEY`. Every agent replies in the language of the user's latest message (English or Vietnamese): `LANGUAGE_RULE` in `app/core/prompts.py`.
+FastAPI app hosting LangChain agents (`create_agent`) behind an orchestrator, with a plain HTML/JS UI at `/` (`app/static/`, chat view plus a Readme dialog opened from the header, EN/VI toggle in `i18n.js`), being replaced by a React + Vite + Tailwind + shadcn UI in `frontend/`, served at `/next` (`mount_frontend` in `app/api/main.py`; `/` stays the old UI until the switch). The **orchestrator** answers general questions, hands a message to one specialist, or asks several as tools and writes the answer. Specialists: **docs**, **sql**, **chart**, **research**, each its own agent server. Chat calls go to each user's own OpenAI-compatible server, set in the app's Settings (`get_chat_model(user_id)` in `app/core/llm.py`, saved in `model_settings`); embeddings go to OpenRouter on the operator's `EMBED_API_KEY`. Every agent replies in the language of the user's latest message (English or Vietnamese): `LANGUAGE_RULE` in `app/core/prompts.py`.
 
 Layout of `app/`: `core/` (config, llm, db, memory, auth, accounts, conversations, shared prompts; knows nothing about specific agents), `agents/` (one package per agent: `agent.py` with build + `SPEC`, `tools.py`, `prompts.py`; listed in `agents/registry.py`), `features/` (data an agent uses plus its API, ingestion and background jobs; listed in `features/registry.py`), `orchestration/` (router + assistant graph), `api/` (shared routes and `main.py`).
 
@@ -36,6 +36,10 @@ Development is on Windows with `uv`. Postgres 18 (pgvector) runs on **port 5433*
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\dev_db.ps1   # start Postgres, keep WSL up until shutdown
 uv sync                                            # install deps into .venv
+cd frontend; npm install                           # new UI deps (Node 24)
+cd frontend; npm run dev                           # new UI on :5173, proxies /api to :8000
+cd frontend; npm test                              # frontend tests
+cd frontend; npm run build                         # frontend/dist, served at /next
 uv run uvicorn app.api.main:app --reload --reload-include "*.md" --loop asyncio:SelectorEventLoop
 uv run pytest                                      # all tests
 uv run pytest tests/test_sql.py::test_name         # single test

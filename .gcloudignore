@@ -20,3 +20,5 @@ CLAUDE.local.md
 .agents/
 .codex/
 /AGENTS.md
+/frontend/node_modules
+/frontend/dist

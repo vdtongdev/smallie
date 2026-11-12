@@ -41,6 +41,7 @@ The app runs as a container on **Cloud Run** (free tier, scales to zero). All da
      --env-vars-file cloudrun.env.yaml --memory 1Gi --cpu 1 --no-cpu-throttling `
      --min-instances 0 --max-instances 1 --timeout 900
    ```
+   - The image builds the React UI in a Node 24 stage and copies only `frontend/dist` into the runtime image, which has no Node. Before deploying, `gcloud meta list-files-for-upload .` should list `frontend/package.json` and `frontend/src/`, and not `frontend/node_modules`.
    - `--no-cpu-throttling` keeps the CPU on after a response, so document indexing, chat-history indexing and the stock update (all background tasks) still run.
    - `--max-instances 1` caps the cost.
    - `--allow-unauthenticated` only opens the URL; the app still requires a login.

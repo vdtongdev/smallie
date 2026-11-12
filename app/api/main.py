@@ -57,6 +57,30 @@ class NoCacheStaticFiles(StaticFiles):
         return response
 
 
+FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+
+
+class FrontendFiles(StaticFiles):
+    """The React build: hashed assets cache for a year, index.html is revalidated."""
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        if response.status_code in (200, 304):
+            if path.replace("\\", "/").startswith("assets/"):
+                response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+            else:
+                response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+def mount_frontend(app: FastAPI, dist: Path) -> bool:
+    if not (dist / "index.html").is_file():
+        logging.warning("No frontend build at %s; /next is not served. Run `npm run build` in frontend/.", dist)
+        return False
+    app.mount("/next", FrontendFiles(directory=dist, html=True), name="next")
+    return True
+
+
 def _session_secret() -> str:
     s = get_settings()
     if s.session_secret:
@@ -87,4 +111,5 @@ app.include_router(routes_usage.router, prefix="/api")
 for feature in FEATURES:
     for feature_router in feature.routers:
         app.include_router(feature_router, prefix="/api")
+mount_frontend(app, FRONTEND_DIST)
 app.mount("/", NoCacheStaticFiles(directory=STATIC_DIR, html=True), name="static")

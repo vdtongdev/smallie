@@ -1,3 +1,11 @@
+# Build the React UI (served at /next); only its dist/ goes into the runtime image.
+FROM node:24-slim AS frontend
+WORKDIR /frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
 # Container image for Google Cloud Run (see DEPLOYING.md). Config comes from env vars, not .env.
 FROM python:3.12-slim
 
@@ -13,6 +21,7 @@ COPY --chown=user pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
 COPY --chown=user . .
+COPY --chown=user --from=frontend /frontend/dist frontend/dist
 RUN uv sync --frozen --no-dev && mkdir -p uploads
 
 # Cloud Run sets PORT (8080).

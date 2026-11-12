@@ -17,3 +17,6 @@ cloudrun.agent*.yaml
 
 # Agent task plans: kept local, the commits and CHANGELOG.md record the work
 docs/plans/
+
+frontend/node_modules/
+frontend/dist/

@@ -80,6 +80,7 @@ def mount_frontend(app: FastAPI, dist: Path) -> bool:
     app.mount("/next", FrontendFiles(directory=dist, html=True), name="next")
     return True
 
+
 def _session_secret() -> str:
     s = get_settings()
     if s.session_secret:

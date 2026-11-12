@@ -19,6 +19,7 @@ This file describes `main` plus the 0.4.0 remote agents (section 10) and the 0.5
 - Language toggle: English / Vietnamese
 - Document upload UI with progress tracking (PDF, DOCX)
 - Charts rendered with Chart.js
+- New UI (`frontend/`, React + Vite + Tailwind + shadcn) served at `/next`; built by `npm run build` into `frontend/dist`, in a Node 24 stage of the `Dockerfile` (no Node in the runtime image). `/` is still the old UI until the switch
 
 **Backend**
 

@@ -4,7 +4,7 @@
     "target": "es2023",
     "lib": ["ES2023", "DOM"],
     "module": "esnext",
-    "types": ["vite/client", "node", "@testing-library/jest-dom"],
+    "types": ["vite/client"],
     "paths": { "@/*": ["./src/*"] },
     "allowArbitraryExtensions": true,
     "skipLibCheck": true,
@@ -23,5 +23,6 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/test"]
 }

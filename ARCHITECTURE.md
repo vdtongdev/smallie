@@ -83,6 +83,7 @@ This file describes `main` plus the 0.4.0 remote agents (section 10) and the 0.5
 │                                                                 │
 │  Tables:                                                        │
 │    users, conversations, documents (+ summary, card_embedding)  │
+│    turn_activity (each reply's saved events, one row per run)   │
 │    LangGraph checkpointer: checkpoints, checkpoint_blobs,       │
 │                            checkpoint_writes                    │
 │    LangGraph store: store, store_vectors                        │
@@ -154,6 +155,8 @@ This file describes `main` plus the 0.4.0 remote agents (section 10) and the 0.5
    - A `usage` event (the latest reply's and the chat's token totals, section 14), then a final `done` event
    - A specialist's reply stays in the thread with its tool calls and results (so "plot that" finds the table later). When the orchestrator answers, only its final message enters the thread; what it asked specialists streams to the UI but stays out of later prompts.
    - The checkpointer saves the thread
+   - Saved activity: `events()` (`routes_chat.py`) keeps the streamed events except `usage`, `done` and `conversation`. Each run of consecutive `token` events from one agent is kept as one empty `token` marker, so a reload can tell a relabel from a second agent, and `tool_result` content is cut to `TOOL_RESULT_PREVIEW` (4000 characters). In its `finally`, after the usage is saved, the stream writes the rows to `turn_activity` (section 1) under the user message the reply answers. A resumed paused team turn adds a second row under the same turn; a reply that saves nothing (such as `no_model`) writes no row. Failed and cut-off replies are saved too. The save is best effort: a failure is logged and the reply is unaffected
+   - `GET /api/conversations/{id}/messages` returns each user message with `activity`: that turn's saved events, concatenated in row order, or `null` for chats from before this table. The React UI replays them for its badges, steps and Activity popup; the text and charts still come from the messages. Nothing reads the saved rows for a prompt
 10. **Background: fact extraction** (after the response is sent)
     - After every finished turn with an answer, whichever agent wrote it; paused turns are skipped
     - One model call extracts facts and agent notes from the question + answer

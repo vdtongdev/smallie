@@ -5,7 +5,9 @@ import App from './App.tsx'
 import { AuthProvider } from './features/auth/AuthProvider'
 import { LanguageProvider } from './i18n'
 import { initTheme } from './lib/theme'
+import { applyThemeName } from './lib/themeName'
 
+applyThemeName()
 initTheme()
 
 createRoot(document.getElementById('root')!).render(

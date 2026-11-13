@@ -2549,4 +2549,7 @@ async def test_crash_retry_answers_in_the_crashed_questions_language(monkeypatch
 
     notes = [e["last"].text for e in log if e["event"] == "start"]
     assert notes and all(f"Write in {language}" in n for n in notes)
-    assert any(f"{language}" in m.text for p in model.prompts for m in p if "TEAM RESULT" in m.text or "REPLY LANGUAGE" in m.text)
+    other = "English" if language == "Vietnamese" else "Vietnamese"
+    texts = [m.text for p in model.prompts for m in p]
+    assert any(f"REPLY LANGUAGE for this message: {language}," in t for t in texts)
+    assert not any(f"REPLY LANGUAGE for this message: {other}," in t for t in texts)

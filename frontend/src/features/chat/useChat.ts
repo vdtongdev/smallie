@@ -18,6 +18,7 @@ export function useChat() {
   const [currentId, setCurrentId] = useState<string | null>(null)
   const [turns, setTurns] = useState<Turn[]>([])
   const [busy, setBusy] = useState(false)
+  const [sent, setSent] = useState(0) // counts finished sends; the sidebar usage box reloads on it
   const [usage, setUsage] = useState<Usage | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [ready, setReady] = useState(false)
@@ -155,6 +156,7 @@ export function useChat() {
       } finally {
         busyRef.current = false
         setBusy(false)
+        setSent((n) => n + 1)
         void loadConversations()
       }
     },
@@ -170,5 +172,5 @@ export function useChat() {
     [loadConversations, reset],
   )
 
-  return { conversations, currentId, turns, busy, usage, loadError, ready, teamMode, setTeamMode, kind, send, open, newChat, remove }
+  return { conversations, currentId, turns, busy, sent, usage, loadError, ready, teamMode, setTeamMode, kind, send, open, newChat, remove }
 }

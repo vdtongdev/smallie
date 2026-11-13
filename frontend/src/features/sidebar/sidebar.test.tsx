@@ -3,6 +3,8 @@ import userEvent from '@testing-library/user-event'
 import { expect, test, vi } from 'vitest'
 import { LanguageProvider } from '@/i18n'
 import { en } from '@/i18n/en'
+import { buttonVariants } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 import type { Conversation } from '@/lib/types'
 import Sidebar from './Sidebar'
 
@@ -91,7 +93,23 @@ test('the Team mode switch is disabled while busy', () => {
   expect(screen.getByRole('checkbox', { name: en.teamMode })).toBeDisabled()
 })
 
+test('the Settings button sits below the chat list and asks to open Settings', async () => {
+  const onOpenSettings = vi.fn()
+  show({ onOpenSettings })
+  const button = screen.getByRole('button', { name: en.settings })
+  expect(screen.getByText('Team chat').compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  await userEvent.click(button)
+  expect(onOpenSettings).toHaveBeenCalledTimes(1)
+})
+
 test('an empty list shows the empty text', () => {
   show({ conversations: [], currentId: null })
   expect(screen.getByText(en.noConversations)).toBeInTheDocument()
+})
+
+test('the Settings button is an outline button, not ghost', () => {
+  show()
+  const button = screen.getByRole('button', { name: en.settings })
+  for (const cls of cn(buttonVariants({ variant: 'outline' })).split(' ')) expect(button.className).toContain(cls)
+  expect(button).toHaveClass('border-border')
 })

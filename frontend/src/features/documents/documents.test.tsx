@@ -2,6 +2,8 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { LanguageProvider } from '@/i18n'
 import { en } from '@/i18n/en'
+import { buttonVariants } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 import { DocumentsPanel } from './DocumentsPanel'
 
 type Doc = { id: string; filename: string; status: string; chunk_count: number; error: string | null }
@@ -207,4 +209,21 @@ test('a reload during an in-flight poll: the newer list wins and one timer remai
   const before = listCalls()
   await tick(6000) // nothing is processing: no timer may remain
   expect(listCalls()).toBe(before)
+})
+
+test('the upload label gets exactly the classes of an outline Button, so its border shows', async () => {
+  await mount()
+  const label = screen.getByLabelText(en.upload).closest('label')!
+  const expected = [...cn(buttonVariants({ variant: 'outline' })).split(' '), 'w-fit', 'cursor-pointer']
+  expect(label.className.split(' ').sort()).toEqual(expected.sort())
+  expect(label).not.toHaveClass('border-transparent')
+})
+
+test('a document row is a compact bordered card with the delete button next to the status', async () => {
+  docs = [doc()]
+  await mount()
+  const row = screen.getByText('a.pdf').closest('li')!
+  expect(row).toHaveClass('border', 'rounded-md', 'w-fit')
+  expect(row).not.toHaveClass('w-full')
+  expect(screen.getByRole('button', { name: `${en.delete} a.pdf` })).not.toHaveClass('ml-auto')
 })

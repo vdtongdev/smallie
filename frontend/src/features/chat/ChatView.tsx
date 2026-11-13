@@ -43,9 +43,9 @@ export default function ChatView({ chat, draft, onOpenSettings }: Props) {
         onOpenSettings={onOpenSettings}
       />
       <Composer busy={chat.busy} awaiting={!!chat.turns.at(-1)?.pending} draft={draft} onSend={(text) => void chat.send(text)} />
-      <div className="flex justify-end">
+      <div className="flex justify-start">
         {showUsage && (
-          <Button type="button" variant="ghost" size="sm" onClick={() => setUsageOpen(true)}>
+          <Button type="button" variant="outline" onClick={() => setUsageOpen(true)}>
             {t('usage')}
           </Button>
         )}

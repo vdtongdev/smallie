@@ -148,6 +148,17 @@ export const en = {
   otherSteps: "Other steps",
   drawing: "Drawing",
   yourQuestion: "Question for you",
+  themeGroup: "Theme",
+  themeShadcn: "shadcn",
+  themeChatroom: "Chatroom",
+  themeLight: "Light",
+  modelsHelpTitle: "How models and profiles work",
+  keyHelpTitle: "Where to get an API key",
+  helpEconomy: "Economy (spend less): easy and medium tasks go to the small model, hard tasks to the standard model.",
+  helpBalanced: "Balanced (recommended): easy tasks go to the small model, medium to the standard model, hard to the strong model.",
+  helpAdvanced: "Advanced (best answers): easy tasks go to the standard model, medium and hard to the strong model.",
+  helpOptional: "The standard model is required. The small and strong models are optional: when one is empty, its tasks use the standard model. If a small or strong model fails (for example the name is wrong, or the provider rate-limits it), the same step is repeated once on the standard model.",
+  helpActivity: "The Activity button above a reply shows which model handled each task and why.",
 } as const
 
 export type I18nKey = keyof typeof en

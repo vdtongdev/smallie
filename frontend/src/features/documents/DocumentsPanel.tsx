@@ -13,6 +13,7 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
 import { buttonVariants } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 
 type Doc = {
   id: string
@@ -70,7 +71,7 @@ export function DocumentsPanel() {
 
   return (
     <div className="flex flex-col gap-2 text-sm">
-      <label className={`${buttonVariants({ variant: 'outline' })} w-fit cursor-pointer`}>
+      <label className={cn(buttonVariants({ variant: 'outline' }), 'w-fit cursor-pointer')}>
         {t('upload')}
         <input type="file" accept=".pdf,.docx" multiple className="sr-only" onChange={upload} />
       </label>
@@ -78,8 +79,8 @@ export function DocumentsPanel() {
       <ul className="flex flex-col gap-1">
         {docs.length === 0 && <li className="text-muted-foreground">{t('noDocuments')}</li>}
         {docs.map((d) => (
-          <li key={d.id} title={d.error ?? ''} className="flex items-center gap-2">
-            <span className="truncate">{d.filename}</span>
+          <li key={d.id} title={d.error ?? ''} className="flex w-fit max-w-full items-center gap-2 rounded-md border border-border px-2 py-1">
+            <span className="min-w-0 truncate">{d.filename}</span>
             <span className="text-muted-foreground">
               {t(`status_${d.status}`) + (d.status === 'ready' ? ` · ${d.chunk_count} ${t('chunks')}` : '')}
             </span>
@@ -87,7 +88,7 @@ export function DocumentsPanel() {
               <AlertDialogTrigger
                 disabled={d.status === 'processing'}
                 aria-label={`${t('delete')} ${d.filename}`}
-                className="ml-auto disabled:opacity-50"
+                className="disabled:opacity-50"
               >
                 <XIcon className="size-4" />
               </AlertDialogTrigger>

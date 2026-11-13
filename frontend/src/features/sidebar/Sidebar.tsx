@@ -11,6 +11,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { useLang } from '@/i18n'
 import type { Conversation } from '@/lib/types'
+import UsageBox from './UsageBox'
 
 type Props = {
   conversations: Conversation[]
@@ -21,9 +22,12 @@ type Props = {
   onNew(): void
   onOpen(id: string): void
   onRemove(id: string): void
+  /** Changes after every finished send, so the usage box reloads. */
+  usageKey?: number
+  onOpenSettings?(): void
 }
 
-export default function Sidebar({ conversations, currentId, busy, teamMode, onTeamMode, onNew, onOpen, onRemove }: Props) {
+export default function Sidebar({ conversations, currentId, busy, teamMode, onTeamMode, onNew, onOpen, onRemove, usageKey = 0, onOpenSettings }: Props) {
   const { t } = useLang()
   return (
     <aside className="flex w-64 shrink-0 flex-col gap-2 overflow-y-auto border-r p-2">
@@ -72,6 +76,10 @@ export default function Sidebar({ conversations, currentId, busy, teamMode, onTe
           </li>
         ))}
       </ul>
+      <Button type="button" variant="outline" onClick={onOpenSettings}>
+        {t('settings')}
+      </Button>
+      <UsageBox refreshKey={usageKey} />
     </aside>
   )
 }

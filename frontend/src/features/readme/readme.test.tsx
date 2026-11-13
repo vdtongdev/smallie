@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, expect, test, vi as vitest } from 'vitest'
@@ -10,19 +8,6 @@ import ReadmeDialog from './ReadmeDialog'
 import ReadmeEn from './ReadmeEn'
 import ReadmeVi from './ReadmeVi'
 
-const html = readFileSync(resolve(process.cwd(), '../app/static/index.html'), 'utf-8')
-const norm = (s: string | null) => (s ?? '').replace(/\s+/g, ' ').trim()
-
-// Block elements are separated by newlines in the old HTML but by nothing in JSX, so compare each text block on its own.
-const blocks = (root: Element) => [...root.querySelectorAll('h1,h2,p,li,th,td,button')].map((el) => norm(el.textContent))
-
-function oldBlocks(lang: 'en' | 'vi') {
-  const doc = new DOMParser().parseFromString(html, 'text/html')
-  const block = doc.querySelector(`#readmeDialog [data-lang="${lang}"]`)!.cloneNode(true) as Element
-  block.querySelectorAll('.market-status').forEach((el) => (el.textContent = ''))
-  return blocks(block)
-}
-
 let status: () => Response
 beforeEach(() => {
   localStorage.clear()
@@ -31,15 +16,47 @@ beforeEach(() => {
 })
 afterEach(() => vitest.unstubAllGlobals())
 
-test('English readme text matches the old UI', () => {
-  const { container } = render(<ReadmeEn marketStatus="" onExample={() => {}} />)
-  expect(blocks(container)).toEqual(oldBlocks('en'))
-})
+const SECTIONS = {
+  en: { title: 'How to use smallie', top: ['What is smallie?', 'The agents', 'Chat modes', 'Usage tracking'], agents: ['Docs', 'Stock database', 'Research', 'Chart'] },
+  vi: {
+    title: 'Hướng dẫn sử dụng smallie',
+    top: ['smallie là gì?', 'Các trợ lý', 'Chế độ trò chuyện', 'Theo dõi mức sử dụng'],
+    agents: ['Tài liệu', 'Cơ sở dữ liệu cổ phiếu', 'Nghiên cứu', 'Biểu đồ'],
+  },
+}
+const summaryText = (d: Element) => norm(d.querySelector(':scope > summary')?.textContent ?? null)
+const norm = (s: string | null) => (s ?? '').replace(/\s+/g, ' ').trim()
 
-test('Vietnamese readme text matches the old UI', () => {
-  const { container } = render(<ReadmeVi marketStatus="" onExample={() => {}} />)
-  expect(blocks(container)).toEqual(oldBlocks('vi'))
-})
+for (const lang of ['en', 'vi'] as const) {
+  const Readme = lang === 'en' ? ReadmeEn : ReadmeVi
+  const want = SECTIONS[lang]
+
+  test(`${lang} readme is a list of closed details with the main sections`, () => {
+    const { container } = render(<Readme marketStatus="" onExample={() => {}} />)
+    expect(screen.getByRole('heading', { level: 1, name: want.title })).toBeInTheDocument()
+    const top = [...container.querySelectorAll(':scope > div > details')]
+    expect(top.map(summaryText)).toEqual(want.top)
+    const agents = top[1]
+    expect([...agents.querySelectorAll(':scope > details')].map(summaryText)).toEqual(want.agents)
+    for (const d of container.querySelectorAll('details')) expect(d).not.toHaveAttribute('open')
+  })
+
+  test(`${lang} readme shows the Usage button screenshot with alt text`, () => {
+    const { container } = render(<Readme marketStatus="" onExample={() => {}} />)
+    const usage = container.querySelectorAll(':scope > div > details')[3]
+    const img = usage.querySelector('img')!
+    expect(img).not.toBeNull()
+    expect(img.getAttribute('alt')?.trim()).toBeTruthy()
+  })
+
+  test(`${lang} readme no longer explains memory, models or profiles`, () => {
+    const { container } = render(<Readme marketStatus="" onExample={() => {}} />)
+    const text = norm(container.textContent)
+    const gone = lang === 'en' ? ['remembers durable facts', 'Models and profiles', 'Your model server'] : ['ghi nhớ những thông tin lâu dài', 'Model và gói cấu hình', 'Máy chủ model của bạn']
+    for (const g of gone) expect(text).not.toContain(g)
+    expect(screen.queryByRole('heading', { name: gone[1] })).toBeNull()
+  })
+}
 
 function renderDialog(onOpenChange = vitest.fn(), onExample = vitest.fn()) {
   render(

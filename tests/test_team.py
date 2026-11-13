@@ -2507,3 +2507,46 @@ async def test_new_question_after_crash_is_a_normal_turn(monkeypatch):
 
     assert next(m for m in reversed(asked[0]) if isinstance(m, HumanMessage)).text == new
     assert (await _thread(assistant, config))[-1].additional_kwargs["team"]["goal"] == new
+
+
+# --- a crash retry is reviewed, written and answered as the crashed question ---
+
+VI_QUESTION = "Vốn hóa của AAPL là bao nhiêu?"
+
+
+def _two_plan(monkeypatch):
+    _plan(monkeypatch, Plan(tasks=[Task(id="t1", agent="sql", goal="get caps"), Task(id="t2", agent="research", goal="notes")]))
+
+
+async def test_crash_retry_review_sees_the_crashed_question(monkeypatch):
+    _two_plan(monkeypatch)
+    seen = []
+
+    async def board(messages, answers, config, user_id=None, inputs=None, agents=None):
+        seen.append(next(m.text for m in reversed(messages) if isinstance(m, HumanMessage)))
+        return Board()
+
+    monkeypatch.setattr(team, "ask_board", board)
+    log = []
+    assistant = _assistant(monkeypatch, per_agent(orchestrator=[AIMessage("Final.")]),
+                           sql=Fake("sql", "Cap is 3T.", log=log), research=Fake("research", "Notes.", log=log))
+    thread = [*_turn("older?", "A1"), HumanMessage(QUESTION), HumanMessage("try again")]
+    await _stream(assistant, {"messages": thread}, {"configurable": {"thread_id": "crash-r"}})
+
+    assert seen == [QUESTION]
+    assert [m.text for m in await _thread(assistant, {"configurable": {"thread_id": "crash-r"}})][-2:] == ["try again", "Final."]
+
+
+@pytest.mark.parametrize("crashed, retry, language", [(VI_QUESTION, "try again", "Vietnamese"), (QUESTION, "thử lại", "English")])
+async def test_crash_retry_answers_in_the_crashed_questions_language(monkeypatch, crashed, retry, language):
+    _two_plan(monkeypatch)
+    _board(monkeypatch, then=Board())
+    log = []
+    model = per_agent(orchestrator=[AIMessage("Final.")])
+    assistant = _assistant(monkeypatch, model, sql=Fake("sql", "Cap is 3T.", log=log), research=Fake("research", "Notes.", log=log))
+    thread = [*_turn("older?", "A1"), HumanMessage(crashed), HumanMessage(retry)]
+    await _stream(assistant, {"messages": thread}, {"configurable": {"thread_id": "crash-l"}})
+
+    notes = [e["last"].text for e in log if e["event"] == "start"]
+    assert notes and all(f"Write in {language}" in n for n in notes)
+    assert any(f"{language}" in m.text for p in model.prompts for m in p if "TEAM RESULT" in m.text or "REPLY LANGUAGE" in m.text)

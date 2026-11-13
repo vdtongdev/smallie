@@ -190,6 +190,13 @@ def crashed_question(messages: Sequence[AnyMessage]) -> HumanMessage | None:
     return None if answered else messages[asked]
 
 
+def thread_of(state: Mapping) -> list[AnyMessage]:
+    """The messages the steps after `plan` work from. In a crash retry the "try again" message is left out, so the
+    crashed question is the user's latest message for the review, the notes, the language and the write-up."""
+    retry_id = state["workspace"].get("retry_id")
+    return [m for m in state["messages"] if m.id != retry_id] if retry_id else list(state["messages"])
+
+
 def clean(board: Board, speakers: Sequence[str], tasks: Sequence[str] | None = None) -> Board:
     """Make a board safe to route on: routes only of agents that answered, `fixable_by` only of the
     conflict's own routes. `tasks`: the live task ids; a review's challenges and outcomes name only those."""
@@ -468,11 +475,12 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         emit({"type": "plan", "tasks": [_brief(t) for t in tasks], "fallback": fallback})
         workspace = {"reset": True, "goal": question, "tasks": tasks, "results": {}, "evidence": [], "artifacts": {},
                      "history": [], "rounds_at": {}, "wave": 0, "question": "",
-                     "synthesis": {"forced": False, "open_points": [], "not_done": []}, "challenged": {}}
+                     "synthesis": {"forced": False, "open_points": [], "not_done": []}, "challenged": {},
+                     **({"retry_id": messages[-1].id} if crashed else {})}
         return Command(update={"workspace": workspace}, goto="dispatch")
 
     async def dispatch(state: TeamState, runtime: Runtime[AgentContext]) -> Command:
-        workspace, messages = state["workspace"], state["messages"]
+        workspace, messages = state["workspace"], thread_of(state)
         tasks = [dict(t) for t in workspace["tasks"]]
         if any(r.get("budget") for r in workspace["results"].values()):  # the model-call budget is spent
             return Command(goto="synthesize")
@@ -557,7 +565,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         return outcome
 
     async def review(state: TeamState, runtime: Runtime[AgentContext], config: RunnableConfig) -> Command:
-        workspace, messages, settings = state["workspace"], state["messages"], get_settings()
+        workspace, messages, settings = state["workspace"], thread_of(state), get_settings()
         tasks, results, rounds_at = workspace["tasks"], workspace["results"], workspace["rounds_at"]
         challenged, synthesis = workspace.get("challenged", {}), workspace["synthesis"]
         pending = [t for t in tasks if t["status"] == "pending" and ANSWER not in t["depends_on"]]
@@ -726,7 +734,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         return Command(update={"messages": messages[-1:], "workspace": update}, goto="dispatch" if added else "review")
 
     async def synthesize(state: TeamState, runtime: Runtime[AgentContext], config: RunnableConfig) -> dict:
-        workspace, messages = state["workspace"], state["messages"]
+        workspace, messages = state["workspace"], thread_of(state)
         drawers = drawers_of(workspace["tasks"])
         answers = _answers(workspace, workspace["tasks"], drawers)
         last = next((e for e in reversed(workspace["history"]) if e["type"] == "review"), None)
@@ -742,7 +750,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
             withdrawn = [t["agent"] for t in workspace["tasks"] if t["status"] == "withdrew" and t["agent"] not in drawers]
             note = NOTHING_FOUND_MESSAGE.format(withdrawn=", ".join(dict.fromkeys(withdrawn)),
                                                 language=reply_language(messages), drawing=_drawing(drawers))
-            command = await ask_orchestrator(state, runtime, config, note, bool(drawers))
+            command = await ask_orchestrator({**state, "messages": messages}, runtime, config, note, bool(drawers))
             answer = await handed_off(command, messages, runtime, config) if command.goto in by_route \
                 else command.update["messages"][0]
         elif len(answers) == 1 and not board.conflicts and not forced and not open_points and not not_done and only.answers_directly:
@@ -756,7 +764,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
                 conflicts=_bullets([f"{c.claim} ({', '.join(c.routes)}): {c.issue}, cause: {c.cause}" for c in board.conflicts]),
                 open_points=_bullets(open_points), not_done=_bullets(not_done),
                 language=reply_language(messages), drawing=_drawing(drawers))
-            command = await ask_orchestrator(state, runtime, config, note, bool(drawers), write_up=True)
+            command = await ask_orchestrator({**state, "messages": messages}, runtime, config, note, bool(drawers), write_up=True)
             answer = command.update["messages"][0]
         artifacts = _merge([r["artifacts"] for r in workspace["results"].values()])
         kwargs = {**answer.additional_kwargs, **_merge([artifacts, collect([answer])]), "team": _transcript(workspace)}
@@ -767,7 +775,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
 
     async def draw(state: TeamState, runtime: Runtime[AgentContext], config: RunnableConfig) -> dict:
         """Each chart task runs once on the thread plus the final answer, with no data source, and its charts join the answer."""
-        workspace, messages, answer = state["workspace"], state["messages"], state["messages"][-1]
+        workspace, messages, answer = state["workspace"], thread_of(state), state["messages"][-1]
         artifacts, results, status = [collect([answer])], {}, {}
         for task in (t for t in workspace["tasks"] if t["status"] == "pending" and ANSWER in t["depends_on"]):
             route, tid = task["agent"], task["id"]

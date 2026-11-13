@@ -45,11 +45,18 @@ SKIPPED_EVENTS = frozenset({"usage", "done", "conversation"})  # not part of a r
 
 
 def _keep(shown: list[dict], event: dict) -> None:
-    """Add a streamed event to the reply's saved events: a run of tokens is one empty marker, a tool result is cut."""
+    """Add a streamed event to the reply's saved events: a run of agent tokens is one empty marker, a run of the
+    orchestrator's own tokens is one marker holding its text, a tool result is cut."""
     kind = event.get("type")
     if kind in SKIPPED_EVENTS:
         return
     if kind == "token":
+        if "agent" not in event and "task" not in event:
+            if shown and shown[-1]["type"] == "token" and "agent" not in shown[-1] and "task" not in shown[-1]:
+                shown[-1]["text"] += event.get("text", "")
+            else:
+                shown.append({"type": "token", "text": event.get("text", "")})
+            return
         marker = {"type": "token", "text": "", **({"agent": event["agent"]} if "agent" in event else {})}
         if not shown or shown[-1] != marker:
             shown.append(marker)
@@ -57,6 +64,19 @@ def _keep(shown: list[dict], event: dict) -> None:
         shown.append({**event, "content": event.get("content", "")[:TOOL_RESULT_PREVIEW]})
     else:
         shown.append(event)
+
+
+def drop_answer_text(shown: list[dict]) -> list[dict]:
+    """Empty the text of the last top-level token marker after the final top-level tool call: it is the answer,
+    already in the thread, so it is not saved twice."""
+    events = [dict(e) for e in shown]
+    calls = [i for i, e in enumerate(events) if e["type"] == "tool_call" and "agent" not in e and "task" not in e]
+    start = calls[-1] if calls else -1
+    for e in reversed(events[start + 1:]):
+        if e["type"] == "token" and "agent" not in e and "task" not in e:
+            e["text"] = ""
+            break
+    return events
 
 
 def _activity_turn(n_before: int | None, n_after: int | None, resumed: bool) -> int | None:
@@ -170,7 +190,7 @@ async def chat(
                 try:
                     n_after = user_messages((await thread_messages(assistant, config))[0])
                     if turn := _activity_turn(n_before, n_after, resumed):
-                        await asyncio.to_thread(save_turn_activity, user_id, conversation["id"], turn, shown)
+                        await asyncio.to_thread(save_turn_activity, user_id, conversation["id"], turn, drop_answer_text(shown))
                 except Exception:  # noqa: BLE001 - the saved activity is best effort
                     log.exception("Saving the turn's activity failed")
         if saved:

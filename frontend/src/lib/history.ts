@@ -40,6 +40,7 @@ export function turnsFromHistory(messages: HistoryMessage[]): Turn[] {
         turn.badges = replayed.badges
         turn.activity = replayed.activity
         turn.synthesized = replayed.synthesized
+        turn.blocks.push(...replayed.blocks.slice(0, -1).filter((b) => b.kind === 'text' && b.text)) // text written before a tool call
       } else turn = newTurn(m.content)
       turn.started = true
       continue

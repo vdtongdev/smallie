@@ -183,6 +183,27 @@ describe('turnsFromHistory', () => {
     expect(t.blocks).toEqual([{ kind: 'text', text: 'a' }])
   })
 
+  it('text saved before a tool call comes back ahead of the answer', () => {
+    const [t] = turnsFromHistory([
+      msg({
+        role: 'user',
+        content: 'q',
+        activity: [
+          { type: 'agent', name: 'orchestrator' },
+          { type: 'token', text: 'Let me check.' },
+          { type: 'tool_call', name: 'x', args: {} },
+          { type: 'tool_result', name: 'x', content: 'r' },
+          { type: 'token', text: '' },
+        ],
+      }),
+      msg({ role: 'assistant', agent: 'orchestrator', content: 'The answer.' }),
+    ])
+    expect(t.blocks).toEqual([
+      { kind: 'text', text: 'Let me check.' },
+      { kind: 'text', text: 'The answer.' },
+    ])
+  })
+
   it('asked agents keep their tools on reload', () => {
     const [t] = turnsFromHistory([
       msg({

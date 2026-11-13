@@ -115,7 +115,10 @@ def render(user_id: str, conversation_id: str) -> str:
     lines = [HEADING]
     if first:
         lines.append(omitted_note % first)
-    return "\n".join(lines + blocks)
+    note = "\n".join(lines + blocks)
+    if not blocks or len(note) > get_settings().chat_data_chars:  # budget too small for any entry
+        return ""
+    return note
 
 
 def chat_tables(user_id: str, conversation_id: str) -> tuple[list[dict], list[dict]]:

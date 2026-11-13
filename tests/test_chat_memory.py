@@ -180,3 +180,14 @@ def test_render_newest_entry_larger_than_the_budget_is_cut(chat, monkeypatch):
     note = render(user, conversation)
     assert 0 < len(note) <= 1000
     assert "START-OF-HUGE" in note
+
+
+@requires_db
+@pytest.mark.parametrize("budget", [10, 30, 60, 80, 150])
+def test_render_never_exceeds_a_tiny_budget(chat, monkeypatch, budget):
+    monkeypatch.setattr(get_settings(), "chat_data_chars", budget)
+    monkeypatch.setattr(get_settings(), "chat_data_entry_chars", 100000)
+    user, conversation = chat()
+    for i in range(5):
+        save_entries(user, conversation, i + 1, "reply", "sql", [entry(f"body-{i} " + "b" * 100)])
+    assert len(render(user, conversation)) <= budget

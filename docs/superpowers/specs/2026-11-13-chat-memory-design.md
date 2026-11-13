@@ -1,6 +1,6 @@
 # Chat memory: every agent knows the data fetched earlier in the chat
 
-Status: draft for review (2026-11-13). Branch `0.9.0/chat-memory`.
+Status: draft for review (2026-11-13). Branch `0.8.0/chat-memory`; ships with 0.8.0.
 
 ## Why
 

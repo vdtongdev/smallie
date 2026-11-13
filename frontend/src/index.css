@@ -114,31 +114,31 @@
 
 :root[data-theme="light"] {
     /* The Chatroom light values; initTheme forces `.dark` off for it. */
-    --background: #f1efea;
+    --background: #e5d0a5;
     --foreground: #1b2430;
-    --card: #ffffff;
+    --card: #faf2dc;
     --card-foreground: #1b2430;
-    --popover: #ffffff;
+    --popover: #faf2dc;
     --popover-foreground: #1b2430;
     --primary: #303d4d;
     --primary-foreground: #ffffff;
-    --secondary: #f4e5bc;
+    --secondary: #d9c18a;
     --secondary-foreground: #303d4d;
-    --muted: #e8e5de;
-    --muted-foreground: #6b5646;
-    --accent: #ece1cf;
+    --muted: #d6bf8e;
+    --muted-foreground: #5a4636;
+    --accent: #dcc797;
     --accent-foreground: #303d4d;
-    --destructive: #8f4a31;
-    --border: #d6d2c7;
-    --input: #d6d2c7;
+    --destructive: #7a3f29;
+    --border: #c4ab75;
+    --input: #c4ab75;
     --ring: #60797d;
-    --sidebar: #ffffff;
+    --sidebar: #f4e5bc;
     --sidebar-foreground: #1b2430;
     --sidebar-primary: #303d4d;
     --sidebar-primary-foreground: #ffffff;
-    --sidebar-accent: #ece1cf;
+    --sidebar-accent: #dcc797;
     --sidebar-accent-foreground: #303d4d;
-    --sidebar-border: #d6d2c7;
+    --sidebar-border: #c4ab75;
     --sidebar-ring: #60797d;
 }
 

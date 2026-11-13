@@ -24,7 +24,7 @@ type Warnings = Record<'model' | 'small_model' | 'strong_model', string>
 
 const NO_WARNINGS: Warnings = { model: '', small_model: '', strong_model: '' }
 const selectClass =
-  'h-9 w-full min-w-0 rounded-md border border-input bg-transparent px-2.5 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30'
+  'h-9 w-full min-w-0 rounded-md border border-input bg-popover text-popover-foreground px-2.5 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50'
 const THEME_LABEL: Record<string, I18nKey> = { shadcn: 'themeShadcn', chatroom: 'themeChatroom', light: 'themeLight' }
 
 function Field({ label, htmlFor, children }: { label: string; htmlFor: string; children: ReactNode }) {
@@ -124,7 +124,7 @@ export default function SettingsDialog({ open, onOpenChange }: Props) {
           {useSelect ? (
             <select id="settingsModel" className={selectClass} value={standard} onChange={(e) => set({ model: e.target.value })}>
               {options(form.model).map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
+                <option key={o.value} value={o.value} className="bg-popover text-popover-foreground">{o.label}</option>
               ))}
             </select>
           ) : (
@@ -136,7 +136,7 @@ export default function SettingsDialog({ open, onOpenChange }: Props) {
           <Field key={slot} label={t(slot === 'small_model' ? 'smallModel' : 'strongModel')} htmlFor={`settings-${slot}`}>
             <select id={`settings-${slot}`} className={selectClass} value={form[slot]} onChange={(e) => set({ [slot]: e.target.value })}>
               {options(form[slot], t('sameAsStandard')).map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
+                <option key={o.value} value={o.value} className="bg-popover text-popover-foreground">{o.label}</option>
               ))}
             </select>
             <Warning text={warn[slot]} />

@@ -284,3 +284,17 @@ test('shows the provider table', async () => {
   expect(screen.getByText('https://dashscope-intl.aliyuncs.com/compatible-mode/v1')).toBeInTheDocument()
   expect(screen.getByText(en.anyOpenAI)).toBeInTheDocument()
 })
+
+test('model dropdowns and their options use opaque popover colours in every theme', async () => {
+  cache(A, ['m1', 's1'])
+  setup()
+  await loaded()
+  const selects = [en.standardModel, en.smallModel, en.strongModel].map((l) => screen.getByLabelText(l))
+  for (const select of selects) {
+    expect(select).toHaveClass('bg-popover', 'text-popover-foreground')
+    expect(select).not.toHaveClass('bg-transparent')
+    const options = select.querySelectorAll('option')
+    expect(options.length).toBeGreaterThan(0)
+    for (const option of options) expect(option).toHaveClass('bg-popover', 'text-popover-foreground')
+  }
+})

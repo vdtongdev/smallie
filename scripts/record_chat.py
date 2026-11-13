@@ -4,7 +4,7 @@
     uv run python -m scripts.record_chat --base http://localhost:8000 --only general,sql
 
 Run from the repo root against a running app. Logs in, sends each scenario to
-`POST /api/chat/auto` in a new chat, and writes `frontend/src/lib/__fixtures__/<name>.json`
+`POST /api/chat/<kind>` in a new chat, and writes `frontend/src/lib/__fixtures__/<name>.json`
 (`name`, `message`, `events`, `history`, `usage`). Each chat is deleted afterwards.
 Every scenario spends model quota on the account's own models.
 """
@@ -19,14 +19,33 @@ from typing import Iterable, Iterator
 
 import httpx
 
+def _auto(message: str) -> dict:
+    return {"message": message, "kind": "auto", "reply": None}
+
+
 SCENARIOS = {
-    "general": "What is a P/E ratio? Answer in one sentence.",
-    "sql": "What are the 5 largest companies by market cap?",
-    "chart": "Chart AAPL vs MSFT closing prices over the last 3 months.",
-    "research": "Research the latest news about NVIDIA in two sentences, with sources.",
-    "asked": "Compare NVIDIA's P/E ratio with what the news says about its valuation this week.",
-    "fallback": "What does my contract say about termination?",
-    "vi": "5 công ty có vốn hoá lớn nhất là những công ty nào?",
+    "general": _auto("What is a P/E ratio? Answer in one sentence."),
+    "sql": _auto("What are the 5 largest companies by market cap?"),
+    "chart": _auto("Chart AAPL vs MSFT closing prices over the last 3 months."),
+    "research": _auto("Research the latest news about NVIDIA in two sentences, with sources."),
+    "asked": _auto("Compare NVIDIA's P/E ratio with what the news says about its valuation this week."),
+    "fallback": _auto("What does my contract say about termination?"),
+    "vi": _auto("5 công ty có vốn hoá lớn nhất là những công ty nào?"),
+    "team_stock": {
+        "message": "How has NVIDIA's stock done this year, and what is the latest news about it?",
+        "kind": "team",
+        "reply": None,
+    },
+    "team_chart": {
+        "message": "Compare AAPL and MSFT closing prices over the last 3 months and chart them.",
+        "kind": "team",
+        "reply": None,
+    },
+    "team_askback": {
+        "message": "Should I put more money into tech stocks now?",
+        "kind": "team",
+        "reply": "I'm 30, moderate risk, investing for 10 years.",
+    },
 }
 
 FIXTURES = Path("frontend/src/lib/__fixtures__")
@@ -48,24 +67,43 @@ def parse_sse(lines: Iterable[str]) -> Iterator[dict]:
             data = []
 
 
-def record(client: httpx.Client, name: str, message: str) -> int:
+def record(client: httpx.Client, name: str, scenario: dict) -> int:
     conversation_id = None
     events = []
-    try:
-        with client.stream("POST", "/api/chat/auto", json={"message": message, "conversation_id": None}) as res:
+
+    def run(message: str) -> bool:
+        nonlocal conversation_id
+        asked = False
+        body = {"message": message, "conversation_id": conversation_id}
+        with client.stream("POST", f"/api/chat/{scenario['kind']}", json=body) as res:
             res.raise_for_status()
             for event in parse_sse(res.iter_lines()):
                 events.append(event)
                 if event.get("type") == "conversation":
                     conversation_id = event["id"]
+                elif event.get("type") == "needs_human":
+                    asked = True
+        return asked
+
+    try:
+        asked = run(scenario["message"])
         if conversation_id is None:
             raise RuntimeError("the stream sent no conversation event")
+        if asked and scenario["reply"]:
+            events.append({"type": "user_reply", "text": scenario["reply"]})
+            run(scenario["reply"])
         history = client.get(f"/api/conversations/{conversation_id}/messages")
         history.raise_for_status()
         usage = client.get(f"/api/conversations/{conversation_id}/usage")
         usage.raise_for_status()
         FIXTURES.mkdir(parents=True, exist_ok=True)
-        data = {"name": name, "message": message, "events": events, "history": history.json(), "usage": usage.json()}
+        data = {
+            "name": name,
+            "message": scenario["message"],
+            "events": events,
+            "history": history.json(),
+            "usage": usage.json(),
+        }
         (FIXTURES / f"{name}.json").write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         return len(events)
     finally:
@@ -91,7 +129,11 @@ def main(argv: list[str] | None = None, transport: httpx.BaseTransport | None = 
 
     failed = 0
     with httpx.Client(base_url=args.base, timeout=300, transport=transport) as client:
-        login = client.post("/api/login", json={"username": user, "password": password})
+        try:
+            login = client.post("/api/login", json={"username": user, "password": password})
+        except httpx.ConnectError:
+            print(f"Cannot reach {args.base}. Is the app running?", file=sys.stderr)
+            return 1
         if login.status_code != 200:
             print(f"Login failed (HTTP {login.status_code}). Check SMALLIE_USER and SMALLIE_PASSWORD.", file=sys.stderr)
             return 1

@@ -13,7 +13,7 @@ export default function UsageBox({ refreshKey }: { refreshKey: number }) {
     let cancelled = false
     api<Totals>('/usage')
       .then((u) => {
-        if (!cancelled && typeof u?.input_tokens === 'number' && typeof u.output_tokens === 'number' && typeof u.cost === 'number') setUsage(u)
+        if (!cancelled) setUsage(u)
       })
       .catch(() => {})
     return () => {

@@ -43,7 +43,9 @@ test('toggle switches to Vietnamese and remembers it', async () => {
     vitest.fn(async (url: string) =>
       url === '/api/me'
         ? new Response(JSON.stringify({ user_id: 'u1', name: 'An', username: 'an', is_admin: false, max_accounts: 10 }), { status: 200 })
-        : new Response('[]', { status: 200 }),
+        : url === '/api/usage'
+          ? new Response(JSON.stringify({ input_tokens: 0, output_tokens: 0, cost: 0 }), { status: 200 })
+          : new Response('[]', { status: 200 }),
     ),
   )
   renderApp()

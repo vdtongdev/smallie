@@ -33,20 +33,38 @@ import json
 import selectors
 import uuid
 from contextlib import AsyncExitStack
+from dataclasses import replace
 
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from app.agents.registry import get
 from app.agents.remote import RemoteAgent
+from app.core.db import get_engine, init_db, users
 from app.core.memory import AgentContext
 from app.orchestration import team
 from app.orchestration.orchestrator import HIDDEN
 from app.orchestration.team import Board
 from app.orchestration.team_plan import Plan, Task
-from tests import test_orchestrator
+from tests import test_orchestrator, test_team
 from tests.conftest import requires_db
 from tests.scripted import per_agent
 from tests.test_team import _assistant, _plan, _stream
+from app.core.conversations import create_conversation
+from sqlalchemy import delete
+
+
+@pytest.fixture
+def chat(monkeypatch):
+    """Its own user with one chat row (chat data is tied to a chat row), removed afterwards by id."""
+    init_db()
+    user_id = f"test-chatmem-regression-{uuid.uuid4()}"
+    with get_engine().begin() as conn:
+        conn.execute(users.insert().values(id=user_id, display_name="Test"))
+    monkeypatch.setattr(test_team, "TEAM_CONTEXT", replace(test_team.TEAM_CONTEXT, user_id=user_id))
+    yield user_id, create_conversation(user_id, "auto", "hello")["id"]
+    with get_engine().begin() as conn:  # cascades to the user's conversations and chat_data
+        conn.execute(delete(users).where(users.c.id == user_id))
 
 SQL, RESEARCH = get("sql"), get("research")
 Q1 = "What is the AAPL market cap?"
@@ -114,16 +132,16 @@ async def final_goal(assistant, config) -> str:
 
 
 @requires_db
-def test_team_retry_after_crash_reuses_fetched_data(monkeypatch):
+@requires_db
+def test_team_retry_after_crash_reuses_fetched_data(monkeypatch, chat):
     # psycopg's async driver cannot run on pytest's Proactor loop (Windows): run on a selector loop
-    asyncio.run(_retry_after_crash(monkeypatch),
+    asyncio.run(_retry_after_crash(monkeypatch, chat[1]),
                 loop_factory=lambda: asyncio.SelectorEventLoop(selectors.SelectSelector()))
 
 
-async def _retry_after_crash(monkeypatch):
+async def _retry_after_crash(monkeypatch, thread):
     from app.core.memory import open_persistence
 
-    thread = f"test-chat-memory-{uuid.uuid4()}"
     config = {"configurable": {"thread_id": thread}}
     async with AsyncExitStack() as stack:
         checkpointer, _ = await open_persistence(stack)
@@ -164,8 +182,9 @@ async def _retry_after_crash(monkeypatch):
     assert not problems, "; ".join(problems)
 
 
-async def test_later_team_question_sees_earlier_turns_data(monkeypatch):
-    config = {"configurable": {"thread_id": "t-later"}}
+@requires_db
+async def test_later_team_question_sees_earlier_turns_data(monkeypatch, chat):
+    config = {"configurable": {"thread_id": chat[1]}}
     _plan(monkeypatch, *itertools.repeat(ONE_PLAN, 5))
     boards(monkeypatch, Board(), Board(), Board())
     sql = FakeRemote(R1, R2, R3)
@@ -180,8 +199,9 @@ async def test_later_team_question_sees_earlier_turns_data(monkeypatch):
         f"the third question's sql call did not receive both earlier results (R1: {R1 in third}, R2: {R2 in third})")
 
 
-async def test_asked_agent_sees_chat_data(monkeypatch):
-    config = {"configurable": {"thread_id": "t-asked"}}
+@requires_db
+async def test_asked_agent_sees_chat_data(monkeypatch, chat):
+    config = {"configurable": {"thread_id": chat[1]}}
     sql = FakeRemote(R1, "RESULT-ASKED-0042 rows")
     research = FakeRemote(findings="Sector notes.")
     ask_both = AIMessage("", tool_calls=[
@@ -190,7 +210,7 @@ async def test_asked_agent_sees_chat_data(monkeypatch):
     model = per_agent(orchestrator=[ask_both, AIMessage("Combined.")])
     assistant = _assistant(monkeypatch, model, documents=(),
                            sql=remote_agent(SQL, sql), research=remote_agent(RESEARCH, research))
-    context = AgentContext(user_id="u1")
+    context = AgentContext(user_id=chat[0])
     for message in (Q1, "Now put that in context with research on the sector."):
         stream = assistant.astream({"messages": [HumanMessage(message)]}, config, context=context,
                                    stream_mode=["updates"], subgraphs=True)

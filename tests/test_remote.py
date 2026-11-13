@@ -155,7 +155,8 @@ async def test_sends_context_and_user_header_without_thread_id():
     config = {"configurable": {"thread_id": "c-42", "checkpoint_ns": "sql:abc", "__pregel_stream": "hook"}}
     await agent(remote).node({"messages": [as_message(HUMAN)]}, config, SimpleNamespace(context=CTX))
     call = remote.calls[0]
-    assert call["context"] == asdict(CTX)
+    # The chat id travels in the context (chart tools read the chat's saved tables); the chat has no saved data.
+    assert call["context"] == {**asdict(CTX), "conversation_id": "c-42", "chat_data": ""}
     assert call["headers"] == {"x-smallie-user-id": "u-7"}
     # Stateless: no thread. checkpoint_ns stays: RemoteGraph prefixes streamed chunks with it.
     assert call["config"]["configurable"] == {"checkpoint_ns": "sql:abc", "__pregel_stream": "hook"}

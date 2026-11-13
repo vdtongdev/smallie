@@ -492,3 +492,12 @@ async def test_save_failure_does_not_fail_the_call(monkeypatch):
                                          context=AgentContext(user_id="u-7"))
     assert len(result["messages"]) == 2
     assert remote.calls[0]["context"]["chat_data"] == ""
+
+
+async def test_call_without_thread_id_keeps_earlier_tool_messages():
+    # No chat: no chat data note replaces the earlier tool messages, so the input is sent unchanged.
+    earlier = [as_message(m) for m in sql_turn("old", "OLD-RESULT")]
+    messages = [HumanMessage("first"), *earlier, AIMessage("answer one"), HumanMessage("second")]
+    remote = FakeRemote(output={"messages": []})
+    await agent(remote).ainvoke({"messages": messages}, {}, context=AgentContext(user_id="u-7"))
+    assert [m.text for m in remote.calls[0]["input"]["messages"] if isinstance(m, ToolMessage)] == ["OLD-RESULT"]

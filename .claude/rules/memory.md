@@ -3,6 +3,7 @@ paths:
   - "app/core/graph.py"
   - "app/core/memory.py"
   - "app/core/snapshot.py"
+  - "app/core/chat_memory.py"
   - "scripts/build_graph.py"
   - "scripts/reindex.py"
   - "app/api/routes_chat.py"

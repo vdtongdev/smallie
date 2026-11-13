@@ -11,6 +11,7 @@ paths:
   - "app/static/charts.js"
   - "app/api/routes_chat.py"
   - "app/agents/delegation.py"
+  - "app/core/chat_memory.py"
 ---
 
 Documents, SQL safety, chart and table artifacts, stock data and the daily update.

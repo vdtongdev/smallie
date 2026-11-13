@@ -298,3 +298,26 @@ test('model dropdowns and their options use opaque popover colours in every them
     for (const option of options) expect(option).toHaveClass('bg-popover', 'text-popover-foreground')
   }
 })
+
+test('models and profiles help is a closed details with the difficulty and profile explanations', async () => {
+  setup()
+  await loaded()
+  const summary = screen.getByText(en.modelsHelpTitle)
+  const details = summary.closest('details')!
+  expect(summary.tagName).toBe('SUMMARY')
+  expect(details).not.toHaveAttribute('open')
+  for (const text of [en.difficultyIntro, en.easyHelp, en.mediumHelp, en.hardHelp, en.helpEconomy, en.helpBalanced, en.helpAdvanced, en.helpOptional, en.helpActivity]) {
+    expect(details.textContent).toContain(text)
+  }
+})
+
+test('the provider table sits in its own closed details', async () => {
+  setup()
+  await loaded()
+  const summary = screen.getByText(en.keyHelpTitle)
+  const details = summary.closest('details')!
+  expect(details).not.toHaveAttribute('open')
+  expect(details).not.toBe(screen.getByText(en.modelsHelpTitle).closest('details'))
+  expect(within(details).getByText('platform.deepseek.com')).toBeInTheDocument()
+  expect(within(details).getByText(en.anyOpenAI)).toBeInTheDocument()
+})

@@ -2,6 +2,8 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import App from '@/App'
+import { cn } from '@/lib/utils'
+import { buttonVariants } from '@/components/ui/button'
 import { AuthProvider } from '@/features/auth/AuthProvider'
 import { LanguageProvider } from '@/i18n'
 import { en } from '@/i18n/en'
@@ -219,4 +221,21 @@ test('the documents panel is mounted in the logged-in shell', async () => {
   installFetch()
   renderApp()
   expect(await screen.findByText(en.upload)).toBeInTheDocument()
+})
+
+test('the Usage button looks like the upload button and sits at the left', async () => {
+  installFetch({
+    'POST /api/chat/auto': () =>
+      sseResponse([
+        { type: 'token', text: 'a' },
+        { type: 'usage', reply: { input_tokens: 5, output_tokens: 6, cached_tokens: 0 }, chat: { input_tokens: 5, output_tokens: 6, cached_tokens: 0 } },
+        { type: 'done' },
+      ]),
+  })
+  renderApp()
+  await userEvent.type(await input(), 'q{Enter}')
+  const button = await screen.findByRole('button', { name: en.usage })
+  for (const cls of cn(buttonVariants({ variant: 'outline' })).split(' ')) expect(button.className).toContain(cls)
+  expect(button.parentElement).toHaveClass('justify-start')
+  expect(button.parentElement).not.toHaveClass('justify-end')
 })

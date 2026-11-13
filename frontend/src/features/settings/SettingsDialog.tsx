@@ -112,12 +112,24 @@ export default function SettingsDialog({ open, onOpenChange }: Props) {
             </label>
           ))}
         </div>
-        <p className="text-muted-foreground">{t('difficultyIntro')}</p>
-        <ul className="list-disc pl-5 text-muted-foreground">
-          <li><strong>{t('easy')}</strong>: {t('easyHelp')}</li>
-          <li><strong>{t('medium')}</strong>: {t('mediumHelp')}</li>
-          <li><strong>{t('hard')}</strong>: {t('hardHelp')}</li>
-        </ul>
+        <details className="rounded-md border px-3 py-2">
+          <summary className="cursor-pointer font-medium">{t('modelsHelpTitle')}</summary>
+          <div className="mt-2 space-y-2 text-muted-foreground">
+            <p>{t('difficultyIntro')}</p>
+            <ul className="list-disc pl-5">
+              <li><strong>{t('easy')}</strong>: {t('easyHelp')}</li>
+              <li><strong>{t('medium')}</strong>: {t('mediumHelp')}</li>
+              <li><strong>{t('hard')}</strong>: {t('hardHelp')}</li>
+            </ul>
+            <ul className="list-disc pl-5">
+              <li>{t('helpEconomy')}</li>
+              <li>{t('helpBalanced')}</li>
+              <li>{t('helpAdvanced')}</li>
+            </ul>
+            <p>{t('helpOptional')}</p>
+            <p>{t('helpActivity')}</p>
+          </div>
+        </details>
 
         <h3 className="font-medium">{t('modelsGroup')}</h3>
         <Field label={t('standardModel')} htmlFor="settingsModel">
@@ -143,25 +155,30 @@ export default function SettingsDialog({ open, onOpenChange }: Props) {
           </Field>
         ))}
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr>
-                <th>{t('colProvider')}</th>
-                <th>{t('colKeyPage')}</th>
-                <th>{t('apiEndpoint')}</th>
-                <th>{t('model')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr><td>{t('provDeepseek')}</td><td>platform.deepseek.com</td><td>https://api.deepseek.com/v1</td><td>deepseek-chat</td></tr>
-              <tr><td>OpenAI</td><td>platform.openai.com</td><td>https://api.openai.com/v1</td><td>gpt-4o-mini</td></tr>
-              <tr><td>OpenRouter</td><td>openrouter.ai</td><td>https://openrouter.ai/api/v1</td><td>{t('modelYourChoice')}</td></tr>
-              <tr><td>Alibaba DashScope</td><td>dashscope.aliyun.com</td><td>https://dashscope-intl.aliyuncs.com/compatible-mode/v1</td><td>qwen-plus</td></tr>
-            </tbody>
-          </table>
-        </div>
-        <p className="text-muted-foreground">{t('anyOpenAI')}</p>
+        <details className="rounded-md border px-3 py-2">
+          <summary className="cursor-pointer font-medium">{t('keyHelpTitle')}</summary>
+          <div className="mt-2">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr>
+                  <th>{t('colProvider')}</th>
+                  <th>{t('colKeyPage')}</th>
+                  <th>{t('apiEndpoint')}</th>
+                  <th>{t('model')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td>{t('provDeepseek')}</td><td>platform.deepseek.com</td><td>https://api.deepseek.com/v1</td><td>deepseek-chat</td></tr>
+                <tr><td>OpenAI</td><td>platform.openai.com</td><td>https://api.openai.com/v1</td><td>gpt-4o-mini</td></tr>
+                <tr><td>OpenRouter</td><td>openrouter.ai</td><td>https://openrouter.ai/api/v1</td><td>{t('modelYourChoice')}</td></tr>
+                <tr><td>Alibaba DashScope</td><td>dashscope.aliyun.com</td><td>https://dashscope-intl.aliyuncs.com/compatible-mode/v1</td><td>qwen-plus</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p className="text-muted-foreground">{t('anyOpenAI')}</p>
+          </div>
+        </details>
 
         <h3 className="font-medium">{t('themeGroup')}</h3>
         <div role="radiogroup" aria-label={t('themeGroup')} className="flex flex-wrap gap-4">

@@ -9,6 +9,7 @@ from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
 from sqlalchemy import insert, select
 from sqlalchemy.exc import IntegrityError
 
+from app.agents.artifacts import artifacts_from
 from app.agents.base import MEMORY_TOOL_NAMES, is_error
 from app.core.config import get_settings
 from app.core.db import chat_data, get_engine
@@ -131,3 +132,19 @@ def chat_tables(user_id: str, conversation_id: str) -> tuple[list[dict], list[di
                     seen.add((kind, item["id"]))
                     found.append(item)
     return tables, charts
+
+
+def known_tables(messages: Sequence[AnyMessage], context) -> tuple[list[dict], list[dict]]:
+    """(tables, charts) the chat's agents can use: the chat's saved ones plus those in `messages`
+    (this turn's). A message's item replaces the saved one with its id and counts as newest, so
+    current-turn ones come last. Without a chat (`context.conversation_id` empty) only `messages`."""
+    user_id, conversation_id = getattr(context, "user_id", ""), getattr(context, "conversation_id", "")
+    saved = chat_tables(user_id, conversation_id) if conversation_id else ([], [])
+    merged = []
+    for saved_items, kind in zip(saved, ("tables", "charts")):
+        items = {item["id"]: item for item in saved_items}
+        for item in artifacts_from(messages, kind):
+            items.pop(item["id"], None)
+            items[item["id"]] = item
+        merged.append(list(items.values()))
+    return merged[0], merged[1]

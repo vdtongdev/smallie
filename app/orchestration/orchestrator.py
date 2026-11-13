@@ -36,7 +36,7 @@ from langgraph.types import Command
 from pydantic import BaseModel, Field
 
 from app.agents import registry
-from app.agents.artifacts import artifacts_from, collect, table_note
+from app.agents.artifacts import collect, table_note
 from app.agents.base import LIMIT_MESSAGE, MEMORY_TOOL_NAMES, AgentSpec
 from app.agents.chart.prompts import TABLES_SECTION
 from app.agents.chart.tools import chart_data, chart_table
@@ -44,7 +44,7 @@ from app.agents.delegation import ask_tool_name, make_ask_tool
 from app.agents.factory import build_agent, call_key
 from app.agents.research.agent import mcp_tools
 from app.agents.skills import load_skills, skills_inline
-from app.core.chat_memory import render
+from app.core.chat_memory import known_tables, render
 from app.core.config import get_settings
 from app.core.memory import TEAM_MODE, AgentContext
 from app.core.prompts import CALL_NOTE, LANGUAGE_RULE, MEMORY_RULE, reply_language
@@ -213,7 +213,7 @@ def is_first_turn(messages: Sequence[AnyMessage]) -> bool:
     return False
 
 
-def compose_section(request: ModelRequest) -> str:
+async def compose_section(request: ModelRequest) -> str:
     """This request's notes, plus the format and citation rules once there is something to write
     up: the first (deciding) call stays short, and plain chat doesn't get research formatting.
     On an onboarding user's first turn, every call ends with the onboarding question."""
@@ -221,8 +221,8 @@ def compose_section(request: ModelRequest) -> str:
     section = f"\n\n{request.runtime.context.notes}" if request.runtime.context.notes else ""
     section += REPLY_LANGUAGE.format(language=reply_language(question))
     if is_composing(request.messages):
-        tables = artifacts_from(request.messages, "tables")  # e.g. from ask_sql, for chart_table
-        charts = artifacts_from(request.messages, "charts")
+        # saved and this turn's (e.g. from ask_sql), for chart_table
+        tables, charts = await asyncio.to_thread(known_tables, request.messages, request.runtime.context)
         tables = TABLES_SECTION.format(tables=table_note(tables, charts)) if tables else ""
         section += tables + COMPOSE_SECTION.format(formats=FORMATS, language=reply_language(question))
     if request.runtime.context.bootstrap and is_first_turn(request.messages):

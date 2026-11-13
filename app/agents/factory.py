@@ -1,7 +1,8 @@
 import asyncio
+import inspect
 import json
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from typing import NotRequired
 
 import openai
@@ -140,7 +141,7 @@ def trim_tool_calls(state, runtime):
     return {"messages": [message.model_copy(update={"tool_calls": kept})]}
 
 
-def make_call_note(tail: Callable[[ModelRequest], str] | None, limit: int, last_call_writes: bool):
+def make_call_note(tail: Callable[[ModelRequest], str | Awaitable[str]] | None, limit: int, last_call_writes: bool):
     """Per-call text goes last in the request, so the system prompt and the messages before it stay the
     same from call to call: `tail(request)`, then `TEAM_VOICE` in team mode (else `SOLO_VOICE`), plus on the last model call the limit allows (when the agent
     writes then) a note naming the reply language, no tool choice, and any tool call the model makes
@@ -148,7 +149,10 @@ def make_call_note(tail: Callable[[ModelRequest], str] | None, limit: int, last_
 
     @wrap_model_call
     async def call_note(request: ModelRequest, handler):
-        text = tail(request).strip() if tail else ""
+        text = tail(request) if tail else ""
+        if inspect.isawaitable(text):  # a tail that reads the database is async
+            text = await text
+        text = text.strip()
         voice = TEAM_VOICE if request.runtime.context.agent == TEAM_MODE else SOLO_VOICE
         text = f"{text}\n\n{voice}" if text else voice
         last = last_call_writes and request.state.get("run_model_call_count", 0) == limit - 1
@@ -245,7 +249,7 @@ def build_agent(
     store: BaseStore | None = None,
     max_model_calls: int | None = None,
     prompt_extra: Callable[[ModelRequest], str] | None = None,
-    tail: Callable[[ModelRequest], str] | None = None,
+    tail: Callable[[ModelRequest], str | Awaitable[str]] | None = None,
     middleware: Sequence[AgentMiddleware] = (),
     last_call_writes: bool = True,
     route: str = "",

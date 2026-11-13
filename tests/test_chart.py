@@ -1,12 +1,15 @@
 import json
+import uuid
 from types import SimpleNamespace
 
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.utils.function_calling import convert_to_openai_tool
 
 from app.agents.chart import tools
 from app.agents.chart.spec import MAX_POINTS, evenly, make_spec, summary
 from app.agents.chart.tools import chart_data, chart_sql, chart_table, rows_to_spec
+from app.core.memory import AgentContext
 from tests.conftest import requires_db
 
 PRICES = {
@@ -165,3 +168,68 @@ async def test_chart_sql_charts_a_real_query_and_keeps_its_table():
     refused, _ = await chart_sql.coroutine(query="DELETE FROM market.stocks", type="bar", title="t",
                                            x_column="a", runtime=_empty_chat())
     assert refused.startswith("Error: only a single SELECT")
+
+
+@pytest.fixture
+def saved_chat():
+    """A user and chat of their own whose `chat_data` holds PRICES from an earlier turn."""
+    from sqlalchemy import delete
+
+    from app.core.chat_memory import save_entries
+    from app.core.conversations import create_conversation
+    from app.core.db import get_engine, init_db, users
+
+    init_db()
+    user_id = f"test-chart-{uuid.uuid4()}"
+    with get_engine().begin() as conn:
+        conn.execute(users.insert().values(id=user_id, display_name="Test"))
+    conversation_id = create_conversation(user_id, "auto", "hello")["id"]
+    earlier = {**PRICES, "query": "SELECT trade_date, ticker, close FROM market.daily_prices"}
+    save_entries(user_id, conversation_id, 1, "sql", "sql", [
+        {"tool": "run_sql", "args": {}, "content": "rows", "artifacts": {"tables": [earlier]}}])
+    yield AgentContext(user_id=user_id, conversation_id=conversation_id)
+    with get_engine().begin() as conn:
+        conn.execute(delete(users).where(users.c.id == user_id))
+
+
+@requires_db
+async def test_chart_table_finds_a_table_from_an_earlier_turn(saved_chat):
+    runtime = SimpleNamespace(state={"messages": []}, context=saved_chat)
+    content, artifact = await chart_table.coroutine(
+        table_id="t1", type="line", title="t", x_column="trade_date", y_columns=["close"], series_column="ticker",
+        runtime=runtime)
+    assert content.startswith("Chart drawn") and artifact["charts"][0]["table_id"] == "t1"
+
+
+@requires_db
+async def test_chart_sql_reuses_a_saved_same_query_table(saved_chat, monkeypatch):
+    monkeypatch.setattr(tools, "query_readonly", lambda sql: (_ for _ in ()).throw(AssertionError("queried again")))
+    runtime = SimpleNamespace(state={"messages": []}, context=saved_chat)
+    content, artifact = await chart_sql.coroutine(
+        query="select trade_date, ticker, close from market.daily_prices", type="line", title="Close",
+        x_column="trade_date", y_columns=["close"], series_column="ticker", runtime=runtime)
+    assert content.startswith("(Reused table t1 from earlier in this chat")
+    assert artifact["charts"][0]["table_id"] == "t1"
+
+
+@requires_db
+async def test_tables_section_lists_saved_tables(saved_chat):
+    from app.agents.chart.agent import tables_section
+
+    request = SimpleNamespace(messages=[HumanMessage("plot that")], runtime=SimpleNamespace(context=saved_chat))
+    section = await tables_section(request)
+    assert "TABLES IN THIS CHAT (" in section and "- t1: 4 rows" in section
+
+
+def test_known_tables_current_turn_wins_and_comes_last(monkeypatch):
+    from app.core import chat_memory
+
+    old_t1, t3 = {**PRICES, "query": "old"}, {**WIDE, "id": "t3"}
+    monkeypatch.setattr(chat_memory, "chat_tables", lambda user, chat: ([old_t1, WIDE], [{"id": "c1"}]))
+    messages = [ToolMessage("rows", tool_call_id="0", artifact={"tables": [PRICES, t3]})]
+    tables, charts = chat_memory.known_tables(messages, SimpleNamespace(user_id="u", conversation_id="x"))
+    assert [t["id"] for t in tables] == ["t2", "t1", "t3"] and tables[1]["query"] == "SELECT ..."
+    assert [c["id"] for c in charts] == ["c1"]
+    # without a chat, only the messages' items
+    tables, _ = chat_memory.known_tables(messages, SimpleNamespace(user_id="u", conversation_id=""))
+    assert [t["id"] for t in tables] == ["t1", "t3"]

@@ -22,6 +22,7 @@ from app.agents.remote import RemoteAgent
 from langgraph.store.memory import InMemoryStore
 from app.agents import factory
 from app.orchestration import graph as graph_module
+from app.orchestration import orchestrator as orchestrator_module
 from app.orchestration import team
 from app.orchestration.router import build_router
 from app.orchestration.team import Board, Challenge, Conflict, Difference, Outcome, Review, Side, clean, participants
@@ -2348,3 +2349,161 @@ async def test_task_usage_not_saved_twice(monkeypatch):
     assert (await get_usage(store, "u1"))["input_tokens"] == 120
     spoke = {e["agent"]: e["usage"] for e in _events(chunks, "spoke")}
     assert spoke["sql"]["model_calls"] == 3 and spoke["research"]["model_calls"] == 2
+
+
+# --- chat memory: tags on saved rows, the note for plan/review/orchestrator, retry after a crash ---
+
+class _Configs(Fake):
+    """A Fake that keeps the configurable of each call (chat_step, chat_turn, thread_id)."""
+
+    async def ainvoke(self, input, config=None, **kwargs):
+        self.__dict__.setdefault("configs", []).append(dict((config or {}).get("configurable", {})))
+        return await super().ainvoke(input, config, **kwargs)
+
+
+async def test_speak_and_draw_tag_their_saved_rows(monkeypatch):
+    _plan(monkeypatch, Plan(tasks=[Task(id="t1", agent="sql", goal="get caps"), Task(id="t2", agent="research", goal="notes"),
+                                   Task(id="t3", agent="chart", goal="draw")]))
+    _board(monkeypatch, then=Board())
+    log = []
+    sql, research, chart = (_Configs(n, f"{n} text", log=log, tools=n != "chart", chart="c1" if n == "chart" else None)
+                            for n in ("sql", "research", "chart"))
+    assistant = _assistant(monkeypatch, per_agent(orchestrator=[AIMessage("Final.")]), sql=sql, research=research, chart=chart)
+    await _stream(assistant, _ask("chart AAPL"))
+
+    assert sql.configs[0]["chat_step"] == "t1" and research.configs[0]["chat_step"] == "t2"
+    assert chart.configs[0]["chat_step"] == "chart"
+
+
+async def test_ask_tags_its_rows_with_the_calling_turn(monkeypatch):
+    sql = _Configs("sql", "Cap is 3T.", log=[])
+    ask = AIMessage("", tool_calls=[{"name": "ask_sql", "args": {"question": "Give the cap."}, "id": "a1"},
+                                    {"name": "ask_research", "args": {"question": "Sector outlook?"}, "id": "a2"}])
+    model = per_agent(orchestrator=[ask, AIMessage("Combined.")])
+    assistant = _assistant(monkeypatch, model, sql=sql, research=_Configs("research", "Notes.", log=[]))
+    config = {"configurable": {"thread_id": "t-ask"}}
+    first = {"messages": [HumanMessage("hello"), AIMessage("Hi."), HumanMessage("Please look into that for me.")]}
+    stream = assistant.astream(first, config, context=AgentContext(user_id="u1"), stream_mode=["updates"], subgraphs=True)
+    async for _ in stream:
+        pass
+
+    assert sql.configs[0]["chat_step"] == "ask" and sql.configs[0]["chat_turn"] == 2
+
+
+async def _asked_with_note(monkeypatch, call):
+    monkeypatch.setattr(orchestrator_module, "render", lambda user_id, conversation_id: f"NOTE-QX-77 {user_id} {conversation_id}")
+    seen = []
+
+    async def ainvoke(messages, config):
+        seen.append(messages[1].content)
+        return None
+
+    monkeypatch.setattr(team, "get_chat_model", lambda user_id: SimpleNamespace(
+        with_structured_output=lambda schema, method: SimpleNamespace(ainvoke=ainvoke)))
+    await call({"callbacks": [], "configurable": {"thread_id": "chat-9"}})
+    return seen[0]
+
+
+async def test_plan_and_review_receive_chat_data(monkeypatch):
+    plan_human = await _asked_with_note(monkeypatch, lambda config: team.ask_plan(
+        [HumanMessage("question?")], [(SQL, RouteInfo())], config, user_id="u-7"))
+    assert "CHAT DATA" in plan_human and "NOTE-QX-77 u-7 chat-9" in plan_human
+    assert plan_human.index("CHAT DATA") < plan_human.index("USER MESSAGE")
+
+    answers = [{"round": 1, "agent": "sql", "text": "x"}]
+    board_human = await _asked_with_note(monkeypatch, lambda config: team.ask_board(
+        [HumanMessage("question?")], answers, config, user_id="u-7"))
+    assert "CHAT DATA" in board_human and "NOTE-QX-77 u-7 chat-9" in board_human
+
+
+async def test_plan_without_a_chat_has_no_chat_data_block(monkeypatch):
+    human = await _planner_input(monkeypatch, [HumanMessage("question?")])
+    assert "CHAT DATA" not in human
+
+
+async def test_a_failing_note_does_not_fail_the_plan_call(monkeypatch):
+    def boom(user_id, conversation_id):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(orchestrator_module, "render", boom)
+
+    async def ainvoke(messages, config):
+        return Plan()
+
+    monkeypatch.setattr(team, "get_chat_model", lambda user_id: SimpleNamespace(
+        with_structured_output=lambda schema, method: SimpleNamespace(ainvoke=ainvoke)))
+    config = {"callbacks": [], "configurable": {"thread_id": "c"}}
+    assert await team.ask_plan([HumanMessage("q?")], [(SQL, RouteInfo())], config, user_id="u") == Plan()
+
+
+async def test_orchestrator_and_writer_get_the_chat_data(monkeypatch):
+    monkeypatch.setattr(orchestrator_module, "render", lambda user_id, conversation_id: f"NOTE-OR-31 {conversation_id}")
+    model = per_agent(orchestrator=[AIMessage("Hello."), AIMessage("Final.")])
+    assistant = _assistant(monkeypatch, model)
+    config = {"configurable": {"thread_id": "chat-5"}}
+    await _stream(assistant, {"messages": [HumanMessage("write a short poem")]}, config)
+    assert model.prompts and all("NOTE-OR-31 chat-5" in p[0].content for p in model.prompts)
+
+
+def _turn(question, answer, tasks=None):
+    """A finished turn on the thread (a team answer carries its transcript when `tasks` is given)."""
+    kwargs = {"team": {"goal": question, "tasks": tasks}} if tasks else {}
+    return [HumanMessage(question), AIMessage(answer, additional_kwargs=kwargs)]
+
+
+def _sql_task(goal):
+    return [{"id": "t1", "agent": "sql", "goal": goal, "depends_on": [], "status": "done", "origin": "plan"}]
+
+
+def test_crashed_question_is_the_latest_one_without_an_answer():
+    q1, q2 = "first question?", "second question?"
+    assert team.crashed_question([*_turn(q1, "a1"), HumanMessage(q2), HumanMessage("try again")]).text == q2
+    assert team.crashed_question([*_turn(q1, "a1"), *_turn(q2, "a2"), HumanMessage("try again")]) is None
+    assert team.crashed_question([HumanMessage("try again")]) is None
+    note = HumanMessage("note", name="team_mode")
+    assert team.crashed_question([HumanMessage(q1), note, HumanMessage("try again")]).text == q1
+
+
+async def test_retry_after_crash_asks_the_crashed_question(monkeypatch):
+    asked = _plan(monkeypatch, Plan(tasks=[Task(id="t1", agent="sql", goal="get caps"), Task(id="t2", agent="research", goal="notes")]))
+    _board(monkeypatch, then=Board())
+    log = []
+    assistant = _assistant(monkeypatch, per_agent(orchestrator=[AIMessage("Final.")]),
+                           sql=Fake("sql", "Cap is 3T.", log=log), research=Fake("research", "Notes.", log=log))
+    crashed = "What is the AAPL dividend yield?"
+    thread = [*_turn(QUESTION, "A1", _sql_task("old goal")), HumanMessage(crashed), HumanMessage("try again")]
+    config = {"configurable": {"thread_id": "crash-1"}}
+    await _stream(assistant, {"messages": thread}, config)
+
+    assert next(m for m in reversed(asked[0]) if isinstance(m, HumanMessage)).text == crashed
+    assert (await _thread(assistant, config))[-1].additional_kwargs["team"]["goal"] == crashed
+
+
+async def test_retry_after_finished_turn_reruns_its_tasks(monkeypatch):
+    asked = _plan(monkeypatch)
+    _board(monkeypatch, then=Board())
+    log = []
+    assistant = _assistant(monkeypatch, per_agent(orchestrator=[AIMessage("Final.")]),
+                           sql=Fake("sql", "Cap is 3T.", log=log), research=Fake("research", "n", log=log))
+    thread = [*_turn("older?", "A1", _sql_task("older goal")), *_turn("newer?", "A2", _sql_task("newer goal")), HumanMessage("try again")]
+    config = {"configurable": {"thread_id": "finished-1"}}
+    await _stream(assistant, {"messages": thread}, config)
+
+    assert not asked  # no plan call: the finished turn's tasks run again
+    transcript = (await _thread(assistant, config))[-1].additional_kwargs["team"]
+    assert [t["goal"] for t in transcript["tasks"]] == ["newer goal"]
+
+
+async def test_new_question_after_crash_is_a_normal_turn(monkeypatch):
+    asked = _plan(monkeypatch, Plan(tasks=[Task(id="t1", agent="sql", goal="get caps"), Task(id="t2", agent="research", goal="notes")]))
+    _board(monkeypatch, then=Board())
+    log = []
+    assistant = _assistant(monkeypatch, per_agent(orchestrator=[AIMessage("Final.")]),
+                           sql=Fake("sql", "Cap is 3T.", log=log), research=Fake("research", "Notes.", log=log))
+    new = "What is the MSFT revenue?"
+    thread = [*_turn(QUESTION, "A1"), HumanMessage("What is the AAPL dividend yield?"), HumanMessage(new)]
+    config = {"configurable": {"thread_id": "crash-2"}}
+    await _stream(assistant, {"messages": thread}, config)
+
+    assert next(m for m in reversed(asked[0]) if isinstance(m, HumanMessage)).text == new
+    assert (await _thread(assistant, config))[-1].additional_kwargs["team"]["goal"] == new

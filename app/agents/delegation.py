@@ -14,7 +14,7 @@ from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
 
 from app.agents.artifacts import collect
-from app.agents.base import AgentSpec
+from app.agents.base import AgentSpec, visible_user_messages
 from app.core.memory import AgentContext
 
 log = logging.getLogger(__name__)
@@ -32,9 +32,11 @@ def make_ask_tool(spec: AgentSpec, agent: Runnable) -> BaseTool:
             # The tool's config carries the stream hook, so a remote agent's tool calls still show.
             # The route in the namespace names the agent behind its stream chunks (parallel asks share one `tools` node).
             config = runtime.config
-            ns = config.get("configurable", {}).get("checkpoint_ns")
-            if ns:
-                config = {**config, "configurable": {**config["configurable"], "checkpoint_ns": f"{ns}|{spec.route}:{runtime.tool_call_id}"}}
+            configurable = {**config.get("configurable", {}), "chat_step": "ask",  # chat memory: its saved rows
+                            "chat_turn": len(visible_user_messages((getattr(runtime, "state", None) or {}).get("messages", [])))}
+            if ns := configurable.get("checkpoint_ns"):
+                configurable["checkpoint_ns"] = f"{ns}|{spec.route}:{runtime.tool_call_id}"
+            config = {**config, "configurable": configurable}
             state = await agent.ainvoke({"messages": [HumanMessage(question)]}, config, context=runtime.context)
         except (openai.RateLimitError, openai.AuthenticationError):
             raise  # the chat route reports these to the user

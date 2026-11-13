@@ -120,6 +120,25 @@ graph_edges = Table(
     UniqueConstraint("user_id", "source_id", "relation", "target_id"),
 )
 
+# What the agents fetched in a chat, one row per tool call, written by the main app as each step
+# finishes and rendered for later agent calls (app/core/chat_memory.py).
+chat_data = Table(
+    "chat_data",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),  # orders the entries
+    Column("user_id", String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("conversation_id", String(36), ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False),
+    Column("turn", Integer),  # visible user messages in the thread when the step ran
+    Column("step", String(32), nullable=False),  # team task id, "chart", "reply" or "ask"
+    Column("agent", String(32), nullable=False),  # route that called the tool
+    Column("tool", String(64), nullable=False),  # tool name; "findings" for research notes
+    Column("args", JSONB, nullable=False, server_default="{}"),
+    Column("content", Text, nullable=False),  # the result text the model saw
+    Column("artifacts", JSONB, nullable=False, server_default="{}"),  # {"tables": [...], "charts": [...]}
+    Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
+    Index("chat_data_chat", "user_id", "conversation_id", "id"),
+)
+
 
 @lru_cache
 def get_engine() -> Engine:
@@ -151,7 +170,7 @@ def pool_args() -> dict:
 # What the agent servers' agent_reader role (db/init/06_agent_reader.sql) may read: document
 # passages, the graph and the store's chat history. Never users, conversations or checkpoints.
 READER_TABLES = ("documents", "model_settings", "graph_nodes", "graph_edges", "langchain_pg_collection", "langchain_pg_embedding",
-                 "store", "store_vectors", "store_migrations", "vector_migrations")
+                 "chat_data", "store", "store_vectors", "store_migrations", "vector_migrations")
 
 
 def grant_reader() -> None:

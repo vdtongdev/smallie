@@ -242,6 +242,16 @@ describe('team turns', () => {
     expect(newTurn('q').team).toBe(false)
   })
 
+  it('shows the agent badge until a plan arrives (orchestrator answers alone)', () => {
+    expect(team([{ type: 'agent', name: 'orchestrator' }, tok('hi')]).badges).toEqual([{ agent: 'orchestrator' }])
+    expect(team([{ type: 'agent', name: 'team' }]).badges).toEqual([])
+  })
+
+  it('once a plan exists, agent events do not add badges', () => {
+    const t = team([{ type: 'plan', tasks }, { type: 'agent', name: 'orchestrator' }])
+    expect(t.badges).toEqual([{ agent: 'sql' }, { agent: 'research' }])
+  })
+
   it('plan, wave, token with task, spoke, review, synthesize, token, done', () => {
     const review = { type: 'review', agreements: [], differences: [], challenges: [], follow_ups: [] }
     const t = team([{ type: 'plan', tasks }, wave(1, ['t1', 't2'], ['sql', 'research'])])

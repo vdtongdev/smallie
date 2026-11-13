@@ -114,7 +114,7 @@ export function reduceTurn(turn: Turn, event: ChatEvent): Turn {
       t.activity.fallbacks.push(event as unknown as ModelFallbackEvent)
       return t
     case 'agent':
-      if (t.team || e.name === 'team') return turn // the plan names its own agents
+      if (e.name === 'team' || (t.team && t.activity.plan.length)) return turn // a plan names its own agents
       if (t.badges.length && !t.started) t.badges[t.badges.length - 1] = { agent: e.name }
       else t.badges.push({ agent: e.name })
       return t

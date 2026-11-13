@@ -1,0 +1,4283 @@
+{
+  "name": "team_alone",
+  "message": "Should I put more money into tech stocks now?",
+  "events": [
+    {
+      "type": "conversation",
+      "id": "32742011-6b58-4521-9b98-a5ac6b6a1b4f",
+      "title": "Should I put more money into tech stocks now?"
+    },
+    {
+      "type": "agent",
+      "name": "team"
+    },
+    {
+      "type": "token",
+      "text": "We"
+    },
+    {
+      "type": "token",
+      "text": "'re"
+    },
+    {
+      "type": "token",
+      "text": " happy"
+    },
+    {
+      "type": "token",
+      "text": " to"
+    },
+    {
+      "type": "token",
+      "text": " help"
+    },
+    {
+      "type": "token",
+      "text": " you"
+    },
+    {
+      "type": "token",
+      "text": " with"
+    },
+    {
+      "type": "token",
+      "text": " your"
+    },
+    {
+      "type": "token",
+      "text": " investment"
+    },
+    {
+      "type": "token",
+      "text": " decision"
+    },
+    {
+      "type": "token",
+      "text": "."
+    },
+    {
+      "type": "token",
+      "text": " However"
+    },
+    {
+      "type": "token",
+      "text": ","
+    },
+    {
+      "type": "token",
+      "text": " to"
+    },
+    {
+      "type": "token",
+      "text": " provide"
+    },
+    {
+      "type": "token",
+      "text": " you"
+    },
+    {
+      "type": "token",
+      "text": " with"
+    },
+    {
+      "type": "token",
+      "text": " the"
+    },
+    {
+      "type": "token",
+      "text": " best"
+    },
+    {
+      "type": "token",
+      "text": " advice"
+    },
+    {
+      "type": "token",
+      "text": ","
+    },
+    {
+      "type": "token",
+      "text": " we"
+    },
+    {
+      "type": "token",
+      "text": " need"
+    },
+    {
+      "type": "token",
+      "text": " to"
+    },
+    {
+      "type": "token",
+      "text": " know"
+    },
+    {
+      "type": "token",
+      "text": " more"
+    },
+    {
+      "type": "token",
+      "text": " about"
+    },
+    {
+      "type": "token",
+      "text": " your"
+    },
+    {
+      "type": "token",
+      "text": " investment"
+    },
+    {
+      "type": "token",
+      "text": " goals"
+    },
+    {
+      "type": "token",
+      "text": " and"
+    },
+    {
+      "type": "token",
+      "text": " risk"
+    },
+    {
+      "type": "token",
+      "text": " tolerance"
+    },
+    {
+      "type": "token",
+      "text": "."
+    },
+    {
+      "type": "token",
+      "text": " Are"
+    },
+    {
+      "type": "token",
+      "text": " you"
+    },
+    {
+      "type": "token",
+      "text": " looking"
+    },
+    {
+      "type": "token",
+      "text": " to"
+    },
+    {
+      "type": "token",
+      "text": " grow"
+    },
+    {
+      "type": "token",
+      "text": " your"
+    },
+    {
+      "type": "token",
+      "text": " wealth"
+    },
+    {
+      "type": "token",
+      "text": " over"
+    },
+    {
+      "type": "token",
+      "text": " the"
+    },
+    {
+      "type": "token",
+      "text": " long"
+    },
+    {
+      "type": "token",
+      "text": " term"
+    },
+    {
+      "type": "token",
+      "text": ","
+    },
+    {
+      "type": "token",
+      "text": " or"
+    },
+    {
+      "type": "token",
+      "text": " do"
+    },
+    {
+      "type": "token",
+      "text": " you"
+    },
+    {
+      "type": "token",
+      "text": " have"
+    },
+    {
+      "type": "token",
+      "text": " a"
+    },
+    {
+      "type": "token",
+      "text": " shorter"
+    },
+    {
+      "type": "token",
+      "text": " time"
+    },
+    {
+      "type": "token",
+      "text": " frame"
+    },
+    {
+      "type": "token",
+      "text": " in"
+    },
+    {
+      "type": "token",
+      "text": " mind"
+    },
+    {
+      "type": "token",
+      "text": "?\n\n"
+    },
+    {
+      "type": "token",
+      "text": "We"
+    },
+    {
+      "type": "token",
+      "text": " can"
+    },
+    {
+      "type": "token",
+      "text": " research"
+    },
+    {
+      "type": "token",
+      "text": " the"
+    },
+    {
+      "type": "token",
+      "text": " current"
+    },
+    {
+      "type": "token",
+      "text": " market"
+    },
+    {
+      "type": "token",
+      "text": " trends"
+    },
+    {
+      "type": "token",
+      "text": " and"
+    },
+    {
+      "type": "token",
+      "text": " provide"
+    },
+    {
+      "type": "token",
+      "text": " you"
+    },
+    {
+      "type": "token",
+      "text": " with"
+    },
+    {
+      "type": "token",
+      "text": " some"
+    },
+    {
+      "type": "token",
+      "text": " general"
+    },
+    {
+      "type": "token",
+      "text": " insights"
+    },
+    {
+      "type": "token",
+      "text": ","
+    },
+    {
+      "type": "token",
+      "text": " but"
+    },
+    {
+      "type": "token",
+      "text": " we"
+    },
+    {
+      "type": "token",
+      "text": " can"
+    },
+    {
+      "type": "token",
+      "text": "'t"
+    },
+    {
+      "type": "token",
+      "text": " give"
+    },
+    {
+      "type": "token",
+      "text": " you"
+    },
+    {
+      "type": "token",
+      "text": " personalized"
+    },
+    {
+      "type": "token",
+      "text": " investment"
+    },
+    {
+      "type": "token",
+      "text": " advice"
+    },
+    {
+      "type": "token",
+      "text": " without"
+    },
+    {
+      "type": "token",
+      "text": " knowing"
+    },
+    {
+      "type": "token",
+      "text": " more"
+    },
+    {
+      "type": "token",
+      "text": " about"
+    },
+    {
+      "type": "token",
+      "text": " your"
+    },
+    {
+      "type": "token",
+      "text": " goals"
+    },
+    {
+      "type": "token",
+      "text": "."
+    },
+    {
+      "type": "token",
+      "text": " Let"
+    },
+    {
+      "type": "token",
+      "text": "'s"
+    },
+    {
+      "type": "token",
+      "text": " start"
+    },
+    {
+      "type": "token",
+      "text": " by"
+    },
+    {
+      "type": "token",
+      "text": " discussing"
+    },
+    {
+      "type": "token",
+      "text": " your"
+    },
+    {
+      "type": "token",
+      "text": " investment"
+    },
+    {
+      "type": "token",
+      "text": " objectives"
+    },
+    {
+      "type": "token",
+      "text": ".\n\n"
+    },
+    {
+      "type": "tool_call",
+      "name": "ask_research",
+      "args": {
+        "question": "Current market trends and investment advice for tech stocks"
+      }
+    },
+    {
+      "type": "tool_call",
+      "name": "tavily_tavily_search",
+      "args": {
+        "max_results": 10,
+        "query": "tech stocks current trends",
+        "search_depth": "advanced",
+        "topic": "news"
+      },
+      "agent": "research"
+    },
+    {
+      "type": "tool_call",
+      "name": "tavily_tavily_search",
+      "args": {
+        "max_results": 10,
+        "query": "investment advice for tech stocks",
+        "search_depth": "advanced",
+        "topic": "news"
+      },
+      "agent": "research"
+    },
+    {
+      "type": "tool_call",
+      "name": "knowledge_wikipedia_search",
+      "args": {
+        "lang": "en",
+        "limit": 5,
+        "query": "tech stocks"
+      },
+      "agent": "research"
+    },
+    {
+      "type": "tool_call",
+      "name": "knowledge_arxiv_search",
+      "args": {
+        "max_results": 5,
+        "query": "tech stocks"
+      },
+      "agent": "research"
+    },
+    {
+      "type": "tool_call",
+      "name": "search_documents",
+      "args": {
+        "entity": "",
+        "query": "tech stocks"
+      },
+      "agent": "research"
+    },
+    {
+      "type": "tool_result",
+      "name": "knowledge_wikipedia_search",
+      "content": "- Big Tech (https://en.wikipedia.org/wiki/Big_Tech): Big Tech, also known as the tech giants or tech titans, are the largest and most powerful technology companies in the world. It most commonly refers to\n- Dot-com bubble (https://en.wikipedia.org/wiki/Dot-com_bubble): more cautious positions. Popular Internet forums that focused on high tech stocks, such as Silicon Investor, Yahoo! Finance, and The Motley Fool declined\n- Temasek Holdings (https://en.wikipedia.org/wiki/Temasek_Holdings): rally&quot;. Reuters. Retrieved 17 July 2025. &quot;Temasek sells off Chinese tech stocks amid crackdown by Beijing&quot;. The Edge Singapore. 16 November 2021. Retrieved\n- Scion Asset Management (https://en.wikipedia.org/wiki/Scion_Asset_Management): Scion was able to achieve these returns partly by shorting overvalued tech stocks at the peak of the internet bubble. By the end of 2004, Scion was managing\n- AI bubble (https://en.wikipedia.org/wiki/AI_bubble): that leading AI tech firms are involved in a circular flow of investments that are artificially inflating the value of their stocks and the broader market\n\n[source ids] cite these pages by id in your notes:\nSb36e = Big Tech (https://en.wikipedia.org/wiki/Big_Tech)\nS2126 = Dot-com bubble (https://en.wikipedia.org/wiki/Dot-com_bubble)\nSed8e = Temasek Holdings (https://en.wikipedia.org/wiki/Temasek_Holdings)\nSfb23 = Scion Asset Management (https://en.wikipedia.org/wiki/Scion_Asset_Management)\nS3456 = AI bubble (https://en.wikipedia.org/wiki/AI_bubble)",
+      "agent": "research"
+    },
+    {
+      "type": "tool_result",
+      "name": "knowledge_arxiv_search",
+      "content": "- TeCH: Text-guided Reconstruction of Lifelike Clothed Humans (Yangyi Huang, Hongwei Yi, Yuliang Xiu, Tingting Liao et al., 2023-08-16) http://arxiv.org/abs/2308.08545v2\n  Despite recent research advancements in reconstructing clothed humans from a single image, accurately restoring the \"unseen regions\" with high-level details remains an unsolved challenge that lacks attention. Existing methods often generate overly smooth back-side surfaces with a blurry texture. But how to effectively capture all visual attributes of an individual from a single image, which are sufficient to reconstruct unseen areas (e.g., the back view)? Motivated by the power of foundation models, TeCH reconstructs the 3D human by leveraging 1) descriptive text prompts (e.g., garments, colors, hairstyles) which are automatically generated via a garment parsing model and Visual Question Answering (VQA), 2) a personalized fine-tuned Text-to-Image diffusion model (T2I) which learns the \"indescribable\" appearance. To represent high-resolution 3D clothed humans at an affordable cost, we propose a hybrid 3D representation based on DMTet, which consists of an explicit body shape grid and an implicit distance field. Guided by the descriptive prompts + personalized T2I diffusion model, the geometry and texture of the 3D humans are optimized through multi-view Score Distillation Sampling (SDS) and reconstruction losses based on the original observation. TeCH produces high-fidelity 3D clothed humans with consistent & delicate texture, and detailed full-body geometry. Quantitative and qualitative experiments demonstrate that TeCH outperforms the state-of-the-art methods in terms of reconstruction accuracy and rendering quality. The code will be publicly available for research purposes at https://huangyangyi.github.io/TeCH\n- Pricing Options on Defaultable Stocks (Erhan Bayraktar, 2007-07-03) http://arxiv.org/abs/0707.0336v2\n  In this note, we develop stock option price approximations for a model which takes both the risk o default and the stochastic volatility into account. We also let the intensity of defaults be influenced by the volatility. We show that it might be possible to infer the risk neutral default intensity from the stock option prices. Our option price approximation has a rich implied volatility surface structure and fits the data implied volatility well. Our calibration exercise shows that an effective hazard rate from bonds issued by a company can be used to explain the implied volatility skew of the implied volatility of the option prices issued by the same company.\n- Effect of Franchised Business models on Fast Food Company Stock Prices in Recession and Recovery with Weibull Analysis (Sandip Dutta, Vignesh Prabhu, 2019-12-30) http://arxiv.org/abs/1912.12940v1\n  At the initial stages of this research, the assumption was that the franchised businesses perhaps should not be affected much by recession as there are multiple cash pools available inherent to the franchised business model. However, after analyzing the available data, it indicated otherwise, the stock price performance as discussed indicates a different pattern. The stock price data is analyzed with an unconventional tool, Weibull distribution and observations confirmed the presence of either a reverse trend in franchised business than what is observed for non-franchised or the franchised stock followed large food suppliers. There is a layered ownership and cash flow in a franchised business model. The parent company run by franchiser depends on the performance of child companies run by franchisees. Both parent and child companies are run as independent businesses but only the parent company is listed as a stock ticker in stock exchange. Does this double layer of vertical operation, cash reserve, and cash flow protect them better in recession? The data analyzed in this paper indicates that the recession effect can be more severe; and if it dives with the average market, expect a slower recover",
+      "agent": "research"
+    },
+    {
+      "type": "tool_result",
+      "name": "search_documents",
+      "content": "No matching passages in the user's documents.",
+      "agent": "research"
+    },
+    {
+      "type": "tool_result",
+      "name": "tavily_tavily_search",
+      "content": "{\"query\":\"investment advice for tech stocks\",\"follow_up_questions\":null,\"answer\":null,\"images\":[],\"results\":[{\"url\":\"https://www.usbank.com/investing/financial-perspectives/market-news/investing-in-tech-stocks.html\",\"title\":\"Investing in Tech Stocks | U.S. Bank\",\"content\":\"## A selective approach to investing in technology stocks\\n\\nA selective approach remains the clearest message for investors. Technology companies can offer strong earnings growth potential, and some businesses in the sector are less sensitive to the business cycle than other parts of the market. Haworth notes, “Secular, rapid business growth can drive significant performance gains,” but he also warns that “Diminishing benefits to AI investing will likely vary significantly by industry.” [...] For investors, that means the most productive strategy may be a thoughtful one rather than an aggressive one. The technology sector still offers meaningful long-term opportunity, but success is likely to depend on selectivity, discipline, and a willingness to look past short-term noise. Investors should also consult with their financial professionals for guidance, especially when volatility or valuation concerns arise.\\n\\n## FAQs\\n\\n### What are technology stocks? [...] That distinction is important because not every company will convert technology spending into lasting shareholder value. Some businesses will benefit from stronger demand, better margins, and wider adoption, while others may struggle with competition, execution risk, or prices that already reflect aggressive growth expectations. Investors can improve decision-making by aligning any technology exposure with their goals, time horizon, and tolerance for volatility.\\n\\n## Why long-term investors still watch the technology sector closely\",\"score\":0.7774689,\"published_date\":\"Wed, 29 Apr 2026 19:09:00 GMT\",\"raw_content\":null,\"id\":\"174513-00\"},{\"url\":\"https://www.morganstanley.com/insights/articles/magnificent-seven-rotation-portfolio-strategies-2026\",\"title\":\"Why Good News Isn’t Moving Stocks | Morgan Stanley\",\"content\":\"In this environment, we suggest that prudent investors:\\n\\n   Focus on U.S. companies that are likely to hit earnings targets.\\n   Consider taking profits in small-cap, micro-cap and speculative equities.\\n   Redeploy capital to large-cap “core” and quality stocks, including Magnificent 7 mega-cap tech names.\\n   Broaden exposure to GenAI productivity beneficiaries, including in health care, energy, software and financials.\\n\\nFor passive investors, consider balancing exposure between market-cap-weighted and equal-weighted equity indexes, and using active management for up to 50% of allocations.\\n\\nAlso consider adding to rest-of-world equities, with a focus on emerging markets. For some investors, hedge funds, gold and infrastructure may also remain key allocations. [...] Image 17: Lisa Shalett\\n\\nLisa Shalett\\n\\n## Key Takeaways\\n\\n   Indexes feel stuck: Good economic and earnings news is largely priced in, and markets need true upside surprises to move higher.\\n   In particular, markets want clearer proof that massive AI capex will translate into durable returns, not just bigger spending headlines.\\n   This uncertainty seems to be compelling more investors to shift money away from mega-cap tech, toward a much broader set of stocks.\\n   In this environment, consider emphasizing earnings achievability and quality in your investments, taking profits in small caps, and broadening exposure to AI adopters in select sectors. [...] As the second quarter nears, the recent sprint into small caps and lower-quality, more-volatile stocks may take a breath. Some of those names will likely disappoint. When that happens, money often shifts back toward “quality”—financially strong companies with solid profits, steadier earnings and less debt. This could reopen opportunity in parts of tech that still look compelling on growth-adjusted valuation measures.\\n\\nIn this environment, we suggest that prudent invest",
+      "agent": "research"
+    },
+    {
+      "type": "tool_result",
+      "name": "tavily_tavily_search",
+      "content": "{\"query\":\"tech stocks current trends\",\"follow_up_questions\":null,\"answer\":null,\"images\":[],\"results\":[{\"url\":\"https://io-fund.com/broad-market-today/nasdaq-100-returns-vs-tech-bubble-warnings\",\"title\":\"Tech Stocks Weekly: Key Market Updates and Trends\",\"content\":\"In 2020, despite rapid earnings growth, with companies like Zoom growing 326%, tech stocks were labeled a bubble amid pandemic-driven volatility and policy uncertainty. “Everybody loves a party … but, inevitably, after a big party there’s a hangover,” the billionaire investor Stanley Druckenmiller said in a Squawk Box interview. “Right now, we’re in an absolute raging mania.”” Although tech would later reset, the most explosive move followed these bubble warnings.\\n In 2022, rising rates and tightening financial conditions reignited claims that the tech bubble had finally burst and the Nasdaq-100 was down (33%) in 2022. However, tech stocks recovered in 2023, and the Nasdaq-100 rose 53.8% in 2023. [...] In 2024, the narrative re-emerged once again—this time framed as an “AI bubble”—despite strong balance sheets, accelerating earnings, and durable long-term demand drivers. However, Nasdaq-100 rose 24.9% with Nvidia rising 171.2% in 2024. [...] What followed tells a very different story with not only the Nasdaq-100 up 550% over a 10-year period but also high-flying stocks like Shopify returned as much as 5200% and Nvidia returned 22,000% over the same period.\\n\\nIt’s true that capturing those gains does not come easy. Investors had to hold through five drawdowns that were greater than 20%, including two declines greater than 30%, while tuning out a constant stream of bearish commentary – often from reputable sources – proclaiming the long-awaited tech bubble has finally “popped.” Despite these strong convictions, the long-term trend remained intact.\",\"score\":0.78464925,\"published_date\":\"Fri, 06 Mar 2026 00:00:00 GMT\",\"raw_content\":null,\"id\":\"5ab615-00\"},{\"url\":\"https://www.usbank.com/investing/financial-perspectives/market-news/investing-in-tech-stocks.html\",\"title\":\"Investing in Tech Stocks | U.S. Bank\",\"content\":\"## Why technology stocks still drive market leadership\\n\\nLeadership in the technology sector remains powerful, but performance within the group is far from uniform. The largest technology-oriented stocks (known as the “Magnificent 7) along with Broadcom, Micron Technology and Advanced Micro Devices, have driven much of the market’s recent advance, yet the winners have changed over time and performance has varied widely from one company to the next. Micron Technology is leading the group with a 77% gain in 2026 (as of April 28), followed by Advanced Micro Devices at 51% and Broadcom at 16%, while Apple, Microsoft, and Tesla are trailing their peers with negative year-to-date returns.1\\n\\n### Performance of ten largest technology-related stocks in the S&P 500 Index\\n\\nStock [...] 2025 results also reflected dispersion and shifting leadership from previous years. Micron gained 223%, Advanced Micro Devices was up 71%, Alphabet gained 66%, Broadcom rose 49%, and Nvidia returned 39%, while Apple, Microsoft, Amazon, Meta Platforms, and Tesla lagged those leaders by a wide margin.1 While technology-oriented stocks still drove 2025 market performance, returns were more subdued than the prior two years.\\n\\n## Investing in technology means investing in productivity and innovation [...] Technology investing is typically viewed as one of the most attractive growth-oriented equity investment opportunities, but it also carries a higher risk of price volatility than most other sectors. Over certain periods, technology stocks generate significant returns that far outpace the rest of the market. For example, according to S&P Dow Jones Indices, from 2016 through 2025, the S&P 500 Communication Services and Information Technology sector generated double-digit total returns in eight of the ten years, peaking at 57.4% in 2023. However, it had two years of negative performance, in",
+      "agent": "research"
+    },
+    {
+      "type": "tool_result",
+      "name": "ask_research",
+      "content": "FINDINGS:\n- Tech stocks have been experiencing a slump in 2026, with the Nasdaq-100 falling over 9% from its early October peak amid concerns about AI infrastructure spending and the controversy surrounding Nvidia's former CEO Jensen Huang. [source: Goldman Sachs Reportedly Sees AI Hyperscalers As ‘Relatively Defensive’ After Tech Selloff — Forecasts 14% S&P 500 Upside | https://finance.yahoo.com/markets/stocks/articles/goldman-sachs-reportedly-sees-ai-115231520.html]\n- Goldman Sachs strategists see technology stocks, particularly artificial intelligence (AI) hyperscalers, as relatively defensive investments after a recent selloff pushed their valuations below historical levels. [source: Goldman Sachs Reportedly Sees AI Hyperscalers As ‘Relatively Defensive’ After Tech Selloff — Forecasts 14% S&P 500 Upside | https://finance.yahoo.com/markets/stocks/articles/goldman-sachs-reportedly-sees-ai-115231520.html]\n- The AI trade may be back, for now, after an early fall slumber, with several under-the-radar moves in the AI sector this week that investors may have overlooked amid the outsized focus on the Huang scandals. [source: 3 signs AI stocks may be a great trade again | https://finance.yahoo.com/markets/article/3-signs-ai-stocks-may-be-a-great-trade-again-130410381.html]\n- A selective approach remains the clearest message for investors in technology stocks, with a focus on U.S. companies that are likely to hit earnings targets and considering taking profits in small-cap, micro-cap, and speculative equities. [source: Investing in Tech Stocks | U.S. Bank | https://www.usbank.com/investing/financial-perspectives/market-news/investing-in-tech-stocks.html]\n- The technology sector still offers meaningful long-term opportunity, but success is likely to depend on selectivity, discipline, and a willingness to look past short-term noise. [source: Investing in Tech Stocks | U.S. Bank | https://www.usbank.com/investing/financial-perspectives/market-news/investing-in-tech-stocks.html]\n- Investors should be cautious and consider diversifying their portfolios to avoid the concentration risk associated with tech stocks, which represent as much as 40% of the U.S. large-cap equity market. [source: A lot changed in stock market in just a few months. The single biggest risk did not | https://www.cnbc.com/2026/10/15/spx-sp500-tech-stocks-invest.html]\n- The tech sell-off could be a brief dip that rebounds to new highs, or it could turn into a bear market, and investors should be prepared for either scenario. [source: If the Tech Stock Sell-Off Turns Into a Bear Market, History Says This Investing Strategy Has Never Failed | https://finance.yahoo.com/markets/stocks/articles/tech-stock-sell-off-turns-042000090.html]\n- The best AI stocks to buy in 2026 include Microsoft, Palantir, Snowflake, Salesforce, and CrowdStrike, according to Wall Street's biggest tech bulls. [source: Best AI Stocks to Buy in 2026: 10 Top Picks & How to Invest | The Motley Fool | https://www.fool.com/investing/stock-market/market-sectors/information-technology/ai-stocks]\n- The 5 best-performing AI stocks right now are Nvidia, Microsoft, Alphabet, Meta Platforms, and Amazon, according to NerdWallet. [source: The 5 Best-Performing AI Stocks Right Now - NerdWallet | https://www.nerdwallet.com/investing/learn/ai-stocks-invest-in-artificial-intelligence]\n- Growth stocks can be volatile and require a long-term mindset and diversification across several leaders to balance growth potential with the risk inherent in investing in a new technology. [source: 10 Best Growth Stocks for 2026 and How to Invest | The Motley Fool | https://www.fool.com/investing/stock-market/types-of-stocks/growth-stocks]\n\nGAPS: none\n\nMEMORY: Facts about this user from earlier chats and their files are listed below; use them.\n- User interested in NVIDIA\n\nPAST CHATS: Recent activity from the user's other chats may be listed below. Use it only when the user refers to earlier chats or questions (\"what did I ask before"
+    },
+    {
+      "type": "token",
+      "text": "Based"
+    },
+    {
+      "type": "token",
+      "text": " on"
+    },
+    {
+      "type": "token",
+      "text": " the"
+    },
+    {
+      "type": "token",
+      "text": " user"
+    },
+    {
+      "type": "token",
+      "text": "'s"
+    },
+    {
+      "type": "token",
+      "text": " question"
+    },
+    {
+      "type": "token",
+      "text": ","
+    },
+    {
+      "type": "token",
+      "text": " \""
+    },
+    {
+      "type": "token",
+      "text": "Should"
+    },
+    {
+      "type": "token",
+      "text": " I"
+    },
+    {
+      "type": "token",
+      "text": " put"
+    },
+    {
+      "type": "token",
+      "text": " more"
+    },
+    {
+      "type": "token",
+      "text": " money"
+    },
+    {
+      "type": "token",
+      "text": " into"
+    },
+    {
+      "type": "token",
+      "text": " tech"
+    },
+    {
+      "type": "token",
+      "text": " stocks"
+    },
+    {
+      "type": "token",
+      "text": " now"
+    },
+    {
+      "type": "token",
+      "text": "?\","
+    },
+    {
+      "type": "token",
+      "text": " we"
+    },
+    {
+      "type": "token",
+      "text": " will"
+    },
+    {
+      "type": "token",
+      "text": " provide"
+    },
+    {
+      "type": "token",
+      "text": " a"
+    },
+    {
+      "type": "token",
+      "text": " summary"
+    },
+    {
+      "type": "token",
+      "text": " of"
+    },
+    {
+      "type": "token",
+      "text": " the"
+    },
+    {
+      "type": "token",
+      "text": " current"
+    },
+    {
+      "type": "token",
+      "text": " market"
+    },
+    {
+      "type": "token",
+      "text": " trends"
+    },
+    {
+      "type": "token",
+      "text": " and"
+    },
+    {
+      "type": "token",
+      "text": " investment"
+    },
+    {
+      "type": "token",
+      "text": " advice"
+    },
+    {
+      "type": "token",
+      "text": " for"
+    },
+    {
+      "type": "token",
+      "text": " tech"
+    },
+    {
+      "type": "token",
+      "text": " stocks"
+    },
+    {
+      "type": "token",
+      "text": ".\n\n"
+    },
+    {
+      "type": "token",
+      "text": "The"
+    },
+    {
+      "type": "token",
+      "text": " current"
+    },
+    {
+      "type": "token",
+      "text": " market"
+    },
+    {
+      "type": "token",
+      "text": " trends"
+    },
+    {
+      "type": "token",
+      "text": " suggest"
+    },
+    {
+      "type": "token",
+      "text": " that"
+    },
+    {
+      "type": "token",
+      "text": " tech"
+    },
+    {
+      "type": "token",
+      "text": " stocks"
+    },
+    {
+      "type": "token",
+      "text": " have"
+    },
+    {
+      "type": "token",
+      "text": " been"
+    },
+    {
+      "type": "token",
+      "text": " experiencing"
+    },
+    {
+      "type": "token",
+      "text": " a"
+    },
+    {
+      "type": "token",
+      "text": " slump"
+    },
+    {
+      "type": "token",
+      "text": " in"
+    },
+    {
+      "type": "token",
+      "text": " "
+    },
+    {
+      "type": "token",
+      "text": "202"
+    },
+    {
+      "type": "token",
+      "text": "6"
+    },
+    {
+      "type": "token",
+      "text": ","
+    },
+    {
+      "type": "token",
+      "text": " with"
+    },
+    {
+      "type": "token",
+      "text": " the"
+    },
+    {
+      "type": "token",
+      "text": " Nas"
+    },
+    {
+      "type": "token",
+      "text": "daq"
+    },
+    {
+      "type": "token",
+      "text": "-"
+    },
+    {
+      "type": "token",
+      "text": "100"
+    },
+    {
+      "type": "token",
+      "text": " falling"
+    },
+    {
+      "type": "token",
+      "text": " over"
+    },
+    {
+      "type": "token",
+      "text": " "
+    },
+    {
+      "type": "token",
+      "text": "9"
+    },
+    {
+      "type": "token",
+      "text": "%"
+    },
+    {
+      "type": "token",
+      "text": " from"
+    },
+    {
+      "type": "token",
+      "text": " its"
+    },
+    {
+      "type": "token",
+      "text": " early"
+    },
+    {
+      "type": "token",
+      "text": " October"
+    },
+    {
+      "type": "token",
+      "text": " peak"
+    },
+    {
+      "type": "token",
+      "text": " amid"
+    },
+    {
+      "type": "token",
+      "text": " concerns"
+    },
+    {
+      "type": "token",
+      "text": " about"
+    },
+    {
+      "type": "token",
+      "text": " AI"
+    },
+    {
+      "type": "token",
+      "text": " infrastructure"
+    },
+    {
+      "type": "token",
+      "text": " spending"
+    },
+    {
+      "type": "token",
+      "text": " and"
+    },
+    {
+      "type": "token",
+      "text": " the"
+    },
+    {
+      "type": "token",
+      "text": " controversy"
+    },
+    {
+      "type": "token",
+      "text": " surrounding"
+    },
+    {
+      "type": "token",
+      "text": " Nvidia"
+    },
+    {
+      "type": "token",
+      "text": "'s"
+    },
+    {
+      "type": "token",
+      "text": " former"
+    },
+    {
+      "type": "token",
+      "text": " CEO"
+    },
+    {
+      "type": "token",
+      "text": " Jensen"
+    },
+    {
+      "type": "token",
+      "text": " Huang"
+    },
+    {
+      "type": "token",
+      "text": "."
+    },
+    {
+      "type": "token",
+      "text": " However"
+    },
+    {
+      "type": "token",
+      "text": ","
+    },
+    {
+      "type": "token",
+      "text": " Goldman"
+    },
+    {
+      "type": "token",
+      "text": " Sachs"
+    },
+    {
+      "type": "token",
+      "text": " strateg"
+    },
+    {
+      "type": "token",
+      "text": "ists"
+    },
+    {
+      "type": "token",
+      "text": " see"
+    },
+    {
+      "type": "token",
+      "text": " technology"
+    },
+    {
+      "type": "token",
+      "text": " stocks"
+    },
+    {
+      "type": "token",
+      "text": ","
+    },
+    {
+      "type": "token",
+      "text": " particularly"
+    },
+    {
+      "type": "token",
+      "text": " artificial"
+    },
+    {
+      "type": "token",
+      "text": " intelligence"
+    },
+    {
+      "type": "token",
+      "text": " ("
+    },
+    {
+      "type": "token",
+      "text": "AI"
+    },
+    {
+      "type": "token",
+      "text": ")"
+    },
+    {
+      "type": "token",
+      "text": " hypers"
+    },
+    {
+      "type": "token",
+      "text": "cal"
+    },
+    {
+      "type": "token",
+      "text": "ers"
+    },
+    {
+      "type": "token",
+      "text": ","
+    },
+    {
+      "type": "token",
+      "text": " as"
+    },
+    {
+      "type": "token",
+      "text": " relatively"
+    },
+    {
+      "type": "token",
+      "text": " defensive"
+    },
+    {
+      "type": "token",
+      "text": " investments"
+    },
+    {
+      "type": "token",
+      "text": " after"
+    },
+    {
+      "type": "token",
+      "text": " a"
+    },
+    {
+      "type": "token",
+      "text": " recent"
+    },
+    {
+      "type": "token",
+      "text": " s"
+    },
+    {
+      "type": "token",
+      "text": "ello"
+    },
+    {
+      "type": "token",
+      "text": "ff"
+    },
+    {
+      "type": "token",
+      "text": " pushed"
+    },
+    {
+      "type": "token",
+      "text": " their"
+    },
+    {
+      "type": "token",
+      "text": " val"
+    },
+    {
+      "type": "token",
+      "text": "uations"
+    },
+    {
+      "type": "token",
+      "text": " below"
+    },
+    {
+      "type": "token",
+      "text": " historical"
+    },
+    {
+      "type": "token",
+      "text": " levels"
+    },
+    {
+      "type": "token",
+      "text": ".\n\n"
+    },
+    {
+      "type": "token",
+      "text": "The"
+    },
+    {
+      "type": "token",
+      "text": " best"
+    },
+    {
+      "type": "token",
+      "text": " AI"
+    },
+    {
+      "type": "token",
+      "text": " stocks"
+    },
+    {
+      "type": "token",
+      "text": " to"
+    },
+    {
+      "type": "token",
+      "text": " buy"
+    },
+    {
+      "type": "token",
+      "text": " in"
+    },
+    {
+      "type": "token",
+      "text": " "
+    },
+    {
+      "type": "token",
+      "text": "202"
+    },
+    {
+      "type": "token",
+      "text": "6"
+    },
+    {
+      "type": "token",
+      "text": " include"
+    },
+    {
+      "type": "token",
+      "text": " Microsoft"
+    },
+    {
+      "type": "token",
+      "text": ","
+    },
+    {
+      "type": "token",
+      "text": " Pal"
+    },
+    {
+      "type": "token",
+      "text": "ant"
+    },
+    {
+      "type": "token",
+      "text": "ir"
+    },
+    {
+      "type": "token",
+      "text": ","
+    },
+    {
+      "type": "token",
+      "text": " Snow"
+    },
+    {
+      "type": "token",
+      "text": "flake"
+    },
+    {
+      "type": "token",
+      "text": ","
+    },
+    {
+      "type": "token",
+      "text": " Salesforce"
+    },
+    {
+      "type": "token",
+      "text": ","
+    },
+    {
+      "type": "token",
+      "text": " and"
+    },
+    {
+      "type": "token",
+      "text": " Crowd"
+    },
+    {
+      "type": "token",
+      "text": "Strike"
+    },
+    {
+      "type": "token",
+      "text": ","
+    },
+    {
+      "type": "token",
+      "text": " according"
+    },
+    {
+      "type": "token",
+      "text": " to"
+    },
+    {
+      "type": "token",
+      "text": " Wall"
+    },
+    {
+      "type": "token",
+      "text": " Street"
+    },
+    {
+      "type": "token",
+      "text": "'s"
+    },
+    {
+      "type": "token",
+      "text": " biggest"
+    },
+    {
+      "type": "token",
+      "text": " tech"
+    },
+    {
+      "type": "token",
+      "text": " bulls"
+    },
+    {
+      "type": "token",
+      "text": "."
+    },
+    {
+      "type": "token",
+      "text": " The"
+    },
+    {
+      "type": "token",
+      "text": " "
+    },
+    {
+      "type": "token",
+      "text": "5"
+    },
+    {
+      "type": "token",
+      "text": " best"
+    },
+    {
+      "type": "token",
+      "text": "-per"
+    },
+    {
+      "type": "token",
+      "text": "forming"
+    },
+    {
+      "type": "token",
+      "text": " AI"
+    },
+    {
+      "type": "token",
+      "text": " stocks"
+    },
+    {
+      "type": "token",
+      "text": " right"
+    },
+    {
+      "type": "token",
+      "text": " now"
+    },
+    {
+      "type": "token",
+      "text": " are"
+    },
+    {
+      "type": "token",
+      "text": " Nvidia"
+    },
+    {
+      "type": "token",
+      "text": ","
+    },
+    {
+      "type": "token",
+      "text": " Microsoft"
+    },
+    {
+      "type": "token",
+      "text": ","
+    },
+    {
+      "type": "token",
+      "text": " Alphabet"
+    },
+    {
+      "type": "token",
+      "text": ","
+    },
+    {
+      "type": "token",
+      "text": " Meta"
+    },
+    {
+      "type": "token",
+      "text": " Platforms"
+    },
+    {
+      "type": "token",
+      "text": ","
+    },
+    {
+      "type": "token",
+      "text": " and"
+    },
+    {
+      "type": "token",
+      "text": " Amazon"
+    },
+    {
+      "type": "token",
+      "text": ","
+    },
+    {
+      "type": "token",
+      "text": " according"
+    },
+    {
+      "type": "token",
+      "text": " to"
+    },
+    {
+      "type": "token",
+      "text": " N"
+    },
+    {
+      "type": "token",
+      "text": "erd"
+    },
+    {
+      "type": "token",
+      "text": "Wallet"
+    },
+    {
+      "type": "token",
+      "text": ".\n\n"
+    },
+    {
+      "type": "token",
+      "text": "G"
+    },
+    {
+      "type": "token",
+      "text": "rowth"
+    },
+    {
+      "type": "token",
+      "text": " stocks"
+    },
+    {
+      "type": "token",
+      "text": " can"
+    },
+    {
+      "type": "token",
+      "text": " be"
+    },
+    {
+      "type": "token",
+      "text": " volatile"
+    },
+    {
+      "type": "token",
+      "text": " and"
+    },
+    {
+      "type": "token",
+      "text": " require"
+    },
+    {
+      "type": "token",
+      "text": " a"
+    },
+    {
+      "type": "token",
+      "text": " long"
+    },
+    {
+      "type": "token",
+      "text": "-term"
+    },
+    {
+      "type": "token",
+      "text": " mindset"
+    },
+    {
+      "type": "token",
+      "text": " and"
+    },
+    {
+      "type": "token",
+      "text": " divers"
+    },
+    {
+      "type": "token",
+      "text": "ification"
+    },
+    {
+      "type": "token",
+      "text": " across"
+    },
+    {
+      "type": "token",
+      "text": " several"
+    },
+    {
+      "type": "token",
+      "text": " leaders"
+    },
+    {
+      "type": "token",
+      "text": " to"
+    },
+    {
+      "type": "token",
+      "text": " balance"
+    },
+    {
+      "type": "token",
+      "text": " growth"
+    },
+    {
+      "type": "token",
+      "text": " potential"
+    },
+    {
+      "type": "token",
+      "text": " with"
+    },
+    {
+      "type": "token",
+      "text": " the"
+    },
+    {
+      "type": "token",
+      "text": " risk"
+    },
+    {
+      "type": "token",
+      "text": " inherent"
+    },
+    {
+      "type": "token",
+      "text": " in"
+    },
+    {
+      "type": "token",
+      "text": " investing"
+    },
+    {
+      "type": "token",
+      "text": " in"
+    },
+    {
+      "type": "token",
+      "text": " a"
+    },
+    {
+      "type": "token",
+      "text": " new"
+    },
+    {
+      "type": "token",
+      "text": " technology"
+    },
+    {
+      "type": "token",
+      "text": "."
+    },
+    {
+      "type": "token",
+      "text": " A"
+    },
+    {
+      "type": "token",
+      "text": " selective"
+    },
+    {
+      "type": "token",
+      "text": " approach"
+    },
+    {
+      "type": "token",
+      "text": " remains"
+    },
+    {
+      "type": "token",
+      "text": " the"
+    },
+    {
+      "type": "token",
+      "text": " cle"
+    },
+    {
+      "type": "token",
+      "text": "arest"
+    },
+    {
+      "type": "token",
+      "text": " message"
+    },
+    {
+      "type": "token",
+      "text": " for"
+    },
+    {
+      "type": "token",
+      "text": " investors"
+    },
+    {
+      "type": "token",
+      "text": " in"
+    },
+    {
+      "type": "token",
+      "text": " technology"
+    },
+    {
+      "type": "token",
+      "text": " stocks"
+    },
+    {
+      "type": "token",
+      "text": ","
+    },
+    {
+      "type": "token",
+      "text": " with"
+    },
+    {
+      "type": "token",
+      "text": " a"
+    },
+    {
+      "type": "token",
+      "text": " focus"
+    },
+    {
+      "type": "token",
+      "text": " on"
+    },
+    {
+      "type": "token",
+      "text": " U"
+    },
+    {
+      "type": "token",
+      "text": ".S"
+    },
+    {
+      "type": "token",
+      "text": "."
+    },
+    {
+      "type": "token",
+      "text": " companies"
+    },
+    {
+      "type": "token",
+      "text": " that"
+    },
+    {
+      "type": "token",
+      "text": " are"
+    },
+    {
+      "type": "token",
+      "text": " likely"
+    },
+    {
+      "type": "token",
+      "text": " to"
+    },
+    {
+      "type": "token",
+      "text": " hit"
+    },
+    {
+      "type": "token",
+      "text": " earnings"
+    },
+    {
+      "type": "token",
+      "text": " targets"
+    },
+    {
+      "type": "token",
+      "text": " and"
+    },
+    {
+      "type": "token",
+      "text": " considering"
+    },
+    {
+      "type": "token",
+      "text": " taking"
+    },
+    {
+      "type": "token",
+      "text": " profits"
+    },
+    {
+      "type": "token",
+      "text": " in"
+    },
+    {
+      "type": "token",
+      "text": " small"
+    },
+    {
+      "type": "token",
+      "text": "-cap"
+    },
+    {
+      "type": "token",
+      "text": ","
+    },
+    {
+      "type": "token",
+      "text": " micro"
+    },
+    {
+      "type": "token",
+      "text": "-cap"
+    },
+    {
+      "type": "token",
+      "text": ","
+    },
+    {
+      "type": "token",
+      "text": " and"
+    },
+    {
+      "type": "token",
+      "text": " speculative"
+    },
+    {
+      "type": "token",
+      "text": " equ"
+    },
+    {
+      "type": "token",
+      "text": "ities"
+    },
+    {
+      "type": "token",
+      "text": ".\n\n"
+    },
+    {
+      "type": "token",
+      "text": "Based"
+    },
+    {
+      "type": "token",
+      "text": " on"
+    },
+    {
+      "type": "token",
+      "text": " these"
+    },
+    {
+      "type": "token",
+      "text": " findings"
+    },
+    {
+      "type": "token",
+      "text": ","
+    },
+    {
+      "type": "token",
+      "text": " it"
+    },
+    {
+      "type": "token",
+      "text": " seems"
+    },
+    {
+      "type": "token",
+      "text": " that"
+    },
+    {
+      "type": "token",
+      "text": " the"
+    },
+    {
+      "type": "token",
+      "text": " current"
+    },
+    {
+      "type": "token",
+      "text": " market"
+    },
+    {
+      "type": "token",
+      "text": " trends"
+    },
+    {
+      "type": "token",
+      "text": " and"
+    },
+    {
+      "type": "token",
+      "text": " investment"
+    },
+    {
+      "type": "token",
+      "text": " advice"
+    },
+    {
+      "type": "token",
+      "text": " for"
+    },
+    {
+      "type": "token",
+      "text": " tech"
+    },
+    {
+      "type": "token",
+      "text": " stocks"
+    },
+    {
+      "type": "token",
+      "text": " are"
+    },
+    {
+      "type": "token",
+      "text": " mixed"
+    },
+    {
+      "type": "token",
+      "text": "."
+    },
+    {
+      "type": "token",
+      "text": " While"
+    },
+    {
+      "type": "token",
+      "text": " some"
+    },
+    {
+      "type": "token",
+      "text": " experts"
+    },
+    {
+      "type": "token",
+      "text": " see"
+    },
+    {
+      "type": "token",
+      "text": " technology"
+    },
+    {
+      "type": "token",
+      "text": " stocks"
+    },
+    {
+      "type": "token",
+      "text": " as"
+    },
+    {
+      "type": "token",
+      "text": " relatively"
+    },
+    {
+      "type": "token",
+      "text": " defensive"
+    },
+    {
+      "type": "token",
+      "text": " investments"
+    },
+    {
+      "type": "token",
+      "text": ","
+    },
+    {
+      "type": "token",
+      "text": " others"
+    },
+    {
+      "type": "token",
+      "text": " caution"
+    },
+    {
+      "type": "token",
+      "text": " against"
+    },
+    {
+      "type": "token",
+      "text": " investing"
+    },
+    {
+      "type": "token",
+      "text": " in"
+    },
+    {
+      "type": "token",
+      "text": " growth"
+    },
+    {
+      "type": "token",
+      "text": " stocks"
+    },
+    {
+      "type": "token",
+      "text": " due"
+    },
+    {
+      "type": "token",
+      "text": " to"
+    },
+    {
+      "type": "token",
+      "text": " their"
+    },
+    {
+      "type": "token",
+      "text": " volatility"
+    },
+    {
+      "type": "token",
+      "text": "."
+    },
+    {
+      "type": "token",
+      "text": " We"
+    },
+    {
+      "type": "token",
+      "text": " recommend"
+    },
+    {
+      "type": "token",
+      "text": " a"
+    },
+    {
+      "type": "token",
+      "text": " selective"
+    },
+    {
+      "type": "token",
+      "text": " approach"
+    },
+    {
+      "type": "token",
+      "text": " to"
+    },
+    {
+      "type": "token",
+      "text": " investing"
+    },
+    {
+      "type": "token",
+      "text": " in"
+    },
+    {
+      "type": "token",
+      "text": " technology"
+    },
+    {
+      "type": "token",
+      "text": " stocks"
+    },
+    {
+      "type": "token",
+      "text": ","
+    },
+    {
+      "type": "token",
+      "text": " focusing"
+    },
+    {
+      "type": "token",
+      "text": " on"
+    },
+    {
+      "type": "token",
+      "text": " U"
+    },
+    {
+      "type": "token",
+      "text": ".S"
+    },
+    {
+      "type": "token",
+      "text": "."
+    },
+    {
+      "type": "token",
+      "text": " companies"
+    },
+    {
+      "type": "token",
+      "text": " that"
+    },
+    {
+      "type": "token",
+      "text": " are"
+    },
+    {
+      "type": "token",
+      "text": " likely"
+    },
+    {
+      "type": "token",
+      "text": " to"
+    },
+    {
+      "type": "token",
+      "text": " hit"
+    },
+    {
+      "type": "token",
+      "text": " earnings"
+    },
+    {
+      "type": "token",
+      "text": " targets"
+    },
+    {
+      "type": "token",
+      "text": ".\n\n"
+    },
+    {
+      "type": "token",
+      "text": "Sources"
+    },
+    {
+      "type": "token",
+      "text": ":\n"
+    },
+    {
+      "type": "token",
+      "text": "1"
+    },
+    {
+      "type": "token",
+      "text": "."
+    },
+    {
+      "type": "token",
+      "text": " ["
+    },
+    {
+      "type": "token",
+      "text": "Gold"
+    },
+    {
+      "type": "token",
+      "text": "man"
+    },
+    {
+      "type": "token",
+      "text": " Sachs"
+    },
+    {
+      "type": "token",
+      "text": " Report"
+    },
+    {
+      "type": "token",
+      "text": "edly"
+    },
+    {
+      "type": "token",
+      "text": " Se"
+    },
+    {
+      "type": "token",
+      "text": "es"
+    },
+    {
+      "type": "token",
+      "text": " AI"
+    },
+    {
+      "type": "token",
+      "text": " Hyp"
+    },
+    {
+      "type": "token",
+      "text": "ers"
+    },
+    {
+      "type": "token",
+      "text": "cal"
+    },
+    {
+      "type": "token",
+      "text": "ers"
+    },
+    {
+      "type": "token",
+      "text": " As"
+    },
+    {
+      "type": "token",
+      "text": " ‘"
+    },
+    {
+      "type": "token",
+      "text": "Rel"
+    },
+    {
+      "type": "token",
+      "text": "atively"
+    },
+    {
+      "type": "token",
+      "text": " Defensive"
+    },
+    {
+      "type": "token",
+      "text": "’"
+    },
+    {
+      "type": "token",
+      "text": " After"
+    },
+    {
+      "type": "token",
+      "text": " Tech"
+    },
+    {
+      "type": "token",
+      "text": " S"
+    },
+    {
+      "type": "token",
+      "text": "ello"
+    },
+    {
+      "type": "token",
+      "text": "ff"
+    },
+    {
+      "type": "token",
+      "text": " —"
+    },
+    {
+      "type": "token",
+      "text": " Fore"
+    },
+    {
+      "type": "token",
+      "text": "casts"
+    },
+    {
+      "type": "token",
+      "text": " "
+    },
+    {
+      "type": "token",
+      "text": "14"
+    },
+    {
+      "type": "token",
+      "text": "%"
+    },
+    {
+      "type": "token",
+      "text": " S"
+    },
+    {
+      "type": "token",
+      "text": "&P"
+    },
+    {
+      "type": "token",
+      "text": " "
+    },
+    {
+      "type": "token",
+      "text": "500"
+    },
+    {
+      "type": "token",
+      "text": " Ups"
+    },
+    {
+      "type": "token",
+      "text": "ide"
+    },
+    {
+      "type": "token",
+      "text": " |"
+    },
+    {
+      "type": "token",
+      "text": " https"
+    },
+    {
+      "type": "token",
+      "text": "://"
+    },
+    {
+      "type": "token",
+      "text": "finance"
+    },
+    {
+      "type": "token",
+      "text": ".yahoo"
+    },
+    {
+      "type": "token",
+      "text": ".com"
+    },
+    {
+      "type": "token",
+      "text": "/mark"
+    },
+    {
+      "type": "token",
+      "text": "ets"
+    },
+    {
+      "type": "token",
+      "text": "/"
+    },
+    {
+      "type": "token",
+      "text": "stocks"
+    },
+    {
+      "type": "token",
+      "text": "/articles"
+    },
+    {
+      "type": "token",
+      "text": "/g"
+    },
+    {
+      "type": "token",
+      "text": "old"
+    },
+    {
+      "type": "token",
+      "text": "man"
+    },
+    {
+      "type": "token",
+      "text": "-s"
+    },
+    {
+      "type": "token",
+      "text": "achs"
+    },
+    {
+      "type": "token",
+      "text": "-reported"
+    },
+    {
+      "type": "token",
+      "text": "ly"
+    },
+    {
+      "type": "token",
+      "text": "-se"
+    },
+    {
+      "type": "token",
+      "text": "es"
+    },
+    {
+      "type": "token",
+      "text": "-"
+    },
+    {
+      "type": "token",
+      "text": "ai"
+    },
+    {
+      "type": "token",
+      "text": "-"
+    },
+    {
+      "type": "token",
+      "text": "115"
+    },
+    {
+      "type": "token",
+      "text": "231"
+    },
+    {
+      "type": "token",
+      "text": "520"
+    },
+    {
+      "type": "token",
+      "text": ".html"
+    },
+    {
+      "type": "token",
+      "text": "]("
+    },
+    {
+      "type": "token",
+      "text": "https"
+    },
+    {
+      "type": "token",
+      "text": "://"
+    },
+    {
+      "type": "token",
+      "text": "finance"
+    },
+    {
+      "type": "token",
+      "text": ".yahoo"
+    },
+    {
+      "type": "token",
+      "text": ".com"
+    },
+    {
+      "type": "token",
+      "text": "/mark"
+    },
+    {
+      "type": "token",
+      "text": "ets"
+    },
+    {
+      "type": "token",
+      "text": "/"
+    },
+    {
+      "type": "token",
+      "text": "stocks"
+    },
+    {
+      "type": "token",
+      "text": "/articles"
+    },
+    {
+      "type": "token",
+      "text": "/g"
+    },
+    {
+      "type": "token",
+      "text": "old"
+    },
+    {
+      "type": "token",
+      "text": "man"
+    },
+    {
+      "type": "token",
+      "text": "-s"
+    },
+    {
+      "type": "token",
+      "text": "achs"
+    },
+    {
+      "type": "token",
+      "text": "-reported"
+    },
+    {
+      "type": "token",
+      "text": "ly"
+    },
+    {
+      "type": "token",
+      "text": "-se"
+    },
+    {
+      "type": "token",
+      "text": "es"
+    },
+    {
+      "type": "token",
+      "text": "-"
+    },
+    {
+      "type": "token",
+      "text": "ai"
+    },
+    {
+      "type": "token",
+      "text": "-"
+    },
+    {
+      "type": "token",
+      "text": "115"
+    },
+    {
+      "type": "token",
+      "text": "231"
+    },
+    {
+      "type": "token",
+      "text": "520"
+    },
+    {
+      "type": "token",
+      "text": ".html"
+    },
+    {
+      "type": "token",
+      "text": ")\n"
+    },
+    {
+      "type": "token",
+      "text": "2"
+    },
+    {
+      "type": "token",
+      "text": "."
+    },
+    {
+      "type": "token",
+      "text": " ["
+    },
+    {
+      "type": "token",
+      "text": "3"
+    },
+    {
+      "type": "token",
+      "text": " signs"
+    },
+    {
+      "type": "token",
+      "text": " AI"
+    },
+    {
+      "type": "token",
+      "text": " stocks"
+    },
+    {
+      "type": "token",
+      "text": " may"
+    },
+    {
+      "type": "token",
+      "text": " be"
+    },
+    {
+      "type": "token",
+      "text": " a"
+    },
+    {
+      "type": "token",
+      "text": " great"
+    },
+    {
+      "type": "token",
+      "text": " trade"
+    },
+    {
+      "type": "token",
+      "text": " again"
+    },
+    {
+      "type": "token",
+      "text": " |"
+    },
+    {
+      "type": "token",
+      "text": " https"
+    },
+    {
+      "type": "token",
+      "text": "://"
+    },
+    {
+      "type": "token",
+      "text": "finance"
+    },
+    {
+      "type": "token",
+      "text": ".yahoo"
+    },
+    {
+      "type": "token",
+      "text": ".com"
+    },
+    {
+      "type": "token",
+      "text": "/mark"
+    },
+    {
+      "type": "token",
+      "text": "ets"
+    },
+    {
+      "type": "token",
+      "text": "/article"
+    },
+    {
+      "type": "token",
+      "text": "/"
+    },
+    {
+      "type": "token",
+      "text": "3"
+    },
+    {
+      "type": "token",
+      "text": "-sign"
+    },
+    {
+      "type": "token",
+      "text": "s"
+    },
+    {
+      "type": "token",
+      "text": "-"
+    },
+    {
+      "type": "token",
+      "text": "ai"
+    },
+    {
+      "type": "token",
+      "text": "-st"
+    },
+    {
+      "type": "token",
+      "text": "ocks"
+    },
+    {
+      "type": "token",
+      "text": "-m"
+    },
+    {
+      "type": "token",
+      "text": "ay"
+    },
+    {
+      "type": "token",
+      "text": "-be"
+    },
+    {
+      "type": "token",
+      "text": "-a"
+    },
+    {
+      "type": "token",
+      "text": "-g"
+    },
+    {
+      "type": "token",
+      "text": "reat"
+    },
+    {
+      "type": "token",
+      "text": "-trade"
+    },
+    {
+      "type": "token",
+      "text": "-"
+    },
+    {
+      "type": "token",
+      "text": "again"
+    },
+    {
+      "type": "token",
+      "text": "-"
+    },
+    {
+      "type": "token",
+      "text": "130"
+    },
+    {
+      "type": "token",
+      "text": "410"
+    },
+    {
+      "type": "token",
+      "text": "381"
+    },
+    {
+      "type": "token",
+      "text": ".html"
+    },
+    {
+      "type": "token",
+      "text": "]("
+    },
+    {
+      "type": "token",
+      "text": "https"
+    },
+    {
+      "type": "token",
+      "text": "://"
+    },
+    {
+      "type": "token",
+      "text": "finance"
+    },
+    {
+      "type": "token",
+      "text": ".yahoo"
+    },
+    {
+      "type": "token",
+      "text": ".com"
+    },
+    {
+      "type": "token",
+      "text": "/mark"
+    },
+    {
+      "type": "token",
+      "text": "ets"
+    },
+    {
+      "type": "token",
+      "text": "/article"
+    },
+    {
+      "type": "token",
+      "text": "/"
+    },
+    {
+      "type": "token",
+      "text": "3"
+    },
+    {
+      "type": "token",
+      "text": "-sign"
+    },
+    {
+      "type": "token",
+      "text": "s"
+    },
+    {
+      "type": "token",
+      "text": "-"
+    },
+    {
+      "type": "token",
+      "text": "ai"
+    },
+    {
+      "type": "token",
+      "text": "-st"
+    },
+    {
+      "type": "token",
+      "text": "ocks"
+    },
+    {
+      "type": "token",
+      "text": "-m"
+    },
+    {
+      "type": "token",
+      "text": "ay"
+    },
+    {
+      "type": "token",
+      "text": "-be"
+    },
+    {
+      "type": "token",
+      "text": "-a"
+    },
+    {
+      "type": "token",
+      "text": "-g"
+    },
+    {
+      "type": "token",
+      "text": "reat"
+    },
+    {
+      "type": "token",
+      "text": "-trade"
+    },
+    {
+      "type": "token",
+      "text": "-"
+    },
+    {
+      "type": "token",
+      "text": "again"
+    },
+    {
+      "type": "token",
+      "text": "-"
+    },
+    {
+      "type": "token",
+      "text": "130"
+    },
+    {
+      "type": "token",
+      "text": "410"
+    },
+    {
+      "type": "token",
+      "text": "381"
+    },
+    {
+      "type": "token",
+      "text": ".html"
+    },
+    {
+      "type": "token",
+      "text": ")\n"
+    },
+    {
+      "type": "token",
+      "text": "3"
+    },
+    {
+      "type": "token",
+      "text": "."
+    },
+    {
+      "type": "token",
+      "text": " ["
+    },
+    {
+      "type": "token",
+      "text": "Invest"
+    },
+    {
+      "type": "token",
+      "text": "ing"
+    },
+    {
+      "type": "token",
+      "text": " in"
+    },
+    {
+      "type": "token",
+      "text": " Tech"
+    },
+    {
+      "type": "token",
+      "text": " Stocks"
+    },
+    {
+      "type": "token",
+      "text": " |"
+    },
+    {
+      "type": "token",
+      "text": " U"
+    },
+    {
+      "type": "token",
+      "text": ".S"
+    },
+    {
+      "type": "token",
+      "text": "."
+    },
+    {
+      "type": "token",
+      "text": " Bank"
+    },
+    {
+      "type": "token",
+      "text": " |"
+    },
+    {
+      "type": "token",
+      "text": " https"
+    },
+    {
+      "type": "token",
+      "text": "://"
+    },
+    {
+      "type": "token",
+      "text": "www"
+    },
+    {
+      "type": "token",
+      "text": ".us"
+    },
+    {
+      "type": "token",
+      "text": "bank"
+    },
+    {
+      "type": "token",
+      "text": ".com"
+    },
+    {
+      "type": "token",
+      "text": "/in"
+    },
+    {
+      "type": "token",
+      "text": "vest"
+    },
+    {
+      "type": "token",
+      "text": "ing"
+    },
+    {
+      "type": "token",
+      "text": "/"
+    },
+    {
+      "type": "token",
+      "text": "financial"
+    },
+    {
+      "type": "token",
+      "text": "-p"
+    },
+    {
+      "type": "token",
+      "text": "ers"
+    },
+    {
+      "type": "token",
+      "text": "pectives"
+    },
+    {
+      "type": "token",
+      "text": "/m"
+    },
+    {
+      "type": "token",
+      "text": "arket"
+    },
+    {
+      "type": "token",
+      "text": "-news"
+    },
+    {
+      "type": "token",
+      "text": "/in"
+    },
+    {
+      "type": "token",
+      "text": "vest"
+    },
+    {
+      "type": "token",
+      "text": "ing"
+    },
+    {
+      "type": "token",
+      "text": "-in"
+    },
+    {
+      "type": "token",
+      "text": "-tech"
+    },
+    {
+      "type": "token",
+      "text": "-st"
+    },
+    {
+      "type": "token",
+      "text": "ocks"
+    },
+    {
+      "type": "token",
+      "text": ".html"
+    },
+    {
+      "type": "token",
+      "text": "]("
+    },
+    {
+      "type": "token",
+      "text": "https"
+    },
+    {
+      "type": "token",
+      "text": "://"
+    },
+    {
+      "type": "token",
+      "text": "www"
+    },
+    {
+      "type": "token",
+      "text": ".us"
+    },
+    {
+      "type": "token",
+      "text": "bank"
+    },
+    {
+      "type": "token",
+      "text": ".com"
+    },
+    {
+      "type": "token",
+      "text": "/in"
+    },
+    {
+      "type": "token",
+      "text": "vest"
+    },
+    {
+      "type": "token",
+      "text": "ing"
+    },
+    {
+      "type": "token",
+      "text": "/"
+    },
+    {
+      "type": "token",
+      "text": "financial"
+    },
+    {
+      "type": "token",
+      "text": "-p"
+    },
+    {
+      "type": "token",
+      "text": "ers"
+    },
+    {
+      "type": "token",
+      "text": "pectives"
+    },
+    {
+      "type": "token",
+      "text": "/m"
+    },
+    {
+      "type": "token",
+      "text": "arket"
+    },
+    {
+      "type": "token",
+      "text": "-news"
+    },
+    {
+      "type": "token",
+      "text": "/in"
+    },
+    {
+      "type": "token",
+      "text": "vest"
+    },
+    {
+      "type": "token",
+      "text": "ing"
+    },
+    {
+      "type": "token",
+      "text": "-in"
+    },
+    {
+      "type": "token",
+      "text": "-tech"
+    },
+    {
+      "type": "token",
+      "text": "-st"
+    },
+    {
+      "type": "token",
+      "text": "ocks"
+    },
+    {
+      "type": "token",
+      "text": ".html"
+    },
+    {
+      "type": "token",
+      "text": ")\n"
+    },
+    {
+      "type": "token",
+      "text": "4"
+    },
+    {
+      "type": "token",
+      "text": "."
+    },
+    {
+      "type": "token",
+      "text": " ["
+    },
+    {
+      "type": "token",
+      "text": "A"
+    },
+    {
+      "type": "token",
+      "text": " lot"
+    },
+    {
+      "type": "token",
+      "text": " changed"
+    },
+    {
+      "type": "token",
+      "text": " in"
+    },
+    {
+      "type": "token",
+      "text": " stock"
+    },
+    {
+      "type": "token",
+      "text": " market"
+    },
+    {
+      "type": "token",
+      "text": " in"
+    },
+    {
+      "type": "token",
+      "text": " just"
+    },
+    {
+      "type": "token",
+      "text": " a"
+    },
+    {
+      "type": "token",
+      "text": " few"
+    },
+    {
+      "type": "token",
+      "text": " months"
+    },
+    {
+      "type": "token",
+      "text": "."
+    },
+    {
+      "type": "token",
+      "text": " The"
+    },
+    {
+      "type": "token",
+      "text": " single"
+    },
+    {
+      "type": "token",
+      "text": " biggest"
+    },
+    {
+      "type": "token",
+      "text": " risk"
+    },
+    {
+      "type": "token",
+      "text": " did"
+    },
+    {
+      "type": "token",
+      "text": " not"
+    },
+    {
+      "type": "token",
+      "text": " |"
+    },
+    {
+      "type": "token",
+      "text": " https"
+    },
+    {
+      "type": "token",
+      "text": "://"
+    },
+    {
+      "type": "token",
+      "text": "www"
+    },
+    {
+      "type": "token",
+      "text": ".cn"
+    },
+    {
+      "type": "token",
+      "text": "bc"
+    },
+    {
+      "type": "token",
+      "text": ".com"
+    },
+    {
+      "type": "token",
+      "text": "/"
+    },
+    {
+      "type": "token",
+      "text": "202"
+    },
+    {
+      "type": "token",
+      "text": "6"
+    },
+    {
+      "type": "token",
+      "text": "/"
+    },
+    {
+      "type": "token",
+      "text": "10"
+    },
+    {
+      "type": "token",
+      "text": "/"
+    },
+    {
+      "type": "token",
+      "text": "15"
+    },
+    {
+      "type": "token",
+      "text": "/s"
+    },
+    {
+      "type": "token",
+      "text": "px"
+    },
+    {
+      "type": "token",
+      "text": "-sp"
+    },
+    {
+      "type": "token",
+      "text": "500"
+    },
+    {
+      "type": "token",
+      "text": "-tech"
+    },
+    {
+      "type": "token",
+      "text": "-st"
+    },
+    {
+      "type": "token",
+      "text": "ocks"
+    },
+    {
+      "type": "token",
+      "text": "-in"
+    },
+    {
+      "type": "token",
+      "text": "vest"
+    },
+    {
+      "type": "token",
+      "text": ".html"
+    },
+    {
+      "type": "token",
+      "text": "]("
+    },
+    {
+      "type": "token",
+      "text": "https"
+    },
+    {
+      "type": "token",
+      "text": "://"
+    },
+    {
+      "type": "token",
+      "text": "www"
+    },
+    {
+      "type": "token",
+      "text": ".cn"
+    },
+    {
+      "type": "token",
+      "text": "bc"
+    },
+    {
+      "type": "token",
+      "text": ".com"
+    },
+    {
+      "type": "token",
+      "text": "/"
+    },
+    {
+      "type": "token",
+      "text": "202"
+    },
+    {
+      "type": "token",
+      "text": "6"
+    },
+    {
+      "type": "token",
+      "text": "/"
+    },
+    {
+      "type": "token",
+      "text": "10"
+    },
+    {
+      "type": "token",
+      "text": "/"
+    },
+    {
+      "type": "token",
+      "text": "15"
+    },
+    {
+      "type": "token",
+      "text": "/s"
+    },
+    {
+      "type": "token",
+      "text": "px"
+    },
+    {
+      "type": "token",
+      "text": "-sp"
+    },
+    {
+      "type": "token",
+      "text": "500"
+    },
+    {
+      "type": "token",
+      "text": "-tech"
+    },
+    {
+      "type": "token",
+      "text": "-st"
+    },
+    {
+      "type": "token",
+      "text": "ocks"
+    },
+    {
+      "type": "token",
+      "text": "-in"
+    },
+    {
+      "type": "token",
+      "text": "vest"
+    },
+    {
+      "type": "token",
+      "text": ".html"
+    },
+    {
+      "type": "token",
+      "text": ")\n"
+    },
+    {
+      "type": "token",
+      "text": "5"
+    },
+    {
+      "type": "token",
+      "text": "."
+    },
+    {
+      "type": "token",
+      "text": " ["
+    },
+    {
+      "type": "token",
+      "text": "If"
+    },
+    {
+      "type": "token",
+      "text": " the"
+    },
+    {
+      "type": "token",
+      "text": " Tech"
+    },
+    {
+      "type": "token",
+      "text": " Stock"
+    },
+    {
+      "type": "token",
+      "text": " Sell"
+    },
+    {
+      "type": "token",
+      "text": "-"
+    },
+    {
+      "type": "token",
+      "text": "Off"
+    },
+    {
+      "type": "token",
+      "text": " Turns"
+    },
+    {
+      "type": "token",
+      "text": " Into"
+    },
+    {
+      "type": "token",
+      "text": " a"
+    },
+    {
+      "type": "token",
+      "text": " Bear"
+    },
+    {
+      "type": "token",
+      "text": " Market"
+    },
+    {
+      "type": "token",
+      "text": ","
+    },
+    {
+      "type": "token",
+      "text": " History"
+    },
+    {
+      "type": "token",
+      "text": " Says"
+    },
+    {
+      "type": "token",
+      "text": " This"
+    },
+    {
+      "type": "token",
+      "text": " Investing"
+    },
+    {
+      "type": "token",
+      "text": " Strategy"
+    },
+    {
+      "type": "token",
+      "text": " Has"
+    },
+    {
+      "type": "token",
+      "text": " Never"
+    },
+    {
+      "type": "token",
+      "text": " Failed"
+    },
+    {
+      "type": "token",
+      "text": " |"
+    },
+    {
+      "type": "token",
+      "text": " https"
+    },
+    {
+      "type": "token",
+      "text": "://"
+    },
+    {
+      "type": "token",
+      "text": "finance"
+    },
+    {
+      "type": "token",
+      "text": ".yahoo"
+    },
+    {
+      "type": "token",
+      "text": ".com"
+    },
+    {
+      "type": "token",
+      "text": "/mark"
+    },
+    {
+      "type": "token",
+      "text": "ets"
+    },
+    {
+      "type": "token",
+      "text": "/"
+    },
+    {
+      "type": "token",
+      "text": "stocks"
+    },
+    {
+      "type": "token",
+      "text": "/articles"
+    },
+    {
+      "type": "token",
+      "text": "/"
+    },
+    {
+      "type": "token",
+      "text": "tech"
+    },
+    {
+      "type": "token",
+      "text": "-stock"
+    },
+    {
+      "type": "token",
+      "text": "-s"
+    },
+    {
+      "type": "token",
+      "text": "ell"
+    },
+    {
+      "type": "token",
+      "text": "-off"
+    },
+    {
+      "type": "token",
+      "text": "-turn"
+    },
+    {
+      "type": "token",
+      "text": "s"
+    },
+    {
+      "type": "token",
+      "text": "-"
+    },
+    {
+      "type": "token",
+      "text": "042"
+    },
+    {
+      "type": "token",
+      "text": "000"
+    },
+    {
+      "type": "token",
+      "text": "090"
+    },
+    {
+      "type": "token",
+      "text": ".html"
+    },
+    {
+      "type": "token",
+      "text": "]("
+    },
+    {
+      "type": "token",
+      "text": "https"
+    },
+    {
+      "type": "token",
+      "text": "://"
+    },
+    {
+      "type": "token",
+      "text": "finance"
+    },
+    {
+      "type": "token",
+      "text": ".yahoo"
+    },
+    {
+      "type": "token",
+      "text": ".com"
+    },
+    {
+      "type": "token",
+      "text": "/mark"
+    },
+    {
+      "type": "token",
+      "text": "ets"
+    },
+    {
+      "type": "token",
+      "text": "/"
+    },
+    {
+      "type": "token",
+      "text": "stocks"
+    },
+    {
+      "type": "token",
+      "text": "/articles"
+    },
+    {
+      "type": "token",
+      "text": "/"
+    },
+    {
+      "type": "token",
+      "text": "tech"
+    },
+    {
+      "type": "token",
+      "text": "-stock"
+    },
+    {
+      "type": "token",
+      "text": "-s"
+    },
+    {
+      "type": "token",
+      "text": "ell"
+    },
+    {
+      "type": "token",
+      "text": "-off"
+    },
+    {
+      "type": "token",
+      "text": "-turn"
+    },
+    {
+      "type": "token",
+      "text": "s"
+    },
+    {
+      "type": "token",
+      "text": "-"
+    },
+    {
+      "type": "token",
+      "text": "042"
+    },
+    {
+      "type": "token",
+      "text": "000"
+    },
+    {
+      "type": "token",
+      "text": "090"
+    },
+    {
+      "type": "token",
+      "text": ".html"
+    },
+    {
+      "type": "token",
+      "text": ")\n"
+    },
+    {
+      "type": "token",
+      "text": "6"
+    },
+    {
+      "type": "token",
+      "text": "."
+    },
+    {
+      "type": "token",
+      "text": " ["
+    },
+    {
+      "type": "token",
+      "text": "Best"
+    },
+    {
+      "type": "token",
+      "text": " AI"
+    },
+    {
+      "type": "token",
+      "text": " Stocks"
+    },
+    {
+      "type": "token",
+      "text": " to"
+    },
+    {
+      "type": "token",
+      "text": " Buy"
+    },
+    {
+      "type": "token",
+      "text": " in"
+    },
+    {
+      "type": "token",
+      "text": " "
+    },
+    {
+      "type": "token",
+      "text": "202"
+    },
+    {
+      "type": "token",
+      "text": "6"
+    },
+    {
+      "type": "token",
+      "text": ":"
+    },
+    {
+      "type": "token",
+      "text": " "
+    },
+    {
+      "type": "token",
+      "text": "10"
+    },
+    {
+      "type": "token",
+      "text": " Top"
+    },
+    {
+      "type": "token",
+      "text": " Picks"
+    },
+    {
+      "type": "token",
+      "text": " &"
+    },
+    {
+      "type": "token",
+      "text": " How"
+    },
+    {
+      "type": "token",
+      "text": " to"
+    },
+    {
+      "type": "token",
+      "text": " Invest"
+    },
+    {
+      "type": "token",
+      "text": " |"
+    },
+    {
+      "type": "token",
+      "text": " The"
+    },
+    {
+      "type": "token",
+      "text": " Mot"
+    },
+    {
+      "type": "token",
+      "text": "ley"
+    },
+    {
+      "type": "token",
+      "text": " Fool"
+    },
+    {
+      "type": "token",
+      "text": " |"
+    },
+    {
+      "type": "token",
+      "text": " https"
+    },
+    {
+      "type": "token",
+      "text": "://"
+    },
+    {
+      "type": "token",
+      "text": "www"
+    },
+    {
+      "type": "token",
+      "text": "."
+    },
+    {
+      "type": "token",
+      "text": "fo"
+    },
+    {
+      "type": "token",
+      "text": "ol"
+    },
+    {
+      "type": "token",
+      "text": ".com"
+    },
+    {
+      "type": "token",
+      "text": "/in"
+    },
+    {
+      "type": "token",
+      "text": "vest"
+    },
+    {
+      "type": "token",
+      "text": "ing"
+    },
+    {
+      "type": "token",
+      "text": "/"
+    },
+    {
+      "type": "token",
+      "text": "stock"
+    },
+    {
+      "type": "token",
+      "text": "-market"
+    },
+    {
+      "type": "token",
+      "text": "/m"
+    },
+    {
+      "type": "token",
+      "text": "arket"
+    },
+    {
+      "type": "token",
+      "text": "-se"
+    },
+    {
+      "type": "token",
+      "text": "ctors"
+    },
+    {
+      "type": "token",
+      "text": "/in"
+    },
+    {
+      "type": "token",
+      "text": "formation"
+    },
+    {
+      "type": "token",
+      "text": "-"
+    },
+    {
+      "type": "token",
+      "text": "technology"
+    },
+    {
+      "type": "token",
+      "text": "/"
+    },
+    {
+      "type": "token",
+      "text": "ai"
+    },
+    {
+      "type": "token",
+      "text": "-st"
+    },
+    {
+      "type": "token",
+      "text": "ocks"
+    },
+    {
+      "type": "token",
+      "text": "]("
+    },
+    {
+      "type": "token",
+      "text": "https"
+    },
+    {
+      "type": "token",
+      "text": "://"
+    },
+    {
+      "type": "token",
+      "text": "www"
+    },
+    {
+      "type": "token",
+      "text": "."
+    },
+    {
+      "type": "token",
+      "text": "fo"
+    },
+    {
+      "type": "token",
+      "text": "ol"
+    },
+    {
+      "type": "token",
+      "text": ".com"
+    },
+    {
+      "type": "token",
+      "text": "/in"
+    },
+    {
+      "type": "token",
+      "text": "vest"
+    },
+    {
+      "type": "token",
+      "text": "ing"
+    },
+    {
+      "type": "token",
+      "text": "/"
+    },
+    {
+      "type": "token",
+      "text": "stock"
+    },
+    {
+      "type": "token",
+      "text": "-market"
+    },
+    {
+      "type": "token",
+      "text": "/m"
+    },
+    {
+      "type": "token",
+      "text": "arket"
+    },
+    {
+      "type": "token",
+      "text": "-se"
+    },
+    {
+      "type": "token",
+      "text": "ctors"
+    },
+    {
+      "type": "token",
+      "text": "/in"
+    },
+    {
+      "type": "token",
+      "text": "formation"
+    },
+    {
+      "type": "token",
+      "text": "-"
+    },
+    {
+      "type": "token",
+      "text": "technology"
+    },
+    {
+      "type": "token",
+      "text": "/"
+    },
+    {
+      "type": "token",
+      "text": "ai"
+    },
+    {
+      "type": "token",
+      "text": "-st"
+    },
+    {
+      "type": "token",
+      "text": "ocks"
+    },
+    {
+      "type": "token",
+      "text": ")\n"
+    },
+    {
+      "type": "token",
+      "text": "7"
+    },
+    {
+      "type": "token",
+      "text": "."
+    },
+    {
+      "type": "token",
+      "text": " ["
+    },
+    {
+      "type": "token",
+      "text": "The"
+    },
+    {
+      "type": "token",
+      "text": " "
+    },
+    {
+      "type": "token",
+      "text": "5"
+    },
+    {
+      "type": "token",
+      "text": " Best"
+    },
+    {
+      "type": "token",
+      "text": "-"
+    },
+    {
+      "type": "token",
+      "text": "Perform"
+    },
+    {
+      "type": "token",
+      "text": "ing"
+    },
+    {
+      "type": "token",
+      "text": " AI"
+    },
+    {
+      "type": "token",
+      "text": " Stocks"
+    },
+    {
+      "type": "token",
+      "text": " Right"
+    },
+    {
+      "type": "token",
+      "text": " Now"
+    },
+    {
+      "type": "token",
+      "text": " -"
+    },
+    {
+      "type": "token",
+      "text": " N"
+    },
+    {
+      "type": "token",
+      "text": "erd"
+    },
+    {
+      "type": "token",
+      "text": "Wallet"
+    },
+    {
+      "type": "token",
+      "text": " |"
+    },
+    {
+      "type": "token",
+      "text": " https"
+    },
+    {
+      "type": "token",
+      "text": "://"
+    },
+    {
+      "type": "token",
+      "text": "www"
+    },
+    {
+      "type": "token",
+      "text": "."
+    },
+    {
+      "type": "token",
+      "text": "ner"
+    },
+    {
+      "type": "token",
+      "text": "dw"
+    },
+    {
+      "type": "token",
+      "text": "allet"
+    },
+    {
+      "type": "token",
+      "text": ".com"
+    },
+    {
+      "type": "token",
+      "text": "/in"
+    },
+    {
+      "type": "token",
+      "text": "vest"
+    },
+    {
+      "type": "token",
+      "text": "ing"
+    },
+    {
+      "type": "token",
+      "text": "/"
+    },
+    {
+      "type": "token",
+      "text": "learn"
+    },
+    {
+      "type": "token",
+      "text": "/"
+    },
+    {
+      "type": "token",
+      "text": "ai"
+    },
+    {
+      "type": "token",
+      "text": "-st"
+    },
+    {
+      "type": "token",
+      "text": "ocks"
+    },
+    {
+      "type": "token",
+      "text": "-in"
+    },
+    {
+      "type": "token",
+      "text": "vest"
+    },
+    {
+      "type": "token",
+      "text": "-in"
+    },
+    {
+      "type": "token",
+      "text": "-art"
+    },
+    {
+      "type": "token",
+      "text": "ificial"
+    },
+    {
+      "type": "token",
+      "text": "-int"
+    },
+    {
+      "type": "token",
+      "text": "elligence"
+    },
+    {
+      "type": "token",
+      "text": "]("
+    },
+    {
+      "type": "token",
+      "text": "https"
+    },
+    {
+      "type": "token",
+      "text": "://"
+    },
+    {
+      "type": "token",
+      "text": "www"
+    },
+    {
+      "type": "token",
+      "text": "."
+    },
+    {
+      "type": "token",
+      "text": "ner"
+    },
+    {
+      "type": "token",
+      "text": "dw"
+    },
+    {
+      "type": "token",
+      "text": "allet"
+    },
+    {
+      "type": "token",
+      "text": ".com"
+    },
+    {
+      "type": "token",
+      "text": "/in"
+    },
+    {
+      "type": "token",
+      "text": "vest"
+    },
+    {
+      "type": "token",
+      "text": "ing"
+    },
+    {
+      "type": "token",
+      "text": "/"
+    },
+    {
+      "type": "token",
+      "text": "learn"
+    },
+    {
+      "type": "token",
+      "text": "/"
+    },
+    {
+      "type": "token",
+      "text": "ai"
+    },
+    {
+      "type": "token",
+      "text": "-st"
+    },
+    {
+      "type": "token",
+      "text": "ocks"
+    },
+    {
+      "type": "token",
+      "text": "-in"
+    },
+    {
+      "type": "token",
+      "text": "vest"
+    },
+    {
+      "type": "token",
+      "text": "-in"
+    },
+    {
+      "type": "token",
+      "text": "-art"
+    },
+    {
+      "type": "token",
+      "text": "ificial"
+    },
+    {
+      "type": "token",
+      "text": "-int"
+    },
+    {
+      "type": "token",
+      "text": "elligence"
+    },
+    {
+      "type": "token",
+      "text": ")\n\n"
+    },
+    {
+      "type": "token",
+      "text": "We"
+    },
+    {
+      "type": "token",
+      "text": " recommend"
+    },
+    {
+      "type": "token",
+      "text": " that"
+    },
+    {
+      "type": "token",
+      "text": " you"
+    },
+    {
+      "type": "token",
+      "text": " consult"
+    },
+    {
+      "type": "token",
+      "text": " with"
+    },
+    {
+      "type": "token",
+      "text": " a"
+    },
+    {
+      "type": "token",
+      "text": " financial"
+    },
+    {
+      "type": "token",
+      "text": " advisor"
+    },
+    {
+      "type": "token",
+      "text": " to"
+    },
+    {
+      "type": "token",
+      "text": " determine"
+    },
+    {
+      "type": "token",
+      "text": " the"
+    },
+    {
+      "type": "token",
+      "text": " best"
+    },
+    {
+      "type": "token",
+      "text": " investment"
+    },
+    {
+      "type": "token",
+      "text": " strategy"
+    },
+    {
+      "type": "token",
+      "text": " for"
+    },
+    {
+      "type": "token",
+      "text": " your"
+    },
+    {
+      "type": "token",
+      "text": " individual"
+    },
+    {
+      "type": "token",
+      "text": " needs"
+    },
+    {
+      "type": "token",
+      "text": " and"
+    },
+    {
+      "type": "token",
+      "text": " goals"
+    },
+    {
+      "type": "token",
+      "text": "."
+    },
+    {
+      "type": "token",
+      "text": " What"
+    },
+    {
+      "type": "token",
+      "text": " are"
+    },
+    {
+      "type": "token",
+      "text": " your"
+    },
+    {
+      "type": "token",
+      "text": " investment"
+    },
+    {
+      "type": "token",
+      "text": " goals"
+    },
+    {
+      "type": "token",
+      "text": ","
+    },
+    {
+      "type": "token",
+      "text": " and"
+    },
+    {
+      "type": "token",
+      "text": " how"
+    },
+    {
+      "type": "token",
+      "text": " do"
+    },
+    {
+      "type": "token",
+      "text": " you"
+    },
+    {
+      "type": "token",
+      "text": " plan"
+    },
+    {
+      "type": "token",
+      "text": " to"
+    },
+    {
+      "type": "token",
+      "text": " achieve"
+    },
+    {
+      "type": "token",
+      "text": " them"
+    },
+    {
+      "type": "token",
+      "text": "?"
+    },
+    {
+      "type": "agent",
+      "name": "team"
+    },
+    {
+      "type": "usage",
+      "reply": {
+        "input_tokens": 37922,
+        "cached_tokens": 0,
+        "output_tokens": 4392
+      },
+      "chat": {
+        "input_tokens": 37922,
+        "output_tokens": 4392,
+        "cached_tokens": 0
+      },
+      "reply_by_model": {
+        "meta-llama/llama-3.1-8b-instruct": {
+          "model_calls": 5,
+          "input_tokens": 37922,
+          "cached_tokens": 0,
+          "output_tokens": 4392
+        }
+      },
+      "chat_by_model": {
+        "meta-llama/llama-3.1-8b-instruct": {
+          "model_calls": 5,
+          "input_tokens": 37922,
+          "cached_tokens": 0,
+          "output_tokens": 4392
+        }
+      }
+    },
+    {
+      "type": "done"
+    }
+  ],
+  "history": [
+    {
+      "role": "user",
+      "content": "Should I put more money into tech stocks now?",
+      "activity": [
+        {
+          "name": "team",
+          "type": "agent"
+        },
+        {
+          "text": "",
+          "type": "token"
+        },
+        {
+          "args": {
+            "question": "Current market trends and investment advice for tech stocks"
+          },
+          "name": "ask_research",
+          "type": "tool_call"
+        },
+        {
+          "args": {
+            "query": "tech stocks current trends",
+            "topic": "news",
+            "max_results": 10,
+            "search_depth": "advanced"
+          },
+          "name": "tavily_tavily_search",
+          "type": "tool_call",
+          "agent": "research"
+        },
+        {
+          "args": {
+            "query": "investment advice for tech stocks",
+            "topic": "news",
+            "max_results": 10,
+            "search_depth": "advanced"
+          },
+          "name": "tavily_tavily_search",
+          "type": "tool_call",
+          "agent": "research"
+        },
+        {
+          "args": {
+            "lang": "en",
+            "limit": 5,
+            "query": "tech stocks"
+          },
+          "name": "knowledge_wikipedia_search",
+          "type": "tool_call",
+          "agent": "research"
+        },
+        {
+          "args": {
+            "query": "tech stocks",
+            "max_results": 5
+          },
+          "name": "knowledge_arxiv_search",
+          "type": "tool_call",
+          "agent": "research"
+        },
+        {
+          "args": {
+            "query": "tech stocks",
+            "entity": ""
+          },
+          "name": "search_documents",
+          "type": "tool_call",
+          "agent": "research"
+        },
+        {
+          "name": "knowledge_wikipedia_search",
+          "type": "tool_result",
+          "agent": "research",
+          "content": "- Big Tech (https://en.wikipedia.org/wiki/Big_Tech): Big Tech, also known as the tech giants or tech titans, are the largest and most powerful technology companies in the world. It most commonly refers to\n- Dot-com bubble (https://en.wikipedia.org/wiki/Dot-com_bubble): more cautious positions. Popular Internet forums that focused on high tech stocks, such as Silicon Investor, Yahoo! Finance, and The Motley Fool declined\n- Temasek Holdings (https://en.wikipedia.org/wiki/Temasek_Holdings): rally&quot;. Reuters. Retrieved 17 July 2025. &quot;Temasek sells off Chinese tech stocks amid crackdown by Beijing&quot;. The Edge Singapore. 16 November 2021. Retrieved\n- Scion Asset Management (https://en.wikipedia.org/wiki/Scion_Asset_Management): Scion was able to achieve these returns partly by shorting overvalued tech stocks at the peak of the internet bubble. By the end of 2004, Scion was managing\n- AI bubble (https://en.wikipedia.org/wiki/AI_bubble): that leading AI tech firms are involved in a circular flow of investments that are artificially inflating the value of their stocks and the broader market\n\n[source ids] cite these pages by id in your notes:\nSb36e = Big Tech (https://en.wikipedia.org/wiki/Big_Tech)\nS2126 = Dot-com bubble (https://en.wikipedia.org/wiki/Dot-com_bubble)\nSed8e = Temasek Holdings (https://en.wikipedia.org/wiki/Temasek_Holdings)\nSfb23 = Scion Asset Management (https://en.wikipedia.org/wiki/Scion_Asset_Management)\nS3456 = AI bubble (https://en.wikipedia.org/wiki/AI_bubble)"
+        },
+        {
+          "name": "knowledge_arxiv_search",
+          "type": "tool_result",
+          "agent": "research",
+          "content": "- TeCH: Text-guided Reconstruction of Lifelike Clothed Humans (Yangyi Huang, Hongwei Yi, Yuliang Xiu, Tingting Liao et al., 2023-08-16) http://arxiv.org/abs/2308.08545v2\n  Despite recent research advancements in reconstructing clothed humans from a single image, accurately restoring the \"unseen regions\" with high-level details remains an unsolved challenge that lacks attention. Existing methods often generate overly smooth back-side surfaces with a blurry texture. But how to effectively capture all visual attributes of an individual from a single image, which are sufficient to reconstruct unseen areas (e.g., the back view)? Motivated by the power of foundation models, TeCH reconstructs the 3D human by leveraging 1) descriptive text prompts (e.g., garments, colors, hairstyles) which are automatically generated via a garment parsing model and Visual Question Answering (VQA), 2) a personalized fine-tuned Text-to-Image diffusion model (T2I) which learns the \"indescribable\" appearance. To represent high-resolution 3D clothed humans at an affordable cost, we propose a hybrid 3D representation based on DMTet, which consists of an explicit body shape grid and an implicit distance field. Guided by the descriptive prompts + personalized T2I diffusion model, the geometry and texture of the 3D humans are optimized through multi-view Score Distillation Sampling (SDS) and reconstruction losses based on the original observation. TeCH produces high-fidelity 3D clothed humans with consistent & delicate texture, and detailed full-body geometry. Quantitative and qualitative experiments demonstrate that TeCH outperforms the state-of-the-art methods in terms of reconstruction accuracy and rendering quality. The code will be publicly available for research purposes at https://huangyangyi.github.io/TeCH\n- Pricing Options on Defaultable Stocks (Erhan Bayraktar, 2007-07-03) http://arxiv.org/abs/0707.0336v2\n  In this note, we develop stock option price approximations for a model which takes both the risk o default and the stochastic volatility into account. We also let the intensity of defaults be influenced by the volatility. We show that it might be possible to infer the risk neutral default intensity from the stock option prices. Our option price approximation has a rich implied volatility surface structure and fits the data implied volatility well. Our calibration exercise shows that an effective hazard rate from bonds issued by a company can be used to explain the implied volatility skew of the implied volatility of the option prices issued by the same company.\n- Effect of Franchised Business models on Fast Food Company Stock Prices in Recession and Recovery with Weibull Analysis (Sandip Dutta, Vignesh Prabhu, 2019-12-30) http://arxiv.org/abs/1912.12940v1\n  At the initial stages of this research, the assumption was that the franchised businesses perhaps should not be affected much by recession as there are multiple cash pools available inherent to the franchised business model. However, after analyzing the available data, it indicated otherwise, the stock price performance as discussed indicates a different pattern. The stock price data is analyzed with an unconventional tool, Weibull distribution and observations confirmed the presence of either a reverse trend in franchised business than what is observed for non-franchised or the franchised stock followed large food suppliers. There is a layered ownership and cash flow in a franchised business model. The parent company run by franchiser depends on the performance of child companies run by franchisees. Both parent and child companies are run as independent businesses but only the parent company is listed as a stock ticker in stock exchange. Does this double layer of vertical operation, cash reserve, and cash flow protect them better in recession? The data analyzed in this paper indicates that the recession effect can be more severe; and if it dives with the average market, expect a slower recover"
+        },
+        {
+          "name": "search_documents",
+          "type": "tool_result",
+          "agent": "research",
+          "content": "No matching passages in the user's documents."
+        },
+        {
+          "name": "tavily_tavily_search",
+          "type": "tool_result",
+          "agent": "research",
+          "content": "{\"query\":\"investment advice for tech stocks\",\"follow_up_questions\":null,\"answer\":null,\"images\":[],\"results\":[{\"url\":\"https://www.usbank.com/investing/financial-perspectives/market-news/investing-in-tech-stocks.html\",\"title\":\"Investing in Tech Stocks | U.S. Bank\",\"content\":\"## A selective approach to investing in technology stocks\\n\\nA selective approach remains the clearest message for investors. Technology companies can offer strong earnings growth potential, and some businesses in the sector are less sensitive to the business cycle than other parts of the market. Haworth notes, “Secular, rapid business growth can drive significant performance gains,” but he also warns that “Diminishing benefits to AI investing will likely vary significantly by industry.” [...] For investors, that means the most productive strategy may be a thoughtful one rather than an aggressive one. The technology sector still offers meaningful long-term opportunity, but success is likely to depend on selectivity, discipline, and a willingness to look past short-term noise. Investors should also consult with their financial professionals for guidance, especially when volatility or valuation concerns arise.\\n\\n## FAQs\\n\\n### What are technology stocks? [...] That distinction is important because not every company will convert technology spending into lasting shareholder value. Some businesses will benefit from stronger demand, better margins, and wider adoption, while others may struggle with competition, execution risk, or prices that already reflect aggressive growth expectations. Investors can improve decision-making by aligning any technology exposure with their goals, time horizon, and tolerance for volatility.\\n\\n## Why long-term investors still watch the technology sector closely\",\"score\":0.7774689,\"published_date\":\"Wed, 29 Apr 2026 19:09:00 GMT\",\"raw_content\":null,\"id\":\"174513-00\"},{\"url\":\"https://www.morganstanley.com/insights/articles/magnificent-seven-rotation-portfolio-strategies-2026\",\"title\":\"Why Good News Isn’t Moving Stocks | Morgan Stanley\",\"content\":\"In this environment, we suggest that prudent investors:\\n\\n   Focus on U.S. companies that are likely to hit earnings targets.\\n   Consider taking profits in small-cap, micro-cap and speculative equities.\\n   Redeploy capital to large-cap “core” and quality stocks, including Magnificent 7 mega-cap tech names.\\n   Broaden exposure to GenAI productivity beneficiaries, including in health care, energy, software and financials.\\n\\nFor passive investors, consider balancing exposure between market-cap-weighted and equal-weighted equity indexes, and using active management for up to 50% of allocations.\\n\\nAlso consider adding to rest-of-world equities, with a focus on emerging markets. For some investors, hedge funds, gold and infrastructure may also remain key allocations. [...] Image 17: Lisa Shalett\\n\\nLisa Shalett\\n\\n## Key Takeaways\\n\\n   Indexes feel stuck: Good economic and earnings news is largely priced in, and markets need true upside surprises to move higher.\\n   In particular, markets want clearer proof that massive AI capex will translate into durable returns, not just bigger spending headlines.\\n   This uncertainty seems to be compelling more investors to shift money away from mega-cap tech, toward a much broader set of stocks.\\n   In this environment, consider emphasizing earnings achievability and quality in your investments, taking profits in small caps, and broadening exposure to AI adopters in select sectors. [...] As the second quarter nears, the recent sprint into small caps and lower-quality, more-volatile stocks may take a breath. Some of those names will likely disappoint. When that happens, money often shifts back toward “quality”—financially strong companies with solid profits, steadier earnings and less debt. This could reopen opportunity in parts of tech that still look compelling on growth-adjusted valuation measures.\\n\\nIn this environment, we suggest that prudent invest"
+        },
+        {
+          "name": "tavily_tavily_search",
+          "type": "tool_result",
+          "agent": "research",
+          "content": "{\"query\":\"tech stocks current trends\",\"follow_up_questions\":null,\"answer\":null,\"images\":[],\"results\":[{\"url\":\"https://io-fund.com/broad-market-today/nasdaq-100-returns-vs-tech-bubble-warnings\",\"title\":\"Tech Stocks Weekly: Key Market Updates and Trends\",\"content\":\"In 2020, despite rapid earnings growth, with companies like Zoom growing 326%, tech stocks were labeled a bubble amid pandemic-driven volatility and policy uncertainty. “Everybody loves a party … but, inevitably, after a big party there’s a hangover,” the billionaire investor Stanley Druckenmiller said in a Squawk Box interview. “Right now, we’re in an absolute raging mania.”” Although tech would later reset, the most explosive move followed these bubble warnings.\\n In 2022, rising rates and tightening financial conditions reignited claims that the tech bubble had finally burst and the Nasdaq-100 was down (33%) in 2022. However, tech stocks recovered in 2023, and the Nasdaq-100 rose 53.8% in 2023. [...] In 2024, the narrative re-emerged once again—this time framed as an “AI bubble”—despite strong balance sheets, accelerating earnings, and durable long-term demand drivers. However, Nasdaq-100 rose 24.9% with Nvidia rising 171.2% in 2024. [...] What followed tells a very different story with not only the Nasdaq-100 up 550% over a 10-year period but also high-flying stocks like Shopify returned as much as 5200% and Nvidia returned 22,000% over the same period.\\n\\nIt’s true that capturing those gains does not come easy. Investors had to hold through five drawdowns that were greater than 20%, including two declines greater than 30%, while tuning out a constant stream of bearish commentary – often from reputable sources – proclaiming the long-awaited tech bubble has finally “popped.” Despite these strong convictions, the long-term trend remained intact.\",\"score\":0.78464925,\"published_date\":\"Fri, 06 Mar 2026 00:00:00 GMT\",\"raw_content\":null,\"id\":\"5ab615-00\"},{\"url\":\"https://www.usbank.com/investing/financial-perspectives/market-news/investing-in-tech-stocks.html\",\"title\":\"Investing in Tech Stocks | U.S. Bank\",\"content\":\"## Why technology stocks still drive market leadership\\n\\nLeadership in the technology sector remains powerful, but performance within the group is far from uniform. The largest technology-oriented stocks (known as the “Magnificent 7) along with Broadcom, Micron Technology and Advanced Micro Devices, have driven much of the market’s recent advance, yet the winners have changed over time and performance has varied widely from one company to the next. Micron Technology is leading the group with a 77% gain in 2026 (as of April 28), followed by Advanced Micro Devices at 51% and Broadcom at 16%, while Apple, Microsoft, and Tesla are trailing their peers with negative year-to-date returns.1\\n\\n### Performance of ten largest technology-related stocks in the S&P 500 Index\\n\\nStock [...] 2025 results also reflected dispersion and shifting leadership from previous years. Micron gained 223%, Advanced Micro Devices was up 71%, Alphabet gained 66%, Broadcom rose 49%, and Nvidia returned 39%, while Apple, Microsoft, Amazon, Meta Platforms, and Tesla lagged those leaders by a wide margin.1 While technology-oriented stocks still drove 2025 market performance, returns were more subdued than the prior two years.\\n\\n## Investing in technology means investing in productivity and innovation [...] Technology investing is typically viewed as one of the most attractive growth-oriented equity investment opportunities, but it also carries a higher risk of price volatility than most other sectors. Over certain periods, technology stocks generate significant returns that far outpace the rest of the market. For example, according to S&P Dow Jones Indices, from 2016 through 2025, the S&P 500 Communication Services and Information Technology sector generated double-digit total returns in eight of the ten years, peaking at 57.4% in 2023. However, it had two years of negative performance, in"
+        },
+        {
+          "name": "ask_research",
+          "type": "tool_result",
+          "content": "FINDINGS:\n- Tech stocks have been experiencing a slump in 2026, with the Nasdaq-100 falling over 9% from its early October peak amid concerns about AI infrastructure spending and the controversy surrounding Nvidia's former CEO Jensen Huang. [source: Goldman Sachs Reportedly Sees AI Hyperscalers As ‘Relatively Defensive’ After Tech Selloff — Forecasts 14% S&P 500 Upside | https://finance.yahoo.com/markets/stocks/articles/goldman-sachs-reportedly-sees-ai-115231520.html]\n- Goldman Sachs strategists see technology stocks, particularly artificial intelligence (AI) hyperscalers, as relatively defensive investments after a recent selloff pushed their valuations below historical levels. [source: Goldman Sachs Reportedly Sees AI Hyperscalers As ‘Relatively Defensive’ After Tech Selloff — Forecasts 14% S&P 500 Upside | https://finance.yahoo.com/markets/stocks/articles/goldman-sachs-reportedly-sees-ai-115231520.html]\n- The AI trade may be back, for now, after an early fall slumber, with several under-the-radar moves in the AI sector this week that investors may have overlooked amid the outsized focus on the Huang scandals. [source: 3 signs AI stocks may be a great trade again | https://finance.yahoo.com/markets/article/3-signs-ai-stocks-may-be-a-great-trade-again-130410381.html]\n- A selective approach remains the clearest message for investors in technology stocks, with a focus on U.S. companies that are likely to hit earnings targets and considering taking profits in small-cap, micro-cap, and speculative equities. [source: Investing in Tech Stocks | U.S. Bank | https://www.usbank.com/investing/financial-perspectives/market-news/investing-in-tech-stocks.html]\n- The technology sector still offers meaningful long-term opportunity, but success is likely to depend on selectivity, discipline, and a willingness to look past short-term noise. [source: Investing in Tech Stocks | U.S. Bank | https://www.usbank.com/investing/financial-perspectives/market-news/investing-in-tech-stocks.html]\n- Investors should be cautious and consider diversifying their portfolios to avoid the concentration risk associated with tech stocks, which represent as much as 40% of the U.S. large-cap equity market. [source: A lot changed in stock market in just a few months. The single biggest risk did not | https://www.cnbc.com/2026/10/15/spx-sp500-tech-stocks-invest.html]\n- The tech sell-off could be a brief dip that rebounds to new highs, or it could turn into a bear market, and investors should be prepared for either scenario. [source: If the Tech Stock Sell-Off Turns Into a Bear Market, History Says This Investing Strategy Has Never Failed | https://finance.yahoo.com/markets/stocks/articles/tech-stock-sell-off-turns-042000090.html]\n- The best AI stocks to buy in 2026 include Microsoft, Palantir, Snowflake, Salesforce, and CrowdStrike, according to Wall Street's biggest tech bulls. [source: Best AI Stocks to Buy in 2026: 10 Top Picks & How to Invest | The Motley Fool | https://www.fool.com/investing/stock-market/market-sectors/information-technology/ai-stocks]\n- The 5 best-performing AI stocks right now are Nvidia, Microsoft, Alphabet, Meta Platforms, and Amazon, according to NerdWallet. [source: The 5 Best-Performing AI Stocks Right Now - NerdWallet | https://www.nerdwallet.com/investing/learn/ai-stocks-invest-in-artificial-intelligence]\n- Growth stocks can be volatile and require a long-term mindset and diversification across several leaders to balance growth potential with the risk inherent in investing in a new technology. [source: 10 Best Growth Stocks for 2026 and How to Invest | The Motley Fool | https://www.fool.com/investing/stock-market/types-of-stocks/growth-stocks]\n\nGAPS: none\n\nMEMORY: Facts about this user from earlier chats and their files are listed below; use them.\n- User interested in NVIDIA\n\nPAST CHATS: Recent activity from the user's other chats may be listed below. Use it only when the user refers to earlier chats or questions (\"what did I ask before"
+        },
+        {
+          "text": "",
+          "type": "token"
+        },
+        {
+          "name": "team",
+          "type": "agent"
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "agent": "orchestrator",
+      "content": "Based on the user's question, \"Should I put more money into tech stocks now?\", we will provide a summary of the current market trends and investment advice for tech stocks.\n\nThe current market trends suggest that tech stocks have been experiencing a slump in 2026, with the Nasdaq-100 falling over 9% from its early October peak amid concerns about AI infrastructure spending and the controversy surrounding Nvidia's former CEO Jensen Huang. However, Goldman Sachs strategists see technology stocks, particularly artificial intelligence (AI) hyperscalers, as relatively defensive investments after a recent selloff pushed their valuations below historical levels.\n\nThe best AI stocks to buy in 2026 include Microsoft, Palantir, Snowflake, Salesforce, and CrowdStrike, according to Wall Street's biggest tech bulls. The 5 best-performing AI stocks right now are Nvidia, Microsoft, Alphabet, Meta Platforms, and Amazon, according to NerdWallet.\n\nGrowth stocks can be volatile and require a long-term mindset and diversification across several leaders to balance growth potential with the risk inherent in investing in a new technology. A selective approach remains the clearest message for investors in technology stocks, with a focus on U.S. companies that are likely to hit earnings targets and considering taking profits in small-cap, micro-cap, and speculative equities.\n\nBased on these findings, it seems that the current market trends and investment advice for tech stocks are mixed. While some experts see technology stocks as relatively defensive investments, others caution against investing in growth stocks due to their volatility. We recommend a selective approach to investing in technology stocks, focusing on U.S. companies that are likely to hit earnings targets.\n\nSources:\n1. [Goldman Sachs Reportedly Sees AI Hyperscalers As ‘Relatively Defensive’ After Tech Selloff — Forecasts 14% S&P 500 Upside | https://finance.yahoo.com/markets/stocks/articles/goldman-sachs-reportedly-sees-ai-115231520.html](https://finance.yahoo.com/markets/stocks/articles/goldman-sachs-reportedly-sees-ai-115231520.html)\n2. [3 signs AI stocks may be a great trade again | https://finance.yahoo.com/markets/article/3-signs-ai-stocks-may-be-a-great-trade-again-130410381.html](https://finance.yahoo.com/markets/article/3-signs-ai-stocks-may-be-a-great-trade-again-130410381.html)\n3. [Investing in Tech Stocks | U.S. Bank | https://www.usbank.com/investing/financial-perspectives/market-news/investing-in-tech-stocks.html](https://www.usbank.com/investing/financial-perspectives/market-news/investing-in-tech-stocks.html)\n4. [A lot changed in stock market in just a few months. The single biggest risk did not | https://www.cnbc.com/2026/10/15/spx-sp500-tech-stocks-invest.html](https://www.cnbc.com/2026/10/15/spx-sp500-tech-stocks-invest.html)\n5. [If the Tech Stock Sell-Off Turns Into a Bear Market, History Says This Investing Strategy Has Never Failed | https://finance.yahoo.com/markets/stocks/articles/tech-stock-sell-off-turns-042000090.html](https://finance.yahoo.com/markets/stocks/articles/tech-stock-sell-off-turns-042000090.html)\n6. [Best AI Stocks to Buy in 2026: 10 Top Picks & How to Invest | The Motley Fool | https://www.fool.com/investing/stock-market/market-sectors/information-technology/ai-stocks](https://www.fool.com/investing/stock-market/market-sectors/information-technology/ai-stocks)\n7. [The 5 Best-Performing AI Stocks Right Now - NerdWallet | https://www.nerdwallet.com/investing/learn/ai-stocks-invest-in-artificial-intelligence](https://www.nerdwallet.com/investing/learn/ai-stocks-invest-in-artificial-intelligence)\n\nWe recommend that you consult with a financial advisor to determine the best investment strategy for your individual needs and goals. What are your investment goals, and how do you plan to achieve them?",
+      "team": null,
+      "tool_calls": [],
+      "charts": []
+    }
+  ],
+  "usage": {
+    "reply": {
+      "input_tokens": 37922,
+      "cached_tokens": 0,
+      "output_tokens": 4392
+    },
+    "chat": {
+      "input_tokens": 37922,
+      "output_tokens": 4392,
+      "cached_tokens": 0
+    },
+    "reply_by_model": {
+      "meta-llama/llama-3.1-8b-instruct": {
+        "model_calls": 5,
+        "input_tokens": 37922,
+        "cached_tokens": 0,
+        "output_tokens": 4392
+      }
+    },
+    "chat_by_model": {
+      "meta-llama/llama-3.1-8b-instruct": {
+        "model_calls": 5,
+        "input_tokens": 37922,
+        "cached_tokens": 0,
+        "output_tokens": 4392
+      }
+    }
+  }
+}

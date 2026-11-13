@@ -64,7 +64,7 @@ export default function StatusLine({ turn, labels, onOpenActivity }: Props) {
       {head && <span>{head}</span>}
       {tail && <span>{tail}</span>}
       {count > 0 && (
-        <Button type="button" variant="ghost" size="xs" onClick={() => onOpenActivity(turn)}>
+        <Button type="button" variant="outline" size="xs" onClick={() => onOpenActivity(turn)}>
           {`${t('activity')} (${count})`}
         </Button>
       )}

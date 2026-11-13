@@ -17,7 +17,9 @@ orchestrator then gets no `handoff`, and `no_repeats` stops it from asking a spe
 `MAX_ASKS` times or running the same tool call twice in one message.
 """
 
+import asyncio
 import dataclasses
+import logging
 from collections.abc import Mapping, Sequence
 from datetime import date
 from pathlib import Path
@@ -26,7 +28,7 @@ from typing import Literal
 from langchain.agents.middleware import ModelRequest, ModelResponse, wrap_model_call, wrap_tool_call
 from langchain.tools import tool
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
-from langchain_core.runnables import Runnable
+from langchain_core.runnables import Runnable, RunnableConfig
 from langchain_core.tools import BaseTool
 from langgraph.graph import END
 from langgraph.runtime import Runtime
@@ -34,7 +36,7 @@ from langgraph.types import Command
 from pydantic import BaseModel, Field
 
 from app.agents import registry
-from app.agents.artifacts import artifacts_from, collect, table_note
+from app.agents.artifacts import collect, table_note
 from app.agents.base import LIMIT_MESSAGE, MEMORY_TOOL_NAMES, AgentSpec
 from app.agents.chart.prompts import TABLES_SECTION
 from app.agents.chart.tools import chart_data, chart_table
@@ -42,6 +44,7 @@ from app.agents.delegation import ask_tool_name, make_ask_tool
 from app.agents.factory import build_agent, call_key
 from app.agents.research.agent import mcp_tools
 from app.agents.skills import load_skills, skills_inline
+from app.core.chat_memory import known_tables, render
 from app.core.config import get_settings
 from app.core.memory import TEAM_MODE, AgentContext
 from app.core.prompts import CALL_NOTE, LANGUAGE_RULE, MEMORY_RULE, reply_language
@@ -60,6 +63,8 @@ from app.orchestration.prompts import (
 )
 from app.orchestration.router import ORCHESTRATOR, AssistantState, available_agents, mentioned_routes, previous_route
 
+log = logging.getLogger(__name__)
+
 LABELS = {"en": "Assistant", "vi": "Trợ lý"}
 FORMATS = skills_inline(load_skills(Path(__file__).resolve().parent / "formats"))  # answer formats
 HANDOFF = "handoff"
@@ -72,6 +77,19 @@ SORRY = "Sorry, I couldn't finish this answer. Please try again or rephrase the 
 
 # AIMessage.name -> route, including the orchestrator (and the removed research writer of old chats).
 MESSAGE_ROUTES = {**registry.MESSAGE_ROUTES, ORCHESTRATOR: ORCHESTRATOR, "report_agent": ORCHESTRATOR}
+
+
+async def chat_note(user_id: str, config: RunnableConfig | None) -> tuple[str, str]:
+    """(chat id, the chat's data note) for a call inside a chat's graph run; ("", "") without a chat. A failed
+    render is logged and gives an empty note: it never fails the reply."""
+    conversation_id = ((config or {}).get("configurable") or {}).get("thread_id") or ""
+    if not conversation_id:
+        return "", ""
+    try:
+        return conversation_id, await asyncio.to_thread(render, user_id, conversation_id)
+    except Exception:  # noqa: BLE001 - the reply goes on without the note
+        log.exception("chat data not rendered for chat %s", conversation_id)
+        return conversation_id, ""
 
 
 def make_handoff_tool(routes: Sequence[str]) -> BaseTool:
@@ -195,7 +213,7 @@ def is_first_turn(messages: Sequence[AnyMessage]) -> bool:
     return False
 
 
-def compose_section(request: ModelRequest) -> str:
+async def compose_section(request: ModelRequest) -> str:
     """This request's notes, plus the format and citation rules once there is something to write
     up: the first (deciding) call stays short, and plain chat doesn't get research formatting.
     On an onboarding user's first turn, every call ends with the onboarding question."""
@@ -203,8 +221,8 @@ def compose_section(request: ModelRequest) -> str:
     section = f"\n\n{request.runtime.context.notes}" if request.runtime.context.notes else ""
     section += REPLY_LANGUAGE.format(language=reply_language(question))
     if is_composing(request.messages):
-        tables = artifacts_from(request.messages, "tables")  # e.g. from ask_sql, for chart_table
-        charts = artifacts_from(request.messages, "charts")
+        # saved and this turn's (e.g. from ask_sql), for chart_table
+        tables, charts = await asyncio.to_thread(known_tables, request.messages, request.runtime.context)
         tables = TABLES_SECTION.format(tables=table_note(tables, charts)) if tables else ""
         section += tables + COMPOSE_SECTION.format(formats=FORMATS, language=reply_language(question))
     if request.runtime.context.bootstrap and is_first_turn(request.messages):
@@ -282,7 +300,7 @@ def build_orchestrator(specs: Sequence[AgentSpec], agents: Mapping[str, Runnable
     writer = make_agent([t for t in tools if t.name != HANDOFF and not t.name.startswith("ask_")])
     agent = make_agent(tools)
 
-    async def orchestrator(state: AssistantState, runtime: Runtime[AgentContext]) -> Command:
+    async def orchestrator(state: AssistantState, runtime: Runtime[AgentContext], config: RunnableConfig | None = None) -> Command:
         messages = state["messages"]
         hidden = [HumanMessage(FINDINGS_MESSAGE.format(findings=f, language=reply_language(messages)), name=FINDINGS)
                   ] if (f := state.get("findings")) else []
@@ -292,7 +310,9 @@ def build_orchestrator(specs: Sequence[AgentSpec], agents: Mapping[str, Runnable
         if note := state.get("team_note"):
             hidden.append(HumanMessage(note, name=TEAM_MODE))
         notes, mentioned = await request_notes(runtime.context.user_id, specs, messages)
+        conversation_id, chat_data = await chat_note(runtime.context.user_id, config)
         context = dataclasses.replace(runtime.context, notes=notes, mentioned=mentioned, failed=failed,
+                                      conversation_id=conversation_id, chat_data=chat_data,
                                       deny_tools=(*runtime.context.deny_tools, *(CHART_TOOLS if state.get("team_drawn") else ())))
         result = await (writer if HANDOFF in runtime.context.deny_tools else agent).ainvoke({"messages": [*messages, *hidden]}, context=context)
         new = result["messages"][len(messages) + len(hidden):]

@@ -76,13 +76,89 @@ describe('turnsFromHistory', () => {
     expect(t.blocks).toEqual([{ kind: 'text', text: 'Which one?' }])
   })
 
-  it('a team message renders its text and charts only', () => {
+  it('an older team chat (no saved activity) builds plan, waves and badges from message.team', () => {
+    const team = {
+      tasks: [
+        { id: 't1', agent: 'sql', goal: 'g', depends_on: [], origin: 'plan' },
+        { id: 't2', agent: 'docs', goal: 'h', depends_on: [], origin: 'plan' },
+      ],
+      history: [
+        { type: 'wave', wave: 1, kind: 'plan', tasks: ['t1', 't2'], agents: ['sql', 'docs'] },
+        { type: 'result', task: 't1', agent: 'sql', text: 'a', tools: [{ name: 'run_sql', args: {}, result: 'r' }] },
+        { type: 'result', task: 't2', agent: 'docs', text: 'b', tools: [] },
+        { type: 'review', agreements: [], differences: [] },
+      ],
+    }
     const [t] = turnsFromHistory([
       msg({ role: 'user', content: 'q' }),
-      msg({ role: 'assistant', agent: 'orchestrator', content: 'team answer', team: { tasks: [{ agent: 'sql' }] } }),
+      msg({ role: 'assistant', agent: 'orchestrator', content: 'team answer', team, charts: [chart] }),
     ])
-    expect(t.blocks).toEqual([{ kind: 'text', text: 'team answer' }])
-    expect(t.badges).toEqual([{ agent: 'orchestrator' }])
+    expect(t.team).toBe(true)
+    expect(t.blocks).toEqual([
+      { kind: 'charts', charts: [chart] },
+      { kind: 'text', text: 'team answer' },
+    ])
+    expect(t.badges).toEqual([{ agent: 'sql' }, { agent: 'docs' }])
+    expect(t.activity.plan.map((x) => x.id)).toEqual(['t1', 't2'])
+    expect(t.activity.waves[0].answers.map((a) => a.text)).toEqual(['a', 'b'])
+    expect(t.activity.waves[0].review).not.toBeNull()
+    expect(t.activity.asked).toEqual([])
+  })
+
+  it('an older round-table chat reads rounds and boards; participants name the badges', () => {
+    const [t] = turnsFromHistory([
+      msg({ role: 'user', content: 'q' }),
+      msg({
+        role: 'assistant',
+        agent: 'orchestrator',
+        content: 'a',
+        team: { participants: ['docs', 'sql', 'docs'], rounds: [{ round: 1, kind: 'answer', answers: [{ agent: 'docs', text: 'x', tools: [] }] }], boards: [{ round: 1 }] },
+      }),
+    ])
+    expect(t.badges).toEqual([{ agent: 'docs' }, { agent: 'sql' }])
+    expect(t.activity.waves).toHaveLength(1)
+    expect(t.activity.waves[0].review).toEqual({ round: 1 })
+  })
+
+  it('a team turn with saved activity replays its plan, waves and drawn', () => {
+    const [t] = turnsFromHistory([
+      msg({
+        role: 'user',
+        content: 'q',
+        activity: [
+          { type: 'agent', name: 'team' },
+          { type: 'plan', tasks: [{ id: 't1', agent: 'sql', goal: 'g', depends_on: [] }] },
+          { type: 'wave', wave: 1, kind: 'plan', tasks: ['t1'], agents: ['sql'] },
+          { type: 'task_started', task: 't1', agent: 'sql' },
+          { type: 'token', text: '', agent: 'sql' },
+          { type: 'spoke', task: 't1', agent: 'sql', text: 'rows', tools: [] },
+          { type: 'review', agreements: [] },
+          { type: 'synthesize' },
+          { type: 'token', text: '' },
+          { type: 'agent', name: 'team' },
+        ],
+      }),
+      msg({ role: 'assistant', agent: 'orchestrator', content: 'final', team: { tasks: [], history: [] } }),
+    ])
+    expect(t.team).toBe(true)
+    expect(t.synthesized).toBe(true)
+    expect(t.badges).toEqual([{ agent: 'sql' }])
+    expect(t.activity.plan).toHaveLength(1)
+    expect(t.activity.waves[0].answers.map((a) => [a.task, a.text])).toEqual([['t1', 'rows']])
+    expect(t.activity.waves[0].review).not.toBeNull()
+    expect(t.activity.asked).toEqual([])
+    expect(t.blocks).toEqual([{ kind: 'text', text: 'final' }])
+  })
+
+  it('a paused team turn reloads pending with the question', () => {
+    const [t] = turnsFromHistory([
+      msg({ role: 'user', content: 'q', activity: [{ type: 'plan', tasks: [{ id: 't1', agent: 'sql', goal: '', depends_on: [] }] }, { type: 'needs_human', question: 'Age?' }] }),
+      msg({ role: 'assistant', agent: 'orchestrator', content: 'Age?', pending: true }),
+    ])
+    expect(t.team).toBe(true)
+    expect(t.pending).toBe(true)
+    expect(t.activity.question).toBe('Age?')
+    expect(t.blocks).toEqual([{ kind: 'text', text: 'Age?' }])
   })
 
   it('uses saved events for badges, steps and activity', () => {
@@ -105,6 +181,27 @@ describe('turnsFromHistory', () => {
     expect(t.activity.routing).toEqual(routing)
     expect(t.activity.tools).toEqual([{ name: 'tavily_search', args: { q: 'x' }, result: 'r' }])
     expect(t.blocks).toEqual([{ kind: 'text', text: 'a' }])
+  })
+
+  it('text saved before a tool call comes back ahead of the answer', () => {
+    const [t] = turnsFromHistory([
+      msg({
+        role: 'user',
+        content: 'q',
+        activity: [
+          { type: 'agent', name: 'orchestrator' },
+          { type: 'token', text: 'Let me check.' },
+          { type: 'tool_call', name: 'x', args: {} },
+          { type: 'tool_result', name: 'x', content: 'r' },
+          { type: 'token', text: '' },
+        ],
+      }),
+      msg({ role: 'assistant', agent: 'orchestrator', content: 'The answer.' }),
+    ])
+    expect(t.blocks).toEqual([
+      { kind: 'text', text: 'Let me check.' },
+      { kind: 'text', text: 'The answer.' },
+    ])
   })
 
   it('asked agents keep their tools on reload', () => {

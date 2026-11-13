@@ -20,6 +20,8 @@ export default function Shell() {
           conversations={chat.conversations}
           currentId={chat.currentId}
           busy={chat.busy}
+          teamMode={chat.kind === 'team'}
+          onTeamMode={chat.setTeamMode}
           onNew={chat.newChat}
           onOpen={(id) => void chat.open(id)}
           onRemove={(id) => void chat.remove(id)}

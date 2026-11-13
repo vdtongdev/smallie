@@ -1,14 +1,16 @@
+import asyncio
 import re
 
 from langchain.agents.middleware import ModelRequest
 
-from app.agents.artifacts import artifacts_from, table_note
+from app.agents.artifacts import table_note
 from app.agents.base import AgentSpec
 from app.agents.chart.prompts import CHART_SYSTEM, REVIEW, ROUTE_DESCRIPTION, TABLES_SECTION
 from app.agents.chart.tools import chart_data, chart_sql, chart_table
 from app.agents.factory import build_agent
 from app.agents.sql import agent as sql_agent
 from app.agents.sql.prompts import SQL_RULES
+from app.core.chat_memory import known_tables
 from app.core.prompts import LANGUAGE_RULE, MEMORY_RULE
 
 # Chart words. A ticker alone points to sql; "chart AAPL" matches both, and chart overrides sql.
@@ -19,11 +21,10 @@ HINTS = re.compile(
 )
 
 
-def tables_section(request: ModelRequest) -> str:
+async def tables_section(request: ModelRequest) -> str:
     """The query results already in the chat and how they were charted, so "plot that" or a
     repeated request reuses them instead of querying again."""
-    tables = artifacts_from(request.messages, "tables")
-    charts = artifacts_from(request.messages, "charts")
+    tables, charts = await asyncio.to_thread(known_tables, request.messages, request.runtime.context)
     return TABLES_SECTION.format(tables=table_note(tables, charts)) if tables else ""
 
 

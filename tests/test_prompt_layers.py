@@ -158,3 +158,23 @@ async def test_every_agent_passes_its_route(monkeypatch, route, message):
                             context=context)
     systems = [p[0].content for p in model.prompts if PROMPT_PHRASES[route] in p[0].content]
     assert systems and all("- MINE" in s for s in systems)
+
+
+async def test_chat_data_section_is_last_in_system_prompt(monkeypatch):
+    model = scripted(AIMessage("ok"))
+    monkeypatch.setattr(factory, "get_chat_model", lambda *a, **k: model)
+    agent = factory.build_agent(name="t", system_prompt="x", tools=[], route="sql",
+                                prompt_extra=lambda request: "\n\nEXTRA-SECTION")
+    note = "[turn 1 | sql | run_sql] {\"query\": \"{x}\"}\nrows {0} }{"
+    await agent.ainvoke({"messages": [HumanMessage("go")]}, context=AgentContext(user_id="u", chat_data=note))
+    system = model.prompts[0][0].content
+    assert system.endswith(note)
+    assert system.index("EXTRA-SECTION") < system.index(note)
+
+
+async def test_no_chat_data_leaves_the_prompt_unchanged(monkeypatch):
+    model = scripted(AIMessage("ok"))
+    monkeypatch.setattr(factory, "get_chat_model", lambda *a, **k: model)
+    agent = factory.build_agent(name="t", system_prompt="x", tools=[], route="sql")
+    await agent.ainvoke({"messages": [HumanMessage("go")]}, context=AgentContext(user_id="u"))
+    assert "earlier in this chat" not in model.prompts[0][0].content

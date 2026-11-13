@@ -32,7 +32,7 @@ export default function ReadmeDialog({ open, onOpenChange, onExample }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent showCloseButton={false} aria-describedby={undefined} className="max-h-[85vh] overflow-y-auto sm:max-w-3xl">
+      <DialogContent showCloseButton={false} aria-describedby={undefined}>
         <DialogTitle className="sr-only">{t('readme')}</DialogTitle>
         <DialogClose className="absolute top-3 right-3 rounded px-2 text-lg leading-none" aria-label={t('close')}>
           ×

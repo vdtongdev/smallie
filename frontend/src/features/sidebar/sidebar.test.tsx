@@ -12,7 +12,17 @@ const items: Conversation[] = [
 ]
 
 function show(over: Partial<Parameters<typeof Sidebar>[0]> = {}) {
-  const props = { conversations: items, currentId: 'a', busy: false, onNew: vi.fn(), onOpen: vi.fn(), onRemove: vi.fn(), ...over }
+  const props = {
+    conversations: items,
+    currentId: 'a',
+    busy: false,
+    teamMode: false,
+    onTeamMode: vi.fn(),
+    onNew: vi.fn(),
+    onOpen: vi.fn(),
+    onRemove: vi.fn(),
+    ...over,
+  }
   render(
     <LanguageProvider>
       <Sidebar {...props} />
@@ -59,6 +69,26 @@ test('New chat and the chat titles are disabled while a reply streams', () => {
   show({ busy: true })
   expect(screen.getByRole('button', { name: en.newChat })).toBeDisabled()
   expect(screen.getByRole('button', { name: 'Team chat' })).toBeDisabled()
+})
+
+test('the Team mode switch reports changes when no chat is open', async () => {
+  const p = show({ currentId: null })
+  const box = screen.getByRole('checkbox', { name: en.teamMode })
+  expect(box).toBeEnabled()
+  await userEvent.click(box)
+  expect(p.onTeamMode).toHaveBeenCalledWith(true)
+})
+
+test('the Team mode switch is disabled with an open chat and shows its state', () => {
+  show({ currentId: 'a', teamMode: true })
+  const box = screen.getByRole('checkbox', { name: en.teamMode })
+  expect(box).toBeDisabled()
+  expect(box).toBeChecked()
+})
+
+test('the Team mode switch is disabled while busy', () => {
+  show({ currentId: null, busy: true })
+  expect(screen.getByRole('checkbox', { name: en.teamMode })).toBeDisabled()
 })
 
 test('an empty list shows the empty text', () => {

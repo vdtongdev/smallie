@@ -16,18 +16,29 @@ type Props = {
   conversations: Conversation[]
   currentId: string | null
   busy: boolean
+  teamMode: boolean
+  onTeamMode(on: boolean): void
   onNew(): void
   onOpen(id: string): void
   onRemove(id: string): void
 }
 
-export default function Sidebar({ conversations, currentId, busy, onNew, onOpen, onRemove }: Props) {
+export default function Sidebar({ conversations, currentId, busy, teamMode, onTeamMode, onNew, onOpen, onRemove }: Props) {
   const { t } = useLang()
   return (
     <aside className="flex w-64 shrink-0 flex-col gap-2 overflow-y-auto border-r p-2">
       <Button type="button" onClick={onNew} disabled={busy}>
         {t('newChat')}
       </Button>
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={teamMode}
+          disabled={busy || currentId !== null}
+          onChange={(e) => onTeamMode(e.target.checked)}
+        />
+        {t('teamMode')}
+      </label>
       <ul className="flex flex-col gap-1">
         {conversations.length === 0 && <li className="text-sm text-muted-foreground">{t('noConversations')}</li>}
         {conversations.map((c) => (

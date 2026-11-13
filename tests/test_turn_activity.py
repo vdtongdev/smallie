@@ -7,7 +7,7 @@ from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, Too
 from sqlalchemy import delete, select
 
 from app.api import routes_chat
-from app.api.routes_chat import ChatRequest, _keep, chat
+from app.api.routes_chat import ChatRequest, _keep, chat, drop_answer_text
 from app.api.routes_conversations import user_messages
 from app.core.conversations import create_conversation, delete_conversation, get_turn_activity, save_turn_activity
 from app.core.db import get_engine, init_db, turn_activity, users
@@ -104,7 +104,7 @@ async def _chat(monkeypatch, chunks, *, kind="auto", settings="set", earlier=1, 
     """Run `chat`; the thread holds `earlier` user messages and `astream` adds one when `adds`."""
     messages = [HumanMessage(content=f"q{i}") for i in range(earlier)]
 
-    async def aget_state(config):
+    async def aget_state(config, **kwargs):
         return SimpleNamespace(values={"messages": list(messages)}, interrupts=list(interrupts))
 
     async def astream(*args, **kwargs):
@@ -166,8 +166,28 @@ def test_token_runs_become_one_marker_each():
               {"type": "token", "text": "c", "agent": "sql"}, {"type": "token", "text": "d", "agent": "sql"},
               {"type": "tool_call", "name": "x", "args": {}}, {"type": "token", "text": "e"}]:
         _keep(shown, e)
-    assert shown == [{"type": "token", "text": ""}, {"type": "token", "text": "", "agent": "sql"},
-                     {"type": "tool_call", "name": "x", "args": {}}, {"type": "token", "text": ""}]
+    # Top-level tokens keep their text (the text before a tool call stays on reload); agent tokens stay empty markers.
+    assert shown == [{"type": "token", "text": "ab"}, {"type": "token", "text": "", "agent": "sql"},
+                     {"type": "tool_call", "name": "x", "args": {}}, {"type": "token", "text": "e"}]
+
+
+def test_the_answer_after_the_last_tool_call_is_saved_empty():
+    shown = [{"type": "token", "text": "Let me check."}, {"type": "tool_call", "name": "x", "args": {}},
+             {"type": "tool_result", "name": "x", "content": "r"}, {"type": "token", "text": "The answer."}]
+    assert drop_answer_text(shown) == [{"type": "token", "text": "Let me check."}, shown[1], shown[2],
+                                       {"type": "token", "text": ""}]
+
+
+def test_a_run_without_a_tool_call_saves_an_empty_marker():
+    assert drop_answer_text([{"type": "token", "text": "Hello"}]) == [{"type": "token", "text": ""}]
+
+
+def test_agent_and_task_tokens_are_never_kept():
+    shown: list[dict] = []
+    for e in [{"type": "token", "text": "a", "agent": "sql"}, {"type": "token", "text": "b", "agent": "sql", "task": "t1"},
+              {"type": "token", "text": "c", "task": "t1"}]:
+        _keep(shown, e)
+    assert all(m["text"] == "" for m in shown)
 
 
 async def test_a_long_tool_result_is_cut(monkeypatch):
@@ -226,7 +246,7 @@ def test_user_messages_counts_what_history_shows():
 
 
 def _history_request(messages, interrupts=()):
-    async def aget_state(config):
+    async def aget_state(config, **kwargs):
         return SimpleNamespace(values={"messages": messages}, interrupts=list(interrupts))
 
     return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(assistant=SimpleNamespace(aget_state=aget_state))))

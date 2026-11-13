@@ -21,11 +21,22 @@ export function useChat() {
   const [usage, setUsage] = useState<Usage | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [ready, setReady] = useState(false)
+  const [teamMode, setTeamModeState] = useState(() => localGet('team_mode') === '1')
 
   const currentRef = useRef<string | null>(null)
   const busyRef = useRef(false)
   const epoch = useRef(0) // bumped when the open chat changes, so a reply for the old one stops drawing
   const kinds = useRef(new Map<string, string>())
+  const teamModeRef = useRef(teamMode)
+  teamModeRef.current = teamMode
+  const turnsRef = useRef<Turn[]>([])
+  turnsRef.current = turns
+  // An opened chat keeps its own kind; a new chat follows the switch.
+  const kind = currentId ? (conversations.find((c) => c.id === currentId)?.kind ?? (teamMode ? 'team' : 'auto')) : teamMode ? 'team' : 'auto'
+  const setTeamMode = useCallback((on: boolean) => {
+    setTeamModeState(on)
+    localSet('team_mode', on ? '1' : '0')
+  }, [])
 
   const remember = useCallback(
     (id: string | null) => {
@@ -104,9 +115,12 @@ export function useChat() {
       busyRef.current = true
       setBusy(true)
       const run = epoch.current
-      const kind = kinds.current.get(currentRef.current ?? '') === 'team' ? 'team' : 'auto'
-      let turn = newTurn(message)
-      setTurns((prev) => [...prev, turn])
+      // A paused team turn is resumed by the next team message, whatever the switch says.
+      const resuming = !!turnsRef.current.at(-1)?.pending
+      const opened = currentRef.current
+      const kind = resuming || (opened ? kinds.current.get(opened) === 'team' : teamModeRef.current) ? 'team' : 'auto'
+      let turn = newTurn(message, kind === 'team')
+      setTurns((prev) => [...prev.map((t, i) => (i === prev.length - 1 && t.pending ? { ...t, pending: false } : t)), turn])
       const update = (next: Turn) => {
         turn = next
         if (epoch.current === run) setTurns((prev) => [...prev.slice(0, -1), next])
@@ -156,5 +170,5 @@ export function useChat() {
     [loadConversations, reset],
   )
 
-  return { conversations, currentId, turns, busy, usage, loadError, ready, send, open, newChat, remove }
+  return { conversations, currentId, turns, busy, usage, loadError, ready, teamMode, setTeamMode, kind, send, open, newChat, remove }
 }

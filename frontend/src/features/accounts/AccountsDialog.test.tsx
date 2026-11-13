@@ -121,6 +121,39 @@ test('a load error shows in the dialog', async () => {
   expect(await screen.findByRole('alert')).toHaveTextContent('admin only')
 })
 
+const posts = (calls: ReturnType<typeof installFetch>) => calls.filter((c) => c.method === 'POST' && c.url.includes('/password'))
+
+async function typeNewPassword(value: string) {
+  await screen.findByText('Binh (@binh)')
+  await userEvent.click(within(row('Binh (@binh)')).getByRole('button', { name: en.resetPassword }))
+  await userEvent.type(screen.getByLabelText(en.newPassword.replace('{user}', 'binh')), value)
+  await userEvent.click(screen.getByRole('button', { name: en.save }))
+}
+
+test('a 7-character password shows the hint and sends nothing', async () => {
+  const calls = setup({ 'POST /api/admin/accounts/a1/password': () => json({}) })
+  await typeNewPassword('1234567')
+  expect(await screen.findByText(en.passwordHint)).toBeInTheDocument()
+  expect(posts(calls)).toHaveLength(0)
+})
+
+test('an 8-character password is posted', async () => {
+  const calls = setup({ 'POST /api/admin/accounts/a1/password': () => json({}) })
+  await typeNewPassword('12345678')
+  expect(await screen.findByText(en.passwordChanged)).toBeInTheDocument()
+  expect(JSON.parse(posts(calls)[0].init!.body as string)).toEqual({ password: '12345678' })
+})
+
+test('a failed delete keeps its error visible after the list reloads', async () => {
+  const calls = setup({ 'DELETE /api/admin/accounts/a1': () => json({ detail: 'cannot delete' }, 500) })
+  await screen.findByText('Binh (@binh)')
+  await userEvent.click(within(row('Binh (@binh)')).getByRole('button', { name: en.delete }))
+  const confirm = await screen.findByText(en.confirmDeleteAccount.replace('{user}', 'binh'))
+  await userEvent.click(within(confirm.closest('[role="alertdialog"]') as HTMLElement).getByRole('button', { name: en.delete }))
+  await waitFor(() => expect(calls.filter((c) => c.url === '/api/admin/accounts' && c.method === 'GET')).toHaveLength(2))
+  expect(await screen.findByRole('alert')).toHaveTextContent('cannot delete')
+})
+
 test('no window.prompt, confirm or alert is used', async () => {
   const spies = (['prompt', 'confirm', 'alert'] as const).map((k) => vi.spyOn(window, k).mockReturnValue(null as never))
   setup()

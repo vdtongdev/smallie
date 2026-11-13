@@ -33,10 +33,10 @@ export default function AccountsDialog({ open, onOpenChange }: Props) {
   const [password, setPassword] = useState('')
   const [resetError, setResetError] = useState('')
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (keepError = false) => {
     try {
       setItems(await api<Account[]>('/admin/accounts'))
-      setError('')
+      if (!keepError) setError('')
     } catch (err) {
       setItems([])
       setError(message(err))
@@ -85,7 +85,7 @@ export default function AccountsDialog({ open, onOpenChange }: Props) {
     } catch (err) {
       setError(message(err))
     }
-    await load()
+    await load(true) // keep a delete error on screen after the reload
   }
 
   return (

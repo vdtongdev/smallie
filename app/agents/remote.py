@@ -152,7 +152,9 @@ class RemoteAgent:
                 log.exception("chat data not rendered for chat %s", conversation_id)
             context = replace(context, conversation_id=conversation_id, chat_data=note)
         # checkpoint_ns stays: RemoteGraph drops it from the request and prefixes streamed chunks with it.
-        config["configurable"] = {k: v for k, v in configurable.items() if k != "thread_id"}
+        # chat_step and chat_turn are read above; the server rejects any other key beside the context.
+        config["configurable"] = {k: v for k, v in configurable.items()
+                                  if k not in ("thread_id", "chat_step", "chat_turn")}
         # The note replaces earlier tool messages, so only a call with a chat drops them.
         sent = {**input, "messages": without_earlier_tool_messages(messages)} if conversation_id and "messages" in input else input
         headers = {"x-smallie-user-id": context.user_id}

@@ -501,3 +501,19 @@ async def test_call_without_thread_id_keeps_earlier_tool_messages():
     remote = FakeRemote(output={"messages": []})
     await agent(remote).ainvoke({"messages": messages}, {}, context=AgentContext(user_id="u-7"))
     assert [m.text for m in remote.calls[0]["input"]["messages"] if isinstance(m, ToolMessage)] == ["OLD-RESULT"]
+
+
+async def test_internal_config_keys_never_reach_the_server():
+    """The Agent Server rejects a run that has `context` and other configurable keys than these."""
+    class ServerLikeRemote(FakeRemote):
+        async def ainvoke(self, input, config=None, *, context=None, **kwargs):
+            extra = set(config["configurable"]) - {"checkpoint_ns", "__pregel_stream"}
+            if context is not None and extra:
+                raise RuntimeError(f"Cannot specify both configurable and context: {sorted(extra)}")
+            return await super().ainvoke(input, config, context=context, **kwargs)
+
+    remote = ServerLikeRemote(output={"messages": [HUMAN]})
+    config = {"configurable": {"thread_id": "no-such-chat", "chat_step": "t2", "chat_turn": 3,
+                               "checkpoint_ns": "sql:abc", "__pregel_stream": "hook"}}
+    await agent(remote).ainvoke({"messages": [as_message(HUMAN)]}, config, context=CTX)
+    assert remote.calls[0]["config"]["configurable"] == {"checkpoint_ns": "sql:abc", "__pregel_stream": "hook"}

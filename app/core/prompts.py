@@ -55,6 +55,15 @@ _memory = load_sections(LAYERS / "MEMORY.md", ("notes", "memories", "recent_chat
 NOTES_SECTION = "\n\n" + _memory["notes"]
 MEMORIES_SECTION = "\n\n" + _memory["memories"]
 RECENT_CHATS_SECTION = "\n\n" + _memory["recent_chats"]
+# The chat's saved data (app/core/chat_memory.py render), last in the system prompt. Its one
+# placeholder is filled with `.format(chat_data=...)`: the value may hold braces, the text may not.
+CHAT_DATA_SECTION = (
+    "\n\nDATA FROM EARLIER IN THIS CHAT\n"
+    "Use this data when it answers the request, and name the turn it came from.\n"
+    "Query only for what is missing, or when the user asks for fresh data.\n"
+    "A result marked as shortened is incomplete: query again when you need its detail.\n"
+    "{chat_data}"
+)
 
 _VIETNAMESE = re.compile(r"[ăâđêôơưàáạảãằắặẳẵầấậẩẫèéẹẻẽềếệểễìíịỉĩòóọỏõồốộổỗờớợởỡùúụủũừứựửữỳýỵỷỹ]", re.IGNORECASE)
 

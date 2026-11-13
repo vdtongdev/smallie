@@ -73,6 +73,9 @@ class Settings(BaseSettings):
     # Loop guard: model calls one chat message may use across the orchestrator and every agent
     # server (they report theirs); past it, no further specialist is called.
     max_message_model_calls: int = 30
+    # Chat memory (app/core/chat_memory.py): total size of the note of earlier data every agent call gets, and the cap on one saved tool result.
+    chat_data_chars: int = 24000
+    chat_data_entry_chars: int = 6000
     # Team mode: conflict rounds per meeting point, tasks per message (follow-ups included), and its own model-call cap (same guard as above).
     team_max_rounds: int = 2
     team_max_tasks: int = 6

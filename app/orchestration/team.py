@@ -32,7 +32,7 @@ from pydantic import BaseModel, Field
 from app.agents.artifacts import KINDS, collect
 from app.agents.remote import CallBudgetExceeded
 from app.agents.delegation import ask_tool_name
-from app.agents.base import MEMORY_TOOL_NAMES, TOOL_RESULT_PREVIEW, AgentSpec, RouteInfo, ToolRecorder, turn_messages
+from app.agents.base import MEMORY_TOOL_NAMES, TOOL_RESULT_PREVIEW, AgentSpec, RouteInfo, ToolRecorder, turn_messages, visible_user_messages
 from app.agents.registry import AGENTS
 from app.core.config import get_settings
 from app.core.llm import ask_structured, get_chat_model, pick_model, pick_tier
@@ -42,7 +42,7 @@ from app.core.usage import UsageCounter
 from app.core.prompts import reply_language
 from app.orchestration.prompts import BOARD_PROMPT, CHALLENGE_MESSAGE, CONFLICT_MESSAGE, DRAW_MESSAGE, DRAWING_NOTE, NOTHING_FOUND_MESSAGE, PLAN_PROMPT, ROUND_MESSAGE, TASK_MESSAGE, TEAM_MESSAGE
 from app.orchestration.team_plan import Plan, Task, add_follow_ups, after_user_files, dead_inputs, fallback_tasks, ready, validate_plan
-from app.orchestration.orchestrator import HANDOFF, HIDDEN
+from app.orchestration.orchestrator import HANDOFF, HIDDEN, chat_note
 from app.orchestration.router import ORCHESTRATOR, AssistantState, available_agents, mentioned_routes, obvious_route
 
 log = logging.getLogger(__name__)
@@ -179,6 +179,24 @@ def retry_tasks(messages: Sequence[AnyMessage], available: Sequence[tuple[AgentS
     return tasks or None
 
 
+def crashed_question(messages: Sequence[AnyMessage]) -> HumanMessage | None:
+    """The question of a turn that never got its answer (the app stopped mid turn): the latest visible user message
+    before the newest one, when no final answer follows it. Else None."""
+    visible = visible_user_messages(messages)
+    if len(visible) < 2:
+        return None
+    asked, newest = visible[-2], visible[-1]
+    answered = any(isinstance(m, AIMessage) and not m.tool_calls and m.text.strip() for m in messages[asked + 1:newest])
+    return None if answered else messages[asked]
+
+
+def thread_of(state: Mapping) -> list[AnyMessage]:
+    """The messages the steps after `plan` work from. In a crash retry the "try again" message is left out, so the
+    crashed question is the user's latest message for the review, the notes, the language and the write-up."""
+    retry_id = state["workspace"].get("retry_id")
+    return [m for m in state["messages"] if m.id != retry_id] if retry_id else list(state["messages"])
+
+
 def clean(board: Board, speakers: Sequence[str], tasks: Sequence[str] | None = None) -> Board:
     """Make a board safe to route on: routes only of agents that answered, `fixable_by` only of the
     conflict's own routes. `tasks`: the live task ids; a review's challenges and outcomes name only those."""
@@ -217,7 +235,8 @@ async def ask_board(messages: list[AnyMessage], answers: list[dict], config: Run
             line += f"\nPREVIOUSLY CHALLENGED, report its outcome: {a['challenge']}"
         return line
 
-    human = f"USER MESSAGE:\n{question}\n\nANSWERS:\n" + "\n\n".join(f"{head(a)}:\n{a['text']}" for a in answers)
+    _, note = await chat_note(user_id, config)
+    human = (f"CHAT DATA:\n{note}\n\n" if note else "") + f"USER MESSAGE:\n{question}\n\nANSWERS:\n" +"\n\n".join(f"{head(a)}:\n{a['text']}" for a in answers)
     board = await asyncio.to_thread(get_chat_model, user_id)
     if agents:  # texts go into the message, not a template
         human += "\n\nAVAILABLE AGENTS:\n" + "\n".join(
@@ -263,7 +282,8 @@ async def ask_plan(messages: list[AnyMessage], available: Sequence[tuple[AgentSp
         lines.append(line)
     # Texts go into the message, not a template: they may contain braces.
     chat = chat_so_far(messages[:last] if last else [])
-    human = (f"CHAT SO FAR:\n{chat}\n\n" if chat else "") + f"USER MESSAGE:\n{question}\n\nAGENTS:\n" + "\n".join(lines)
+    _, note = await chat_note(user_id, config)
+    human = (f"CHAT SO FAR:\n{chat}\n\n" if chat else "") + (f"CHAT DATA:\n{note}\n\n" if note else "") + f"USER MESSAGE:\n{question}\n\nAGENTS:\n" + "\n".join(lines)
     planner = await asyncio.to_thread(get_chat_model, user_id)
     system = PLAN_PROMPT.format(language=reply_language(messages), max_tasks=settings.team_max_tasks)
     return await ask_structured(planner, Plan, [SystemMessage(system), HumanMessage(human)], config)
@@ -385,14 +405,14 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         return Send("speak", {"task": task_id, "route": route, "round": rnd, "kind": kind, "note": note, "messages": messages,
                           "earlier": earlier or {}, **rating})
 
-    async def ask_orchestrator(state: AssistantState, runtime: Runtime[AgentContext], note: str = "", drawn: bool = False,
-                               write_up: bool = False):
+    async def ask_orchestrator(state: AssistantState, runtime: Runtime[AgentContext], config: RunnableConfig, note: str = "",
+                               drawn: bool = False, write_up: bool = False):
         """The orchestrator node's Command for this thread (`note` as its hidden team message;
         `drawn`: a chart task charts the answer, so the orchestrator may not; `write_up`: it writes the
         analysis itself, with no hand-off and no specialist to ask)."""
         deny = (HANDOFF, *(ask_tool_name(s) for s in specs if s.tool_description)) if write_up else ()
         runtime = dataclasses.replace(runtime, context=dataclasses.replace(runtime.context, tier="standard", deny_tools=deny))
-        return await orchestrator({**state, "team_note": note, "team_drawn": drawn} if note else state, runtime)
+        return await orchestrator({**state, "team_note": note, "team_drawn": drawn} if note else state, runtime, config)
 
     async def handed_off(command: Command, messages, runtime: Runtime[AgentContext], config: RunnableConfig) -> AIMessage:
         """The orchestrator handed off: that agent answers on the thread, as in normal mode."""
@@ -401,21 +421,27 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         turn = turn_messages(result.get("messages", []))
         return AIMessage(spec.result(result), name=spec.message_names[0], additional_kwargs=collect(turn))
 
-    async def alone(state: TeamState, runtime: Runtime[AgentContext], config: RunnableConfig) -> Command:
-        """No specialist is needed: the orchestrator answers as in normal mode."""
-        command = await ask_orchestrator(state, runtime)
+    async def alone(state: TeamState, runtime: Runtime[AgentContext], config: RunnableConfig, crashed: bool = False) -> Command:
+        """No specialist is needed: the orchestrator answers as in normal mode. `crashed`: a crash retry, so the answer
+        is to the crashed question: the "try again" message is left out of what the orchestrator sees."""
+        messages = state["messages"][:-1] if crashed else state["messages"]
+        command = await ask_orchestrator({**state, "messages": messages}, runtime, config)
         if command.goto not in by_route:
             return Command(goto=END, update=command.update)
-        return Command(goto=END, update={"messages": [await handed_off(command, state["messages"], runtime, config)]})
+        return Command(goto=END, update={"messages": [await handed_off(command, messages, runtime, config)]})
 
     async def plan(state: TeamState, runtime: Runtime[AgentContext], config: RunnableConfig) -> Command:
         messages = state["messages"]
         available = await available_agents(runtime.context.user_id, specs)
-        everyone = participants(available, messages[-1].text)
+        # "try again" after a turn that never got its answer asks that turn's question again
+        crashed = crashed_question(messages) if RETRY.search(messages[-1].text) and len(messages[-1].text.split()) <= SMALL_TALK_WORDS else None
+        question = crashed.text if crashed else messages[-1].text
+        asked_messages = messages[:messages.index(crashed) + 1] if crashed else messages
+        everyone = participants(available, question)
         chosen = [spec.route for spec in everyone if not spec.draws]
-        retry = None if chosen else retry_tasks(messages, available)
+        retry = None if chosen or crashed else retry_tasks(messages, available)
         if not chosen and not retry:
-            return await alone(state, runtime, config)
+            return await alone(state, runtime, config, bool(crashed))
         fallback = False
         if retry:
             tasks = retry
@@ -424,7 +450,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         else:
             missing = False
             try:
-                made = await ask_plan(messages, available, config, user_id=runtime.context.user_id)
+                made = await ask_plan(asked_messages, available, config, user_id=runtime.context.user_id)
                 missing = made is None
                 tasks = validate_plan(made, [s.route for s, _ in available], get_settings().team_max_tasks)
             except (openai.RateLimitError, openai.AuthenticationError):
@@ -433,10 +459,10 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
                 log.exception("Team plan failed")
                 tasks = None
             if tasks == []:
-                return await alone(state, runtime, config)
+                return await alone(state, runtime, config, bool(crashed))
             if tasks is None:  # a named chart agent draws from the answer
                 if missing:  # the model made no plan: the best pick takes the work alone
-                    pick = best_pick(messages[-1].text, available, chosen)
+                    pick = best_pick(question, available, chosen)
                     log.info("Team plan missing, %s takes the work", pick)
                     chosen = [pick]
                 # a failed or invalid plan: the participants take the work, as the round table did
@@ -449,13 +475,14 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
                 # inputless planned tasks wait for the tasks that read the user's files (the fallback runs everyone at once)
                 tasks = after_user_files(tasks, {s.route for s, _ in available if "user_files" in s.sources})
         emit({"type": "plan", "tasks": [_brief(t) for t in tasks], "fallback": fallback})
-        workspace = {"reset": True, "goal": messages[-1].text, "tasks": tasks, "results": {}, "evidence": [], "artifacts": {},
+        workspace = {"reset": True, "goal": question, "tasks": tasks, "results": {}, "evidence": [], "artifacts": {},
                      "history": [], "rounds_at": {}, "wave": 0, "question": "",
-                     "synthesis": {"forced": False, "open_points": [], "not_done": []}, "challenged": {}}
+                     "synthesis": {"forced": False, "open_points": [], "not_done": []}, "challenged": {},
+                     **({"retry_id": messages[-1].id} if crashed else {})}
         return Command(update={"workspace": workspace}, goto="dispatch")
 
     async def dispatch(state: TeamState, runtime: Runtime[AgentContext]) -> Command:
-        workspace, messages = state["workspace"], state["messages"]
+        workspace, messages = state["workspace"], thread_of(state)
         tasks = [dict(t) for t in workspace["tasks"]]
         if any(r.get("budget") for r in workspace["results"].values()):  # the model-call budget is spent
             return Command(goto="synthesize")
@@ -513,7 +540,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
 
         recorder = ToolRecorder()
         try:
-            result = await agents[route].ainvoke({"messages": messages}, merge_configs(config, {"callbacks": [recorder, counter]}),
+            result = await agents[route].ainvoke({"messages": messages}, merge_configs(config, {"callbacks": [recorder, counter], "configurable": {"chat_step": tid}}),
                                                  context=context)
         except (openai.RateLimitError, openai.AuthenticationError):
             raise
@@ -540,7 +567,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         return outcome
 
     async def review(state: TeamState, runtime: Runtime[AgentContext], config: RunnableConfig) -> Command:
-        workspace, messages, settings = state["workspace"], state["messages"], get_settings()
+        workspace, messages, settings = state["workspace"], thread_of(state), get_settings()
         tasks, results, rounds_at = workspace["tasks"], workspace["results"], workspace["rounds_at"]
         challenged, synthesis = workspace.get("challenged", {}), workspace["synthesis"]
         pending = [t for t in tasks if t["status"] == "pending" and ANSWER not in t["depends_on"]]
@@ -709,7 +736,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         return Command(update={"messages": messages[-1:], "workspace": update}, goto="dispatch" if added else "review")
 
     async def synthesize(state: TeamState, runtime: Runtime[AgentContext], config: RunnableConfig) -> dict:
-        workspace, messages = state["workspace"], state["messages"]
+        workspace, messages = state["workspace"], thread_of(state)
         drawers = drawers_of(workspace["tasks"])
         answers = _answers(workspace, workspace["tasks"], drawers)
         last = next((e for e in reversed(workspace["history"]) if e["type"] == "review"), None)
@@ -725,7 +752,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
             withdrawn = [t["agent"] for t in workspace["tasks"] if t["status"] == "withdrew" and t["agent"] not in drawers]
             note = NOTHING_FOUND_MESSAGE.format(withdrawn=", ".join(dict.fromkeys(withdrawn)),
                                                 language=reply_language(messages), drawing=_drawing(drawers))
-            command = await ask_orchestrator(state, runtime, note, bool(drawers))
+            command = await ask_orchestrator({**state, "messages": messages}, runtime, config, note, bool(drawers))
             answer = await handed_off(command, messages, runtime, config) if command.goto in by_route \
                 else command.update["messages"][0]
         elif len(answers) == 1 and not board.conflicts and not forced and not open_points and not not_done and only.answers_directly:
@@ -739,7 +766,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
                 conflicts=_bullets([f"{c.claim} ({', '.join(c.routes)}): {c.issue}, cause: {c.cause}" for c in board.conflicts]),
                 open_points=_bullets(open_points), not_done=_bullets(not_done),
                 language=reply_language(messages), drawing=_drawing(drawers))
-            command = await ask_orchestrator(state, runtime, note, bool(drawers), write_up=True)
+            command = await ask_orchestrator({**state, "messages": messages}, runtime, config, note, bool(drawers), write_up=True)
             answer = command.update["messages"][0]
         artifacts = _merge([r["artifacts"] for r in workspace["results"].values()])
         kwargs = {**answer.additional_kwargs, **_merge([artifacts, collect([answer])]), "team": _transcript(workspace)}
@@ -750,7 +777,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
 
     async def draw(state: TeamState, runtime: Runtime[AgentContext], config: RunnableConfig) -> dict:
         """Each chart task runs once on the thread plus the final answer, with no data source, and its charts join the answer."""
-        workspace, messages, answer = state["workspace"], state["messages"], state["messages"][-1]
+        workspace, messages, answer = state["workspace"], thread_of(state), state["messages"][-1]
         artifacts, results, status = [collect([answer])], {}, {}
         for task in (t for t in workspace["tasks"] if t["status"] == "pending" and ANSWER in t["depends_on"]):
             route, tid = task["agent"], task["id"]
@@ -768,7 +795,8 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
             tools, text, charts = [], "", []
             try:
                 result = await agents[route].ainvoke({"messages": [*messages, note]},
-                                                     merge_configs(config, {"callbacks": [recorder, counter]}), context=context)
+                                                     merge_configs(config, {"callbacks": [recorder, counter], "configurable": {"chat_step": "chart"}}),
+                                                     context=context)
             except (openai.RateLimitError, openai.AuthenticationError):
                 raise
             except Exception as exc:  # noqa: BLE001 - the final answer stands without the chart

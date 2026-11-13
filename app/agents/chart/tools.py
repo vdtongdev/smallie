@@ -11,9 +11,10 @@ import asyncio
 
 from langchain.tools import ToolRuntime, tool
 
-from app.agents.artifacts import artifacts_from, same_query
+from app.agents.artifacts import same_query
 from app.agents.chart.spec import ChartSpec, ChartType, Series, make_spec, summary
 from app.agents.sql.tools import query_readonly
+from app.core.chat_memory import known_tables
 from app.core.memory import TOOL_SOURCE, AgentContext
 
 
@@ -97,8 +98,8 @@ async def chart_sql(query: str, type: ChartType, title: str, x_column: str, runt
     """
     # The same query earlier in the chat: draw its result again instead of querying (the model
     # was asked to reuse listed tables, but repeated questions often get the same SQL anyway).
-    earlier = next((t for t in reversed(artifacts_from(runtime.state["messages"], "tables"))
-                    if same_query(t["query"], query)), None)
+    known, _ = await asyncio.to_thread(known_tables, runtime.state["messages"], getattr(runtime, "context", None))
+    earlier = next((t for t in reversed(known) if same_query(t["query"], query)), None)
     if earlier:
         content, artifact = drawn(rows_to_spec(earlier, type, title, x_column, y_columns, series_column, x_label, y_label))
         reused = f"(Reused table {earlier['id']} from earlier in this chat: the same query, not run again.) "
@@ -126,7 +127,8 @@ async def chart_table(table_id: str, type: ChartType, title: str, x_column: str,
         x_label: Optional x axis label (defaults to x_column).
         y_label: Optional y axis label, with the unit.
     """
-    tables = {t["id"]: t for t in artifacts_from(runtime.state["messages"], "tables")}
+    known, _ = await asyncio.to_thread(known_tables, runtime.state["messages"], getattr(runtime, "context", None))
+    tables = {t["id"]: t for t in known}
     table = tables.get(table_id.strip())
     if table is None:
         return f"Error: no table {table_id!r} in this chat. Available: {', '.join(tables) or 'none'}.", {}

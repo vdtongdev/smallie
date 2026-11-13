@@ -29,6 +29,7 @@ from app.core import db
 from app.core.config import Settings, get_settings
 from app.core.memory import AgentContext
 from app.core.usage import UsageCounter
+from tests.conftest import requires_db
 
 AI_DICT = {
     "type": "ai", "content": "AAPL pays 0.4%.", "name": "sql_agent", "id": "m1",
@@ -154,7 +155,8 @@ async def test_sends_context_and_user_header_without_thread_id():
     config = {"configurable": {"thread_id": "c-42", "checkpoint_ns": "sql:abc", "__pregel_stream": "hook"}}
     await agent(remote).node({"messages": [as_message(HUMAN)]}, config, SimpleNamespace(context=CTX))
     call = remote.calls[0]
-    assert call["context"] == asdict(CTX)
+    # The chat id travels in the context (chart tools read the chat's saved tables); the chat has no saved data.
+    assert call["context"] == {**asdict(CTX), "conversation_id": "c-42", "chat_data": ""}
     assert call["headers"] == {"x-smallie-user-id": "u-7"}
     # Stateless: no thread. checkpoint_ns stays: RemoteGraph prefixes streamed chunks with it.
     assert call["config"]["configurable"] == {"checkpoint_ns": "sql:abc", "__pregel_stream": "hook"}
@@ -408,3 +410,110 @@ def test_tables_on_a_message_survive_the_wire_to_the_servers_state():
     wire = orjson.loads(orjson.dumps({"messages": [answer]}, default=_orjson_default))
     state = add_messages([], wire["messages"])
     assert artifacts_from(state, "tables") == [{"id": "t1", "rows": [[1]]}]
+
+
+# --- chat memory (docs/superpowers/specs/2026-11-13-chat-memory-design.md) ---
+
+def sql_turn(call_id: str, text: str):
+    """What the sql agent returns for a question: a run_sql call and its result."""
+    return [
+        {"type": "ai", "content": "", "id": f"a{call_id}",
+         "tool_calls": [{"name": "run_sql", "args": {"query": f"select {call_id}"}, "id": call_id, "type": "tool_call"}]},
+        {"type": "tool", "content": text, "name": "run_sql", "tool_call_id": call_id, "id": f"t{call_id}"},
+    ]
+
+
+@pytest.fixture
+def saved_chat():
+    from sqlalchemy import delete, select
+    from app.core.conversations import create_conversation
+
+    db.init_db()
+    user_id = f"test-remote-chatmem-{time.monotonic_ns()}"
+    with db.get_engine().begin() as conn:
+        conn.execute(db.users.insert().values(id=user_id, display_name="Test"))
+    conversation_id = create_conversation(user_id, "auto", "hello")["id"]
+
+    def rows():
+        with db.get_engine().connect() as conn:
+            return conn.execute(select(db.chat_data).where(db.chat_data.c.user_id == user_id)).all()
+
+    yield user_id, conversation_id, rows
+    with db.get_engine().begin() as conn:
+        conn.execute(delete(db.users).where(db.users.c.id == user_id))
+
+
+@requires_db
+async def test_remote_call_saves_tool_results(saved_chat):
+    user_id, conversation_id, rows = saved_chat
+    remote = FakeRemote(output={"messages": [HUMAN, *sql_turn("c1", "RESULT-ONE")]})
+    config = {"configurable": {"thread_id": conversation_id, "chat_step": "t2"}}
+    await agent(remote).ainvoke({"messages": [as_message(HUMAN)]}, config, context=AgentContext(user_id=user_id))
+    [row] = rows()
+    assert (row.step, row.agent, row.tool, row.turn) == ("t2", "sql", "run_sql", 1)
+    assert row.content == "RESULT-ONE" and row.args == {"query": "select c1"}
+
+
+@requires_db
+async def test_remote_call_sends_chat_data_and_conversation_id(saved_chat):
+    user_id, conversation_id, _ = saved_chat
+    first = FakeRemote(output={"messages": [HUMAN, *sql_turn("c1", "RESULT-ONE")]})
+    config = {"configurable": {"thread_id": conversation_id}}
+    context = AgentContext(user_id=user_id)
+    await agent(first).ainvoke({"messages": [as_message(HUMAN)]}, config, context=context)
+    second = FakeRemote(output={"messages": [HUMAN]})
+    await agent(second).ainvoke({"messages": [as_message(HUMAN)]}, config, context=context)
+    sent = second.calls[0]["context"]
+    assert sent["conversation_id"] == conversation_id and "RESULT-ONE" in sent["chat_data"]
+    assert "thread_id" not in second.calls[0]["config"]["configurable"]
+
+
+async def test_remote_call_drops_earlier_tool_messages():
+    earlier = [as_message(m) for m in sql_turn("old", "OLD-RESULT")]
+    current = [as_message(m) for m in sql_turn("new", "NEW-RESULT")]
+    messages = [HumanMessage("first"), *earlier, AIMessage("answer one"), HumanMessage("second"), *current]
+    remote = FakeRemote(output={"messages": []})
+    await agent(remote).ainvoke({"messages": messages}, {"configurable": {"thread_id": "no-such-chat"}},
+                                context=AgentContext(user_id="u-7"))
+    sent = remote.calls[0]["input"]["messages"]
+    assert [m.text for m in sent if isinstance(m, ToolMessage)] == ["NEW-RESULT"]
+    assert [m.text for m in sent if isinstance(m, HumanMessage)] == ["first", "second"]
+    assert any(m.text == "answer one" for m in sent)  # final answers stay
+
+
+async def test_save_failure_does_not_fail_the_call(monkeypatch):
+    def boom(*args, **kwargs):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(remote_module, "save_entries", boom)
+    monkeypatch.setattr(remote_module, "render", boom)
+    remote = FakeRemote(output={"messages": [HUMAN, *sql_turn("c1", "R")]})
+    result = await agent(remote).ainvoke({"messages": [as_message(HUMAN)]}, {"configurable": {"thread_id": "c-1"}},
+                                         context=AgentContext(user_id="u-7"))
+    assert len(result["messages"]) == 2
+    assert remote.calls[0]["context"]["chat_data"] == ""
+
+
+async def test_call_without_thread_id_keeps_earlier_tool_messages():
+    # No chat: no chat data note replaces the earlier tool messages, so the input is sent unchanged.
+    earlier = [as_message(m) for m in sql_turn("old", "OLD-RESULT")]
+    messages = [HumanMessage("first"), *earlier, AIMessage("answer one"), HumanMessage("second")]
+    remote = FakeRemote(output={"messages": []})
+    await agent(remote).ainvoke({"messages": messages}, {}, context=AgentContext(user_id="u-7"))
+    assert [m.text for m in remote.calls[0]["input"]["messages"] if isinstance(m, ToolMessage)] == ["OLD-RESULT"]
+
+
+async def test_internal_config_keys_never_reach_the_server():
+    """The Agent Server rejects a run that has `context` and other configurable keys than these."""
+    class ServerLikeRemote(FakeRemote):
+        async def ainvoke(self, input, config=None, *, context=None, **kwargs):
+            extra = set(config["configurable"]) - {"checkpoint_ns", "__pregel_stream"}
+            if context is not None and extra:
+                raise RuntimeError(f"Cannot specify both configurable and context: {sorted(extra)}")
+            return await super().ainvoke(input, config, context=context, **kwargs)
+
+    remote = ServerLikeRemote(output={"messages": [HUMAN]})
+    config = {"configurable": {"thread_id": "no-such-chat", "chat_step": "t2", "chat_turn": 3,
+                               "checkpoint_ns": "sql:abc", "__pregel_stream": "hook"}}
+    await agent(remote).ainvoke({"messages": [as_message(HUMAN)]}, config, context=CTX)
+    assert remote.calls[0]["config"]["configurable"] == {"checkpoint_ns": "sql:abc", "__pregel_stream": "hook"}

@@ -55,6 +55,8 @@ class AgentContext:
     deny_tools: tuple[str, ...] = ()  # tools hidden from the agent and refused if called (team mode: charts have one drawer)
     tier: str = "standard"  # model slot for this run: small, standard or strong (a tier, never a model name or key)
     agent_notes: dict[str, str] = field(default_factory=dict)  # route -> that agent's notes as bullets; each agent renders its own
+    conversation_id: str = ""  # the chat the call belongs to (set by RemoteAgent.ainvoke); chart tools read its saved tables
+    chat_data: str = ""  # the chat's saved data as one note (app/core/chat_memory.py render); rendered last in the system prompt
 
 
 def memory_namespace(user_id: str) -> tuple[str, ...]:

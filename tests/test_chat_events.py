@@ -185,7 +185,7 @@ async def test_messages_show_a_pending_question(monkeypatch):
     snapshot = SimpleNamespace(values={"messages": [HumanMessage("compare revenue")]},
                                interrupts=[SimpleNamespace(value={"question": "Which company?"})])
 
-    async def aget_state(config):
+    async def aget_state(config, **kwargs):
         return snapshot
 
     request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(assistant=SimpleNamespace(aget_state=aget_state))))
@@ -208,7 +208,7 @@ async def test_paused_turn_is_not_remembered(monkeypatch):
     async def spy(*args, **kwargs):
         calls.append(args)
 
-    async def aget_state(config):
+    async def aget_state(config, **kwargs):
         return SimpleNamespace(values={"messages": [AIMessage("x", name="orchestrator")]},
                                interrupts=[SimpleNamespace(value={"question": "Which?"})])
 

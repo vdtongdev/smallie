@@ -19,7 +19,7 @@ from app.agents.remote import RUN_NODE, as_message
 from app.orchestration.orchestrator import HANDOFF, MESSAGE_ROUTES
 from app.core.auth import get_current_user
 from app.core.config import get_settings
-from app.api.routes_conversations import user_messages
+from app.api.routes_conversations import thread_messages, user_messages
 from app.core.conversations import (add_conversation_usage, create_conversation, get_conversation, save_turn_activity,
                                     touch_conversation)
 from app.core.llm import NoModelSettings, pick_model, pick_tier
@@ -127,9 +127,9 @@ async def chat(
                 yield out({"type": "routing", "difficulty": "medium", "profile": settings.profile,
                             "tier": tier_used, "model": model, "reason": reason})
             try:  # the saved activity is best effort: a failed read never stops the reply
-                before = await assistant.aget_state(config)
-                n_before = user_messages(before.values.get("messages", []))
-                resumed = kind == TEAM_MODE and bool(before.interrupts)
+                before, paused = await thread_messages(assistant, config)
+                n_before = user_messages(before)
+                resumed = kind == TEAM_MODE and paused
             except Exception:  # noqa: BLE001
                 log.exception("Reading the thread before the reply failed")
             snapshot = await chat_snapshot(request.app.state.checkpointer, user_id, conversation)
@@ -168,7 +168,7 @@ async def chat(
                     log.exception("Saving the chat's token usage failed")
             if n_before is not None:
                 try:
-                    n_after = user_messages((await assistant.aget_state(config)).values.get("messages", []))
+                    n_after = user_messages((await thread_messages(assistant, config))[0])
                     if turn := _activity_turn(n_before, n_after, resumed):
                         await asyncio.to_thread(save_turn_activity, user_id, conversation["id"], turn, shown)
                 except Exception:  # noqa: BLE001 - the saved activity is best effort

@@ -23,18 +23,38 @@ async def messages(conversation_id: str, request: Request, user_id: str = Depend
     conversation = await asyncio.to_thread(get_conversation, user_id, conversation_id)
     if not conversation:
         raise HTTPException(404, "Conversation not found")
-    state = await request.app.state.assistant.aget_state({"configurable": {"thread_id": conversation_id}})
+    assistant = request.app.state.assistant
+    config = {"configurable": {"thread_id": conversation_id}}
+    thread, paused = await thread_messages(assistant, config)
     activity = await asyncio.to_thread(get_turn_activity, user_id, conversation_id)
-    shown = [m for m in map(_serialize, state.values.get("messages", [])) if m]
+    shown = [m for m in map(_serialize, thread) if m]
     turn = 0
     for item in shown:
         if item["role"] == "user":
             turn += 1
             item["activity"] = activity.get(turn)
-    if state.interrupts:  # a paused team turn: its question is not in the thread yet
-        shown.append({"role": "assistant", "agent": "orchestrator", "content": state.interrupts[0].value["question"],
-                      "pending": True, "team": None, "tool_calls": [], "charts": []})
+    if paused:  # a paused team turn: the latest question is the pending one
+        question = (await assistant.aget_state(config)).interrupts[0].value["question"]
+        if shown and shown[-1]["role"] == "assistant" and shown[-1]["content"] == question:
+            shown[-1]["pending"] = True
+        else:
+            shown.append({"role": "assistant", "agent": "orchestrator", "content": question,
+                          "pending": True, "team": None, "tool_calls": [], "charts": []})
     return shown
+
+
+async def thread_messages(assistant, config) -> tuple[list, bool]:
+    """The messages the history shows and whether the turn is paused on a question. A paused team turn
+    keeps its questions and the user's replies in the team subgraph until it finishes, so they are read there."""
+    state = await assistant.aget_state(config)
+    if not state.interrupts:
+        return state.values.get("messages", []), False
+    paused = await assistant.aget_state(config, subgraphs=True)
+    for task in getattr(paused, "tasks", ()):
+        inner = getattr(task, "state", None)
+        if inner is not None and getattr(inner, "values", None) and inner.values.get("messages"):
+            return inner.values["messages"], True
+    return state.values.get("messages", []), True
 
 
 @router.get("/conversations/{conversation_id}/usage")

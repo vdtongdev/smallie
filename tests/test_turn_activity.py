@@ -104,7 +104,7 @@ async def _chat(monkeypatch, chunks, *, kind="auto", settings="set", earlier=1, 
     """Run `chat`; the thread holds `earlier` user messages and `astream` adds one when `adds`."""
     messages = [HumanMessage(content=f"q{i}") for i in range(earlier)]
 
-    async def aget_state(config):
+    async def aget_state(config, **kwargs):
         return SimpleNamespace(values={"messages": list(messages)}, interrupts=list(interrupts))
 
     async def astream(*args, **kwargs):
@@ -226,7 +226,7 @@ def test_user_messages_counts_what_history_shows():
 
 
 def _history_request(messages, interrupts=()):
-    async def aget_state(config):
+    async def aget_state(config, **kwargs):
         return SimpleNamespace(values={"messages": messages}, interrupts=list(interrupts))
 
     return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(assistant=SimpleNamespace(aget_state=aget_state))))

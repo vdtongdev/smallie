@@ -94,3 +94,21 @@ test('the usage box reloads after a send that ends in an error too', async () =>
   await userEvent.type(await screen.findByPlaceholderText(en.placeholder), 'q{Enter}')
   await waitFor(() => expect(usageCalls(calls)).toBe(before + 1))
 })
+
+test('the Accounts button shows for an admin only', async () => {
+  installFetch({ 'GET /api/me': () => json({ ...me, is_admin: true }) })
+  const view = renderApp()
+  expect(await screen.findByRole('button', { name: en.accounts })).toBeInTheDocument()
+  view.unmount()
+  installFetch()
+  renderApp()
+  await screen.findByText('An')
+  expect(screen.queryByRole('button', { name: en.accounts })).toBeNull()
+})
+
+test('the Accounts button opens the accounts dialog', async () => {
+  installFetch({ 'GET /api/me': () => json({ ...me, is_admin: true }), 'GET /api/admin/accounts': () => json([]) })
+  renderApp()
+  await userEvent.click(await screen.findByRole('button', { name: en.accounts }))
+  expect(await screen.findByRole('heading', { name: en.accountsTitle })).toBeInTheDocument()
+})

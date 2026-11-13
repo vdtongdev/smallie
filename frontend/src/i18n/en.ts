@@ -148,6 +148,10 @@ export const en = {
   otherSteps: "Other steps",
   drawing: "Drawing",
   yourQuestion: "Question for you",
+  themeGroup: "Theme",
+  themeShadcn: "shadcn",
+  themeChatroom: "Chatroom",
+  themeLight: "Light",
 } as const
 
 export type I18nKey = keyof typeof en

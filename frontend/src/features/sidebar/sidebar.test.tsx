@@ -91,6 +91,15 @@ test('the Team mode switch is disabled while busy', () => {
   expect(screen.getByRole('checkbox', { name: en.teamMode })).toBeDisabled()
 })
 
+test('the Settings button sits below the chat list and asks to open Settings', async () => {
+  const onOpenSettings = vi.fn()
+  show({ onOpenSettings })
+  const button = screen.getByRole('button', { name: en.settings })
+  expect(screen.getByText('Team chat').compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  await userEvent.click(button)
+  expect(onOpenSettings).toHaveBeenCalledTimes(1)
+})
+
 test('an empty list shows the empty text', () => {
   show({ conversations: [], currentId: null })
   expect(screen.getByText(en.noConversations)).toBeInTheDocument()

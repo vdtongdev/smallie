@@ -5,6 +5,7 @@ import App from '@/App'
 import { AuthProvider } from '@/features/auth/AuthProvider'
 import { LanguageProvider } from '@/i18n'
 import { en } from '@/i18n/en'
+import { installFetch, sseResponse } from '@/test/chatMock'
 
 const me = { user_id: 'u1', name: 'An', username: 'an', is_admin: false, max_accounts: 5 }
 
@@ -40,6 +41,24 @@ test('header shows name with @username title, Readme and logout', async () => {
   expect(await screen.findByText('An')).toHaveAttribute('title', '@an')
   expect(screen.getByRole('button', { name: en.readme })).toBeInTheDocument()
   expect(screen.getByRole('button', { name: en.logout })).toBeInTheDocument()
+})
+
+test('the sidebar Settings button opens the Settings dialog', async () => {
+  renderApp()
+  await userEvent.click(await screen.findByRole('button', { name: en.settings }))
+  expect(await screen.findByRole('heading', { name: en.settings })).toBeInTheDocument()
+  expect(screen.getByLabelText(en.apiKey)).toBeInTheDocument()
+})
+
+test('the chat no_model Open Settings button opens the Settings dialog', async () => {
+  installFetch({
+    'POST /api/chat/auto': () =>
+      sseResponse([{ type: 'error', message: 'No model set up', code: 'no_model' }, { type: 'done' }]),
+  })
+  renderApp()
+  await userEvent.type(await screen.findByPlaceholderText(en.placeholder), 'q{Enter}')
+  await userEvent.click(await screen.findByRole('button', { name: en.openSettings }))
+  expect(await screen.findByRole('heading', { name: en.settings })).toBeInTheDocument()
 })
 
 test('Readme button opens the dialog and close button closes it', async () => {

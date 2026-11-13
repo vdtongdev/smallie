@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { initTheme } from './theme'
 
 let listeners: ((e: { matches: boolean }) => void)[] = []
@@ -41,4 +41,46 @@ test('follows a change while open', () => {
   expect(isDark()).toBe(false)
   stop()
   expect(listeners).toHaveLength(0)
+})
+
+describe('theme decides dark', () => {
+  afterEach(() => delete document.documentElement.dataset.theme)
+
+  test('chatroom is dark even when the system is light', () => {
+    document.documentElement.dataset.theme = 'chatroom'
+    stubMedia(false)
+    initTheme()
+    expect(isDark()).toBe(true)
+  })
+
+  test('light is not dark even when the system is dark', () => {
+    document.documentElement.dataset.theme = 'light'
+    document.documentElement.classList.add('dark')
+    stubMedia(true)
+    initTheme()
+    expect(isDark()).toBe(false)
+  })
+
+  test('chatroom and light ignore a system change', () => {
+    document.documentElement.dataset.theme = 'chatroom'
+    stubMedia(false)
+    initTheme()
+    listeners.forEach((l) => l({ matches: false }))
+    expect(isDark()).toBe(true)
+    document.documentElement.dataset.theme = 'light'
+    listeners.forEach((l) => l({ matches: true }))
+    expect(isDark()).toBe(false)
+  })
+
+  test('shadcn and smallie follow the system', () => {
+    for (const name of ['shadcn', 'smallie']) {
+      document.documentElement.dataset.theme = name
+      stubMedia(true)
+      const stop = initTheme()
+      expect(isDark()).toBe(true)
+      listeners.forEach((l) => l({ matches: false }))
+      expect(isDark()).toBe(false)
+      stop()
+    }
+  })
 })

@@ -150,4 +150,8 @@ export const vi: Record<I18nKey, string> = {
   otherSteps: "Các bước khác",
   drawing: "Vẽ biểu đồ",
   yourQuestion: "Câu hỏi dành cho bạn",
+  themeGroup: "Giao diện",
+  themeShadcn: "shadcn",
+  themeChatroom: "Chatroom",
+  themeLight: "Sáng",
 }

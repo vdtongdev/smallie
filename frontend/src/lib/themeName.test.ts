@@ -1,10 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { applyThemeName, DEFAULT_THEME, resolveThemeName, THEMES } from './themeName'
+import { applyThemeName, DEFAULT_THEME, PICKER_THEMES, resolveThemeName, setThemeName, THEMES } from './themeName'
 
 describe('resolveThemeName', () => {
-  it('lists the three themes with chatroom as default', () => {
-    expect([...THEMES]).toEqual(['chatroom', 'shadcn', 'smallie'])
+  it('lists the four themes with chatroom as default', () => {
+    expect([...THEMES]).toEqual(['chatroom', 'shadcn', 'smallie', 'light'])
     expect(DEFAULT_THEME).toBe('chatroom')
+  })
+  it('offers exactly shadcn, chatroom and light in the picker; smallie stays reachable', () => {
+    expect([...PICKER_THEMES]).toEqual(['shadcn', 'chatroom', 'light'])
+    expect(resolveThemeName('?theme=smallie', null)).toBe('smallie')
+    expect(resolveThemeName('?theme=light', null)).toBe('light')
   })
   it('prefers the query param over the stored value', () => {
     expect(resolveThemeName('?theme=shadcn', 'smallie')).toBe('shadcn')
@@ -41,6 +46,18 @@ describe('applyThemeName', () => {
     localStorage.setItem('theme', 'smallie')
     expect(applyThemeName()).toBe('smallie')
     expect(document.documentElement.dataset.theme).toBe('smallie')
+  })
+  it('setThemeName sets data-theme and storage at once and re-applies dark mode', () => {
+    vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} }))
+    setThemeName('chatroom')
+    expect(document.documentElement.dataset.theme).toBe('chatroom')
+    expect(localStorage.getItem('theme')).toBe('chatroom')
+    expect(document.documentElement.classList.contains('dark')).toBe(true)
+    setThemeName('light')
+    expect(localStorage.getItem('theme')).toBe('light')
+    expect(document.documentElement.classList.contains('dark')).toBe(false)
+    vi.unstubAllGlobals()
+    document.documentElement.classList.remove('dark')
   })
   it('still applies the theme when storage throws', () => {
     vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {

@@ -421,12 +421,14 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         turn = turn_messages(result.get("messages", []))
         return AIMessage(spec.result(result), name=spec.message_names[0], additional_kwargs=collect(turn))
 
-    async def alone(state: TeamState, runtime: Runtime[AgentContext], config: RunnableConfig) -> Command:
-        """No specialist is needed: the orchestrator answers as in normal mode."""
-        command = await ask_orchestrator(state, runtime, config)
+    async def alone(state: TeamState, runtime: Runtime[AgentContext], config: RunnableConfig, crashed: bool = False) -> Command:
+        """No specialist is needed: the orchestrator answers as in normal mode. `crashed`: a crash retry, so the answer
+        is to the crashed question: the "try again" message is left out of what the orchestrator sees."""
+        messages = state["messages"][:-1] if crashed else state["messages"]
+        command = await ask_orchestrator({**state, "messages": messages}, runtime, config)
         if command.goto not in by_route:
             return Command(goto=END, update=command.update)
-        return Command(goto=END, update={"messages": [await handed_off(command, state["messages"], runtime, config)]})
+        return Command(goto=END, update={"messages": [await handed_off(command, messages, runtime, config)]})
 
     async def plan(state: TeamState, runtime: Runtime[AgentContext], config: RunnableConfig) -> Command:
         messages = state["messages"]
@@ -439,7 +441,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
         chosen = [spec.route for spec in everyone if not spec.draws]
         retry = None if chosen or crashed else retry_tasks(messages, available)
         if not chosen and not retry:
-            return await alone(state, runtime, config)
+            return await alone(state, runtime, config, bool(crashed))
         fallback = False
         if retry:
             tasks = retry
@@ -457,7 +459,7 @@ def build_team(specs: Sequence[AgentSpec], agents: Mapping, orchestrator):
                 log.exception("Team plan failed")
                 tasks = None
             if tasks == []:
-                return await alone(state, runtime, config)
+                return await alone(state, runtime, config, bool(crashed))
             if tasks is None:  # a named chart agent draws from the answer
                 if missing:  # the model made no plan: the best pick takes the work alone
                     pick = best_pick(question, available, chosen)

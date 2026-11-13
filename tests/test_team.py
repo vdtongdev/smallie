@@ -2553,3 +2553,18 @@ async def test_crash_retry_answers_in_the_crashed_questions_language(monkeypatch
     texts = [m.text for p in model.prompts for m in p]
     assert any(f"REPLY LANGUAGE for this message: {language}," in t for t in texts)
     assert not any(f"REPLY LANGUAGE for this message: {other}," in t for t in texts)
+
+
+async def test_crash_retry_that_goes_alone_answers_the_crashed_question(monkeypatch):
+    _plan(monkeypatch, Plan())  # an empty plan: nobody is needed, the orchestrator answers alone
+    model = per_agent(orchestrator=[AIMessage("Alone.")])
+    assistant = _assistant(monkeypatch, model, sql=Fake("sql", "x", log=[]), research=Fake("research", "y", log=[]))
+    thread = [*_turn("older?", "A1"), HumanMessage(VI_QUESTION), HumanMessage("try again")]
+    config = {"configurable": {"thread_id": "crash-alone"}}
+    await _stream(assistant, {"messages": thread}, config)
+
+    prompt = model.prompts[0]
+    assert [m.text for m in prompt if isinstance(m, HumanMessage) and not m.name][-1] == VI_QUESTION
+    assert not any("try again" in m.text for m in prompt if isinstance(m, HumanMessage))
+    assert any("REPLY LANGUAGE for this message: Vietnamese," in m.text for m in prompt)
+    assert [m.text for m in await _thread(assistant, config)][-2:] == ["try again", "Alone."]

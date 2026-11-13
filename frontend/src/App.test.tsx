@@ -3,21 +3,28 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, expect, test, vi as vitest } from 'vitest'
 import App from './App'
 import { vi } from './i18n/vi'
+import { AuthProvider } from './features/auth/AuthProvider'
 import { LanguageProvider } from './i18n'
 
 function renderApp() {
   return render(
     <LanguageProvider>
-      <App />
+      <AuthProvider>
+        <App />
+      </AuthProvider>
     </LanguageProvider>,
   )
 }
 
 beforeEach(() => {
+  vitest.stubGlobal('fetch', vitest.fn(async () => new Response(null, { status: 401 })))
   localStorage.clear()
   document.documentElement.lang = ''
 })
-afterEach(() => vitest.restoreAllMocks())
+afterEach(() => {
+  vitest.restoreAllMocks()
+  vitest.unstubAllGlobals()
+})
 
 test('renders the brand', () => {
   renderApp()
@@ -31,7 +38,16 @@ test('defaults to English and shows the Vietnamese toggle', () => {
 })
 
 test('toggle switches to Vietnamese and remembers it', async () => {
+  vitest.stubGlobal(
+    'fetch',
+    vitest.fn(async (url: string) =>
+      url === '/api/me'
+        ? new Response(JSON.stringify({ user_id: 'u1', name: 'An', username: 'an', is_admin: false, max_accounts: 10 }), { status: 200 })
+        : new Response('[]', { status: 200 }),
+    ),
+  )
   renderApp()
+  await screen.findByText('An')
   await userEvent.click(screen.getByRole('button', { name: 'Tiếng Việt' }))
   expect(screen.getByRole('button', { name: 'English' })).toBeInTheDocument()
   expect(localStorage.getItem('lang')).toBe('vi')

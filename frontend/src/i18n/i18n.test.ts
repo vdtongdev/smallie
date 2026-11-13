@@ -14,6 +14,6 @@ test('en and vi have the same keys', () => {
 
 test('every key of the old UI exists', () => {
   expect(Object.keys(old.en).length).toBeGreaterThan(100)
-  expect(en).toEqual(old.en)
-  expect(vi).toEqual(old.vi)
+  for (const [k, v] of Object.entries(old.en)) expect(en).toHaveProperty([k], v)
+  for (const [k, v] of Object.entries(old.vi)) expect(vi).toHaveProperty([k], v)
 })

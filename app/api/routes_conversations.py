@@ -6,7 +6,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from app.agents.artifacts import artifacts_from
 from app.orchestration.orchestrator import MESSAGE_ROUTES
 from app.core.auth import get_current_user
-from app.core.conversations import delete_conversation, get_conversation, get_conversation_usage, list_conversations
+from app.core.conversations import delete_conversation, get_conversation, get_conversation_usage, get_turn_activity, list_conversations
 from app.core.memory import forget_conversation
 from app.core.snapshot import clear_snapshots
 
@@ -24,7 +24,13 @@ async def messages(conversation_id: str, request: Request, user_id: str = Depend
     if not conversation:
         raise HTTPException(404, "Conversation not found")
     state = await request.app.state.assistant.aget_state({"configurable": {"thread_id": conversation_id}})
+    activity = await asyncio.to_thread(get_turn_activity, user_id, conversation_id)
     shown = [m for m in map(_serialize, state.values.get("messages", [])) if m]
+    turn = 0
+    for item in shown:
+        if item["role"] == "user":
+            turn += 1
+            item["activity"] = activity.get(turn)
     if state.interrupts:  # a paused team turn: its question is not in the thread yet
         shown.append({"role": "assistant", "agent": "orchestrator", "content": state.interrupts[0].value["question"],
                       "pending": True, "team": None, "tool_calls": [], "charts": []})
@@ -47,6 +53,11 @@ async def remove(conversation_id: str, request: Request, user_id: str = Depends(
     await forget_conversation(request.app.state.store, user_id, conversation_id)
     await asyncio.to_thread(delete_conversation, user_id, conversation_id)
     await asyncio.to_thread(clear_snapshots, user_id)
+
+
+def user_messages(messages: list) -> int:
+    """How many user messages the history shows."""
+    return sum(1 for m in map(_serialize, messages) if m and m["role"] == "user")
 
 
 def _serialize(message) -> dict | None:

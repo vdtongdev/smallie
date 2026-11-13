@@ -1,0 +1,387 @@
+{
+  "name": "research",
+  "message": "Research the latest news about NVIDIA in two sentences, with sources.",
+  "events": [
+    {
+      "type": "conversation",
+      "id": "35b77970-38b8-401d-aabd-2898a00add39",
+      "title": "Research the latest news about NVIDIA in two sentences, with"
+    },
+    {
+      "type": "routing",
+      "difficulty": "medium",
+      "profile": "balanced",
+      "tier": "standard",
+      "model": "baidu/ernie-5.5-flash-preview:free",
+      "reason": "standard model"
+    },
+    {
+      "type": "agent",
+      "name": "research"
+    },
+    {
+      "type": "tool_call",
+      "name": "load_skill",
+      "args": {
+        "name": "web-research"
+      }
+    },
+    {
+      "type": "tool_call",
+      "name": "tavily_tavily_search",
+      "args": {
+        "max_results": 10,
+        "query": "NVIDIA news",
+        "topic": "news"
+      }
+    },
+    {
+      "type": "tool_call",
+      "name": "tavily_tavily_search",
+      "args": {
+        "max_results": 10,
+        "query": "Nvidia earnings latest quarter results",
+        "time_range": "month"
+      }
+    },
+    {
+      "type": "tool_result",
+      "name": "load_skill",
+      "content": "1. Plan 2–4 focused queries before searching: the core question, plus the angles a good answer needs (numbers, dates, who/what, opposing views).\n2. Use the web search tool (`tavily_tavily_search`). Search in English, and also in Vietnamese when the topic is about Vietnam or the user writes Vietnamese.\n3. For news or anything that changes, prefer recent results and note each result's date. Say \"as of <date>\" in the finding.\n4. When a result looks important but its snippet is thin, read the page with the extract tool (`tavily_tavily_extract`) instead of guessing from the snippet. Extract at most 2–3 pages.\n5. Prefer primary or reputable sources (official sites, filings, major outlets, papers) over blogs and forums. When sources disagree, record both, each with its source.\n6. Stop once the question is covered. Don't keep searching for marginal details, because every search costs a step.\n7. Every finding gets the source id of the page it came from (not the site's home page) and a quote copied from that page's result."
+    },
+    {
+      "type": "tool_result",
+      "name": "tavily_tavily_search",
+      "content": "{\"query\":\"Nvidia earnings latest quarter results\",\"follow_up_questions\":null,\"answer\":null,\"images\":[],\"results\":[{\"url\":\"https://www.alphaquery.com/stock/NVDA/earnings-history\",\"title\":\"NVIDIA Corporation (NVDA) - Earnings History\",\"content\":\"# NVIDIA Corporation (NVDA)\\n\\n# Earnings Announcements: Estimated vs Actual\\n\\nOn 2026-05-20, NVIDIA Corporation (NVDA) announced earnings per share of $1.87\\nfor the fiscal quarter ending 2026-04-30, beating the average analyst estimate of $1.70.\\n\\nThe next expected annoucement date for quarterly earnings is 2026-08-26, with an average estimated earnings per share of $2.01\\nfor the fiscal quarter ending 2026-07-31. [...] | Announcement Date | Fiscal Quarter End | Estimated EPS | Actual EPS |\\n ---  --- |\\n| 2026-05-20 | 2026-04-30 | $1.70 | $1.87 |\\n| 2026-02-25 | 2026-01-31 | $1.45 | $1.57 |\\n| 2025-11-19 | 2025-10-31 | $1.18 | $1.24 |\\n| 2025-08-27 | 2025-07-31 | $0.94 | $0.99 |\\n| 2025-05-28 | 2025-04-30 | $0.80 | $0.77 |\\n| 2025-02-26 | 2025-01-31 | $0.79 | $0.85 |\\n| 2024-11-20 | 2024-10-31 | $0.70 | $0.78 |\\n| 2024-08-28 | 2024-07-31 | $0.60 | $0.65 |\\n| 2024-05-22 | 2024-04-30 | $0.51 | $0.58 | [...] | 2024-02-21 | 2024-01-31 | $0.42 | $0.49 |\\n| 2023-11-21 | 2023-10-31 | $0.30 | $0.38 |\\n| 2023-08-23 | 2023-07-31 | $0.18 | $0.25 |\\n| 2023-05-24 | 2023-04-30 | $0.06 | $0.09 |\\n| 2023-02-22 | 2023-01-31 | $0.05 | $0.06 |\\n| 2022-11-16 | 2022-10-31 | $0.04 | $0.03 |\\n| 2022-08-24 | 2022-07-31 | $0.03 | $0.03 |\\n| 2022-05-25 | 2022-04-30 | $0.11 | $0.12 |\\n| 2022-02-16 | 2022-01-31 | $0.10 | $0.11 |\\n| 2021-11-17 | 2021-10-31 | $0.09 | $0.10 |\\n| 2021-08-18 | 2021-07-31 | $0.09 | $0.09 |\",\"score\":0.70456684,\"raw_content\":null,\"id\":\"128fc4-00\"},{\"url\":\"https://tavily.com/knowledge/company/TXRhn2TKUD7t\",\"title\":\"NVIDIA\",\"content\":\"# NVIDIA\\nID: TXRhn2TKUD7t\\nWebsite: www.nvidia.com\\nLegal name: NVIDIA Corporation\\nHeadquarters: Santa Clara, CA, United States\\nLinkedIn: www.linkedin.com/company/nvidia · 6,578,529 followers\\nIndustry: Computer Hardware Manufacturing\\nIndustry codes: SIC 73, 737, NAICS 33, 334\\nCompany type: Public Company\\nFounded: 1993\\nBusiness model: B2B, B2C\\nSaaS: no [...] - FY, 2026: revenue 215.94B gross profit 153.46B EBIT 130.39B net income 120.07B EPS 4.900000095367432 USD\\n- Q3, 2026: revenue 57.01B gross profit 41.85B EBIT 36.01B net income 31.91B EPS 1.2999999523162842 USD\\n- Q3, 2026: revenue 57.01B gross profit 41.85B EBIT 36.01B net income 31.91B EPS 1.2999999523162842 USD [...] ## Financials\\n- Stock: NVDA · IPO 1999-01-22\\n- Stock: NASDAQ:NVDA · IPO 1999-01-22\\n- Annual revenue: 215.94B USD\\n- Quarterly revenue: 57.01B USD\\n- Market cap: 3.46T USD as of 2024-10-29\\n- Q1, 2027: revenue 81.62B gross profit 61.16B EBIT 53.54B net income 58.32B EPS 2.390000104904175 USD\\n- Q1, 2027: revenue 81.62B gross profit 61.16B EBIT 53.54B net income 58.32B EPS 2.390000104904175 USD\\n- FY, 2026: revenue 215.94B gross profit 153.46B EBIT 130.39B net income 120.07B EPS 4.900000095367432 USD\",\"score\":0.6754436,\"raw_content\":null,\"id\":\"2aa14a-01\"},{\"url\":\"https://seekingalpha.com/article/4966435-nvidia-earnings-preview-ignore-the-tabloid-headlines-and-focus-on-the-data\",\"title\":\"Nvidia Earnings Preview: Ignore The Tabloid Headlines And Focus On The Data (NASDAQ:NVDA) | Seeking Alpha\",\"content\":\"NVIDIA Corporation (NVDA) has become one of the most profitable companies in the world. In its latest reported quarter, the company recorded revenue of $96.2B (+106% y/y). Data Center accounted for a record\\n\\nThis article was written by [...] ### Recommended For You [...] ## Investing Groups\\n\\n## Portfolios\\n\\n## Find & Compare\\n\\n# Nvidia Earnings Preview: Ignore The Tabloid Headlines And Focus On The Data\\n\\n## Summary\\n\\nNvidia headquarters in Silicon Valley \\n\\nSundry Photography/iStock Editorial via Getty Images\\n\\nNvidia headquarters in Silicon Valley\\n\\nSundry Photography/iStock Editorial via Getty Images\",\"score\":0.6675812,\"raw_content\":null,\"id\":\"ac73d4-02\"},{\"url\":\"h"
+    },
+    {
+      "type": "tool_result",
+      "name": "tavily_tavily_search",
+      "content": "{\"query\":\"NVIDIA news\",\"follow_up_questions\":null,\"answer\":null,\"images\":[],\"results\":[{\"url\":\"https://tavily.com/knowledge/company/TXRhn2TKUD7t\",\"title\":\"NVIDIA\",\"content\":\"# NVIDIA\\nID: TXRhn2TKUD7t\\nWebsite: www.nvidia.com\\nLegal name: NVIDIA Corporation\\nHeadquarters: Santa Clara, CA, United States\\nLinkedIn: www.linkedin.com/company/nvidia · 6,578,529 followers\\nIndustry: Computer Hardware Manufacturing\\nIndustry codes: SIC 73, 737, NAICS 33, 334\\nCompany type: Public Company\\nFounded: 1993\\nBusiness model: B2B, B2C\\nSaaS: no [...] ## M&A\\n- Hugging Face, Inc. (2026-08-01): 12.90B USD\\n- Kumo.AI, Inc. (2026-06-01): 400.00M USD\\n- Illumex Technologies, Inc. (2026-02-01): 60.00M USD\\n- Groq, Inc. (2025-12-01): 20.00B USD\\n- SchedMD LLC (2025-12-01)\\n- Enfabrica Corp. (2025-09-01): 900.00M USD\\n- Solver (2025-09-01)\\n- CentML, Inc. (2025-06-01) [...] - FY, 2026: revenue 215.94B gross profit 153.46B EBIT 130.39B net income 120.07B EPS 4.900000095367432 USD\\n- Q3, 2026: revenue 57.01B gross profit 41.85B EBIT 36.01B net income 31.91B EPS 1.2999999523162842 USD\\n- Q3, 2026: revenue 57.01B gross profit 41.85B EBIT 36.01B net income 31.91B EPS 1.2999999523162842 USD\",\"score\":0.64047897,\"raw_content\":null,\"id\":\"6cbc06-00\"},{\"url\":\"https://www.cnbc.com/2026/11/12/big-wall-street-analyst-calls-thursday-like-nvidia.html\",\"title\":\"Big Wall Street analyst calls Thursday like Nvidia\",\"content\":\"stock due to the increasing turmoil at Nvidia. \\\"We are downgrading shares of NVDA and removing our price target following reports (WSJ, NYT) of founding CEO Jensen Huang's imminent departure amidst allegations of a 2nd extramarital affair.\\\" Bernstein downgrades Nvidia to market perform from outperform Bernstein said in a note to clients late Wednesday night that it had no choice but to downgrade the stock. \\\"We admit to struggling mightily with this call, and can sympathize with the case to buy [...] pressures.\\\" \\\"We downgrade GIS to Neutral, as we now see risk to its dividend level, along with ongoing operating pressures.\\\" Barclays upgrades Reliance to overweight from equal weight Barclays upgraded the steel company and says it sees higher steel prices. \\\"We upgrade RS to Overweight from Equal Weight, reflecting higher 2027/28 estimates on tighter supply, stronger volumes and margins.\\\" Oppenheimer downgrades Nvidia to perform from outperform The firm downgraded the stock due to the [...] concern over the future of mRNA based vaccines and therapies. Meanwhile, MRVI has also reorganized with new management (6/9/25) and reduced annualized expenses by +$65M.\\\" William Blair upgrades Advanced Micro Devices to outperform from market perform William Blair says AMD can benefit from the turmoil at Nvidia. \\\"Meanwhile, Nvidia is facing increased scrutiny and a potential leadership vacuum, and while ASIC competition remains a risk to Instinct (particularly at Meta [META $628.07; Outperform]\",\"score\":0.580091,\"published_date\":\"Thu, 12 Nov 2026 12:58:09 GMT\",\"raw_content\":null,\"id\":\"5ac2fb-01\"}],\"response_time\":1.74,\"request_id\":\"98230161-ee27-4aff-a875-98a1996a5f98\",\"auth_mode\":\"keyed\"}\n\n[source ids] cite these pages by id in your notes:\nS562e = NVIDIA (https://tavily.com/knowledge/company/TXRhn2TKUD7t)\nScaad = Big Wall Street analyst calls Thursday like Nvidia (https://www.cnbc.com/2026/11/12/big-wall-street-analyst-calls-thursday-like-nvidia.html)"
+    },
+    {
+      "type": "tool_call",
+      "name": "tavily_tavily_search",
+      "args": {
+        "max_results": 10,
+        "query": "Jensen Huang departure Nvidia CEO",
+        "time_range": "week",
+        "topic": "news"
+      }
+    },
+    {
+      "type": "tool_call",
+      "name": "tavily_tavily_search",
+      "args": {
+        "max_results": 10,
+        "query": "Nvidia stock news November 2026",
+        "time_range": "week",
+        "topic": "news"
+      }
+    },
+    {
+      "type": "tool_call",
+      "name": "run_sql",
+      "args": {
+        "query": "SELECT trade_date, close, adj_close, volume FROM market.daily_prices WHERE ticker='NVDA' AND trade_date >= DATE '2026-10-25' ORDER BY trade_date"
+      }
+    },
+    {
+      "type": "tool_result",
+      "name": "run_sql",
+      "content": "| trade_date | close | adj_close | volume |\n| --- | --- | --- | --- |\n| 2026-10-26 | 216.0000 | 216.0000 | 90829300 |\n| 2026-10-27 | 217.9400 | 217.9400 | 84799700 |\n| 2026-10-28 | 215.3800 | 215.3800 | 93030200 |\n| 2026-10-29 | 213.6600 | 213.6600 | 77568100 |\n| 2026-10-30 | 204.6400 | 204.6400 | 168386400 |\n| 2026-11-02 | 202.0600 | 202.0600 | 119272200 |\n| 2026-11-03 | 206.6900 | 206.6900 | 91943400 |\n| 2026-11-04 | 200.1300 | 200.1300 | 149033300 |\n| 2026-11-05 | 181.6000 | 181.6000 | 306127800 |\n| 2026-11-06 | 186.6400 | 186.6400 | 180212300 |\n| 2026-11-09 | 178.6700 | 178.6700 | 462719300 |\n| 2026-11-10 | 168.8900 | 168.8900 | 429273200 |\n| 2026-11-11 | 173.7300 | 173.7300 | 313417400 |\n(13 rows; table tf7e6b5)"
+    },
+    {
+      "type": "tool_result",
+      "name": "tavily_tavily_search",
+      "content": "{\"query\":\"Jensen Huang departure Nvidia CEO\",\"follow_up_questions\":null,\"answer\":null,\"images\":[],\"results\":[{\"url\":\"https://www.businessinsider.com/nvidia-stock-drop-jensen-huang-affair-nvda-outlook-dan-ives-2026-11\",\"title\":\"Jensen Huang's Departure Would Shave 30% Off Nvidia Stock, Dan Ives Says - Business Insider\",\"content\":\"If Huang were to depart, Ives said that Nvidia stock would fall 25% to 30%, implying a drop to around $122 per share.\\n\\n\\\"We believe if Jensen was removed as CEO, Nvidia is worth a lot less (25%-30%) as a company/stock and would change the future direction of the company and create a dramatically different competitive environment around AI GPUs both in the US and globally especially for China,\\\" Ives, a senior managing director at Yorkville Ives, wrote in a note. [...] \\\"Jensen is the core DNA of Nvidia and its AI success and ambitions are heavily tied to him staying on as CEO. Jensen is not replaceable,\\\" Ives said. \\\"There is no other person on the management team bench that can step in seamlessly as CEO.\\\"\\n\\nThe dilemma extends to the broader stock market and the economy, as well. Nvidia, which was the world's largest company by market-cap before the recent stock slide, has been a pillar of the AI-led bull market. [...] Jensen Huang is worth about 30% of Nvidia's total value.\\n\\nThat's according to prominent tech bull Dan Ives, who said on Tuesday that Huang's departure from the AI chip titan would whittle its value by nearly a third.\\n\\nHuang is embroiled in a scandal related to an affair with a suspected Chinese spy. The woman, Alice Huang, has been an executive at Singaporean data firm Megaspeed, a company with ties to big Chinese tech firms.\",\"score\":0.8830044,\"published_date\":\"Tue, 10 Nov 2026 15:26:00 GMT\",\"raw_content\":null,\"id\":\"6846cb-00\"},{\"url\":\"https://finance.yahoo.com/markets/stocks/articles/bettors-see-55-chance-jensen-120132587.html\",\"title\":\"Bettors See a 55% Chance Jensen Huang Is Out as Nvidia CEO Before 2029\",\"content\":\"As of about 11 p.m. ET on Monday, November 9, 2026, traders on Kalshi, the CFTC-regulated prediction market, put the chance that Jensen Huang leaves as CEO of NVIDIA (NASDAQ:NVDA) before January 1, 2029 at about 53% to 55%. Yes contracts were offered at 55 cents, and recent trades went through at 53 to 54 cents. [...] Nvidia (NVDA) sank 4% to $179, its lowest close since April, after Jensen Huang admitted he fell short and the board opened an investigation.\\n Thin trading undercuts the 2029 reading: about 11,000 contracts changed hands, versus 225,000 in the before-2027 market, which prices only a 13% to 14% exit chance.\\n Any announced departure pays out on the Yes contract, including retirement or health, so the 2029 price covers every path out and not only a firing. [...] A Yes contract pays only when Huang actually leaves the job, and the exit is announced before the deadline, as naming a future departure date is insufficient and any reason counts, including retirement or health.\\n\\nThe 2029 price therefore covers every path out of the CEO's office, with a firing as one path among several. A rival market counting only leaving or removal put an announcement by December 31, 2026 at about 15.5%.\\n\\n## Thin Trading Weakens the 2029 Reading\",\"score\":0.86108357,\"published_date\":\"Tue, 10 Nov 2026 11:00:00 GMT\",\"raw_content\":null,\"id\":\"5669a4-01\"},{\"url\":\"https://news.kalshi.com/p/jensen-huang-exit-odds-nvidia-ceo\",\"title\":\"Jensen Huang exit odds: Nvidia CEO departure chances hit 44%\",\"content\":\"As it stands, the market-implied probability for Huang to be out as Nvidia CEO before July 1, 2027, jumped as high as 44% on Nov. 8, 2026, before falling back to roughly 30% at the time of writing.\\n\\nMeanwhile, the chances of him being out by January 1, 2028, hit 44% before settling at 36%, while January 1, 2029, is trading at 40%.\\n\\nThe Nvidia chief sent a memo to his employees admitting to being unfaithful to his wife and issued an apology to his family and employees. [."
+    },
+    {
+      "type": "tool_result",
+      "name": "tavily_tavily_search",
+      "content": "{\"query\":\"Nvidia stock news November 2026\",\"follow_up_questions\":null,\"answer\":null,\"images\":[],\"results\":[{\"url\":\"https://www.aljazeera.com/economy/2026/11/12/nvidia-shares-plunge-amid-reports-board-to-discuss-ceo-huangs-future\",\"title\":\"Nvidia shares plunge amid reports board to discuss CEO Huang’s future | Technology News | Al Jazeera\",\"content\":\"By John Power\\n\\nPublished On 12 Nov 202612 Nov 2026\\n\\nChip giant Nvidia’s stock price has tumbled amid reports that its board of directors is meeting to consider the future of CEO Jensen Huang.\\n\\nNvidia shares fell more than 8 percent in after-hours trading on Wednesday as question swirled over Huang’s position at the top of the $4.2 trillion company. [...] Save\\n\\nShare\\n\\nHuang\\n\\n(FILES) Nvidia CEO Jensen Huang speaks during a press conference at Computex in Taipei on June 2, 2026. Huang has admitted to having an affair, reportedly with a Chinese executive at a Singapore-based company that the United States suspects of smuggling AI microchips into China. The scandal has focused attention on how China, a major artificial-intelligence power in itself, obtains the cutting-edge chips despite US export restrictions. (Photo by I-Hwa Cheng / AFP) (AFP) [...] Live\\n\\nLive\\n\\nDEVELOPING STORYDEVELOPING STORY,\\n\\nEconomy|Technology\\n\\n# Nvidia shares plunge amid reports board to discuss CEO Huang’s future\\n\\nChip giants stock price falls more than 8 percent amid speculation over co-founder’s future.\\n\\nSave\\n\\nShare\\n\\nHuang\",\"score\":0.93694025,\"published_date\":\"Thu, 12 Nov 2026 00:43:26 GMT\",\"raw_content\":null,\"id\":\"f64acf-00\"},{\"url\":\"https://global.morningstar.com/en-ca/stocks/nvidia-watching-potential-succession-plan-any-signs-customer-impact\",\"title\":\"Nvidia: Watching Potential Succession Plan and Any Signs of Customer Impact\",\"content\":\"1.   Home\\n2.   Stocks\\n3.   Nvidia: Watching Potential Succession Plan and Any Signs of Customer Impact \\n\\n# Nvidia: Watching Potential Succession Plan and Any Signs of Customer Impact\\n\\nAmid reports about a second affair and Huang’s possible ouster, we think Nvidia stock remains undervalued.\\n\\nImage 2\\n\\nBrian Colello, CPANov 12, 2026\\n\\nShare\\n\\nImage 3: Nvidia signage outside the company headquarters.\\n\\nAaron M. Sprecher via AP\\n\\n## Key Morningstar Metrics for NVIDIA [...] #### Nvidia: Investigation Into CEO Huang Casts Dark Cloud Over Company's Bright AI Future Brian Colello, CPA Nov 9, 2026\\n   #### AMD Earnings: Strong Data Center Outlook Points to Upside for Stock Brian Colello, CPA Nov 4, 2026\\n   #### Intel Earnings: PC Winter Has Arrived, Offsetting Healthy AI Growth Brian Colello, CPA Oct 30, 2026\\n   #### Nvidia: Hugging Face Acquisition Both a Wise Offensive and Defensive Move Brian Colello, CPA Sep 3, 2026 [...] Image 4 ### Anthropic: We See the Stock as Undervalued in the IPO Pricing Range There is meaningful upside as Anthropic is pricing its stock as a reflection of current sentiment, not the company’s fundamentals. Malik Ahmed Khan, CFA Nov 11, 2026Image 5 ### Why Morningstar Thinks Anthropic Is Worth USD 1.7 Trillion A look at how we arrive at our base-case valuation for the AI lab, along with bull and bear scenarios. Malik Ahmed Khan, CFA Nov 9, 2026Image 6 ### Chasing New Frontiers: We See\",\"score\":0.8991304,\"published_date\":\"Thu, 12 Nov 2026 01:52:24 GMT\",\"raw_content\":null,\"id\":\"074c40-01\"},{\"url\":\"https://www.cnbc.com/2026/11/09/nvidia-jensen-huang-chinese-spy-investigation.html\",\"title\":\"Nvidia stock falls as scrutiny turns to Huang’s relationship with alleged Chinese spy\",\"content\":\"Published Mon, Nov 9 2026\\n4:05 AM EST\\nUpdated 5 Min Ago\\nApril Roach\\n@/in/april-roach-901033140/\\n@April\\\\_\\\\_Roach\\nWATCH LIVE\\nThis is breaking news. Please refresh for updates.\\nChoose CNBC as your preferred source on Google and never miss a moment from the most trusted name in business news. [...] Pro News\\nJosh Brown\\nMike Santoli\\nCalls of the Day\\nMy Portfolio\\nLivestream\\nFull Episodes\\nStock Screener\\nMarket Forecast\\nOptions"
+    },
+    {
+      "type": "tool_call",
+      "name": "tavily_tavily_extract",
+      "args": {
+        "extract_depth": "advanced",
+        "query": "Nvidia board oust Jensen Huang stock reaction latest",
+        "urls": [
+          "https://fortune.com/2026/11/12/nvidia-exit-jensen-huang-affair-trump-preserve-documents-spying-chip-smuggling",
+          "https://www.aljazeera.com/economy/2026/11/12/nvidia-shares-plunge-amid-reports-board-to-discuss-ceo-huangs-future"
+        ]
+      }
+    },
+    {
+      "type": "tool_result",
+      "name": "tavily_tavily_extract",
+      "content": "{\"results\":[{\"url\":\"https://fortune.com/2026/11/12/nvidia-exit-jensen-huang-affair-trump-preserve-documents-spying-chip-smuggling\",\"title\":\"Nvidia preps exit for Huang as Trump Administration faces probe into spying and chip smuggling | Fortune\",\"raw_content\":\"## Nvidia fallout is splitting markets in two\\n\\nNvidia shares lost 5.54% overnight after the board convened to discuss replacing CEO Jensen Huang. Shay Boloor, chief market strategist at The Futurum Group, thinks the selloff is overcooked. The company’s “ecosystem [was] already firmly established long before this fiasco so I don’t see next 12 to 18 months of revenue suddenly disappearing if Jensen were to leave,” he told Fortune. [...] ## Good morning. On Fortune’s radar today:\\n\\n Nvidia board preps exit for Jensen Huang.\\n Huang’s affair with a subordinate was caught on video.\\n We have a list of Huang’s possible replacements.\\n Congress preps probe of White House, chip exports, and Chinese spying.\\n Markets: A divided house.\\n AI’s $1 trillion annual cash transfer between buyers and suppliers.\\n The “misery index” rises.\\n This Cisco exec will walk out of meetings if staff use too many corporate acronyms.\\n\\n### ONE BIG THING\\n\\n## Nvidia appoints CEO search agency to find replacement for Jensen Huang as Congress preps probe into White House and chip exports [...] A decision has been made. It is all but certain that Jensen Huang’s time as CEO is coming to an end. Nvidia’s board met last night to discuss how to prepare for his removal. Since then, we have learned that they selected an outside firm to find candidates to replace him and that the board is considering naming a temporary CEO while the search goes on, according to Bloomberg. \\n\\nRecommended Video\\n\\nHere are Huang’s possible replacements, per the FT:\",\"images\":[]},{\"url\":\"https://www.aljazeera.com/economy/2026/11/12/nvidia-shares-plunge-amid-reports-board-to-discuss-ceo-huangs-future\",\"title\":\"Nvidia shares plunge amid reports board to discuss CEO Huang’s future | Technology News | Al Jazeera\",\"raw_content\":\"[Live](/video/live)\\n\\n[Live](/video/live)\\n\\n**DEVELOPING STORY**DEVELOPING STORY,\\n\\n[Economy](/economy/)|[Technology](/tag/technology/)\\n\\n# Nvidia shares plunge amid reports board to discuss CEO Huang’s future\\n\\n*Chip giants stock price falls more than 8 percent amid speculation over co-founder’s future.*\\n\\nSave\\n\\nShare\\n\\n![Huang](/wp-content/uploads/2026/11/AFP__20261110__D6YZ8T3__v1__MidRes__FilesTaiwanChinaUsSemiconductorsAiNvidia-1794443885.jpg?resize=770%2C513&quality=80)\\n\\n(FILES) Nvidia CEO Jensen Huang speaks during a press conference at Computex in Taipei on June 2, 2026. Huang has admitted to having an affair, reportedly with a Chinese executive at a Singapore-based company that the United States suspects of smuggling AI microchips into China. The scandal has focused attention on how China, a major artificial-intelligence power in itself, obtains the cutting-edge chips despite US export restrictions. (Photo by I-Hwa Cheng / AFP) (AFP)\\n\\n[![](/wp-content/uploads/2020/09/jp-1730786685-rotated.jpg?resize=96%2C96&quality=80)](/author/powerj)\\n\\nBy [John Power](/author/powerj)\\n\\nPublished On 12 Nov 202612 Nov 2026\\n\\nChip giant Nvidia’s stock price has tumbled amid reports that its board of directors is meeting to consider the future of CEO Jensen Huang.\\n\\nNvidia shares fell more than 8 percent in after-hours trading on Wednesday as question swirled over Huang’s position at the top of the $4.2 trillion company.\\n\\nThe plunge comes after the New York Times, the Financial Times and the Wall Street Journal reported that Nvidia’s board of directors would discuss Huang’s position amid controversy over his personal life.\\n\\nNvidia did not immediately respond to Al Jazeera’s requests for comment.\\n\\nThe reported meeting comes amid reports that Huang engaged in an extramarital relationship with an Nvidia employee, in addition to an affair with a woman accused of working the Chinese intelligence"
+    },
+    {
+      "type": "tool_call",
+      "name": "tavily_tavily_search",
+      "args": {
+        "max_results": 10,
+        "query": "Nvidia board decision Huang November 12 2026",
+        "time_range": "day",
+        "topic": "news"
+      }
+    },
+    {
+      "type": "tool_call",
+      "name": "tavily_tavily_search",
+      "args": {
+        "max_results": 10,
+        "query": "Nvidia Q3 FY2027 earnings preview November 17 expectations",
+        "time_range": "week"
+      }
+    },
+    {
+      "type": "tool_result",
+      "name": "tavily_tavily_search",
+      "content": "{\"query\":\"Nvidia Q3 FY2027 earnings preview November 17 expectations\",\"follow_up_questions\":null,\"answer\":null,\"images\":[],\"results\":[{\"url\":\"https://www.instagram.com/reel/DfmfzgTlZBG\",\"title\":\"Instagram\",\"content\":\"Here’s what Wall Street expects:  \\n📅 Q3 FY2027 results on Nov 17  \\n💰 Revenue: about $108.9B (company guidance: $108B ± 2%)  \\n📊 EPS forecast: $2.47  \\n📈 The stock hit a record close above $239 on Oct 6  \\n  \\nBeyond data centers, Nvidia’s AI push now reaches robotics and self-driving cars. The real question is whether the AI boom can keep its momentum.  \\n  \\nCan Nvidia beat expectations again? Drop your prediction below 👇  \\n  \\nFollow for more market insights [...] Figures are analyst estimates. Trading involves risk. Not investment advice.  \\n  \\n#Nvidia #NVDA #StockMarket #EarningsSeason #AIStocks   \\n  \\n[Nvidia earnings, NVDA stock, Nvidia Q3 results, Nvidia revenue estimate, Nvidia EPS forecast, AI stocks 2026, Nvidia earnings date, Earnings preview, AI boom, Stock market news] [...] ## No comments yet.\\n\\nStart the conversation.\\n\\nLog in to like or comment.\\n\\nMore posts from stockpulsefx\\n\\nPhoto by STOCKPULSEFX on November 11, 2026. May be an image of poster, card and text.\\n\\nVideo by STOCKPULSEFX on November 05, 2026. May be an image of card, candle and text.\\n\\nVideo by STOCKPULSEFX on November 05, 2026. May be an image of screen and text.\\n\\nPhoto by STOCKPULSEFX on November 05, 2026. May be an image of calendar, poster and text.\",\"score\":0.7897206,\"raw_content\":null,\"id\":\"448949-00\"},{\"url\":\"https://shattered.io/nvidia-holds-support-nasdaq-100-rebounds-3-4-percent-earnings-2026\",\"title\":\"Nvidia Holds Support as Nasdaq 100 Gains 3.4% [2026]\",\"content\":\"| Metric | Q2 FY2027 (actual) | Q3 FY2027 (expected) | Implied change |\\n ---  --- |\\n| Revenue | $96.2 billion | $108.8 billion | About 13% sequential (our arithmetic) |\\n| Year-over-year growth | 106% | 91% | Growth rate slows 15 points |\\n| EPS | Not cited here | $2.47 or $2.49 | 0.8% gap between sources |\\n| Reporting date | Period ended July 26, 2026 | Nov. 17, 2026, 5:00 p.m. EST | Quarter ends October 2026 |\\n\\n### Two EPS Numbers, One Small Gap [...] The next test arrives on Tuesday, November 17, 2026, at 5:00 p.m. EST, when Nvidia reports third-quarter fiscal 2027 results. Its last report, the second-quarter release for the period ended July 26, 2026, showed $96.2 billion in revenue, up 18% from the prior quarter and 106% from a year earlier. Analysts now expect $108.8 billion for the new quarter, which would mark 91% growth. [...] The takeaway: support is holding for now, but it has not been tested by news. Tuesday’s report at 5:00 p.m. EST will do that, and the answer will matter far beyond one ticker.\\n\\n## Frequently Asked Questions\\n\\n### When does Nvidia report third-quarter fiscal 2027 earnings?\\n\\nNvidia is scheduled to report on November 17, 2026, at 5:00 p.m. EST. The quarter covers the period ending October 2026.\\n\\n### What are analysts expecting from Nvidia this quarter?\",\"score\":0.728362,\"raw_content\":null,\"id\":\"1784c9-01\"},{\"url\":\"https://www.indmoney.com/blog/us-stocks/nvidia-stock-fall-michael-burry-heck-of-a-trade\",\"title\":\"Nvidia Stock Falls Over 30%: Michael Burry Sees a ‘Heck of a Trade’ Ahead\",\"content\":\"The next scheduled financial checkpoint is Nvidia’s November 17 Q3 FY2027 results. Compare the announcement with the existing revenue and margin guidance, then examine whether management changes its expectations for customer deployments, memory costs and future profitability. [...] |  |  |\\n --- |\\n| Business measure | Latest reported result or company outlook |\\n| Q2 FY2027 revenue | $96.2 billion, up 106% year on year |\\n| Q2 data-centre revenue | $89.0 billion, up 117% year on year |\\n| Q2 GAAP gross margin | 75.0% |\\n| Q3 FY2027 revenue guidance | $108 billion, plus or minus 2% |\\n| Q3 gross-margin guidance | 74.0%, plus or minus 0.5 percentage points | [...] However, Nvidia had already warned that rising memory co"
+    },
+    {
+      "type": "tool_result",
+      "name": "tavily_tavily_search",
+      "content": "{\"query\":\"Nvidia board decision Huang November 12 2026\",\"follow_up_questions\":null,\"answer\":null,\"images\":[],\"results\":[{\"url\":\"https://www.moomoo.com/community/feed/the-capital-breakdown-thursday-november-12-2026-117603259580421\",\"title\":\"📊 THE CAPITAL BREAKDOWN: Thursday, November 12, 2026 - moomoo Community\",\"content\":\"decide whether to remove Jensen Huang as CEO. No decision has been announced. Nvidia is down almost 6% premarket and futures are lower. Jobless claims are at 8:30, and Cisco and Applied Materials report tonight. [...] 📌 After the bell: the New York Times reported Huang had a second affair, with Kimberly Powell, Nvidia's VP of health care, who reports to him. The board met Wednesday evening to discuss Huang's future as its leader. Bloomberg reported the board has been working with an outside firm on possible replacements and is considering an interim CEO. Huang has no clear No. 2, having said he doesn't believe in succession planning. Shares slid more than 8% after hours. [...] 1:00: 30-year Treasury auction\\n\\nWeekly oil inventories (moved for the holiday)\\n\\nAfter the close: $Cisco (CSCO.US)$, $Applied Materials (AMAT.US)$, $NEBIUS (NBIS.US)$   \\n\\nAny time: Nvidia board decision on Huang\\n\\nFri: October PPI (est. +0.4%, core +0.3%)\\n\\nNext week: Nvidia earnings Tue Nov 17 after the close. GTA VI launches Nov 19.\\n\\n⚡ BOTTOM LINE\",\"score\":0.8727061,\"published_date\":\"Thu, 12 Nov 2026 11:00:00 GMT\",\"raw_content\":null,\"id\":\"4fb894-00\"},{\"url\":\"https://qz.com/nvidia-board-oust-jensen-huang-ceo-affairs-111226\",\"title\":\"Nvidia board is preparing to oust CEO Jensen Huang over two affairs\",\"content\":\"Quartz\\n\\nNvidia board is preparing to oust CEO Jensen Huang over two affairs\\n\\nBusiness News\\n\\n# Nvidia's board is preparing to oust Jensen Huang over two affairs\\n\\nNvidia stock fell 8% after hours Wednesday, and the company has not announced a decision on the CEO's future\\n\\nBy Cris Tolomia·2 min read·Updated November 12, 2026\\n\\nAdd QZ to Google\\n\\nPATRICK T. FALLON / Getty Images [...] Nvidia$NVDA's board is getting ready to push out CEO Jensen Huang following two extramarital affairs, according to The Wall Street Journal. The board convened Wednesday to consider Huang's future, and Nvidia has yet to disclose any decision.\\n\\nNvidiastock fell 8% in after-hours trading Wednesday to $159.95, after closing at $173.73. The stock was off nearly 8% ahead of Thursday's open. [...] China’s Foreign Ministry has called the espionage allegation unsubstantiated. Nvidiais scheduled to report fiscal third-quarter earnings on Nov. 17. Three House Republican committee chairs have asked Huang to appear for a private session with lawmakers on Nov. 18.\\n\\nDaily Brief\\n\\n## The essential business news, delivered fresh every morning.\\n\\nJoin 500,000+ readers who start their day with Quartz.\\n\\nBy subscribing, you agree to our Terms of Service and Privacy Policy.\",\"score\":0.84767824,\"published_date\":\"Thu, 12 Nov 2026 12:44:23 GMT\",\"raw_content\":null,\"id\":\"9e8dba-01\"},{\"url\":\"https://quantumzeitgeist.com/nvidia-board-weighs-huang-two-reported\",\"title\":\"Nvidia Board Weighs Huang’s Future After Two Reported Affairs\",\"content\":\"Nvidia’s board now faces a decision regarding founder Jensen Huang following reports of a romantic relationship with Kimberly Powell, the chipmaker’s Vice-President of Healthcare and an employee of more than 18 years. This revelation deepens a scandal that began days prior with news of an affair involving Alice Huang, an executive at an Nvidia client suspected of ties to Chinese intelligence, the company says. [...] Skip to content\\n\\nQuantum Zeitgeist\\n\\nTechnology News, Technology\\n\\n# Nvidia board weighs Huang’s future after two reported affairs\\n\\nAvatar of Ivy Delaney\\n\\nNovember 12, 2026 by Ivy Delaney\\n\\n   A large screen displays technical specifications alongside a chip illustration, set on a dark stage with purple lighting. [...] November 12, 2026 A scientist adjusts controls beside a large, golden, cylin"
+    },
+    {
+      "type": "token",
+      "text": "Nvidia's board was preparing to oust founder and CEO Jensen Huang after he admitted an affair and reporting"
+    },
+    {
+      "type": "token",
+      "text": " linked one of the relationships to a suspected Chinese spy, meeting on the evening of Nov 11 to weigh his future and hiring an outside firm to search for a replacement, with no decision disclosed as of Nov 12.[1][2][3] The market reaction was immediate — NVDA closed at $173.73 on Nov 11 and fell about 8% after hours to $159.95, roughly 20% below its Oct 26 close — and Bernstein and Oppenheimer both downgraded the stock, with the company's Q3 FY2027 results due Nov 17.[4][5][6]\n\nSources\n\n1. [Exclusive | Nvidia is Preparing to Oust Nvidia CEO Jensen Huang - WSJ](https://www.wsj.com/business/nvidia-is-preparing-to-oust"
+    },
+    {
+      "type": "token",
+      "text": "-nvidia-ceo-jensen-huang-30f421ad)\n2. [Nvidia preps exit for Huang as Trump Administration faces probe into spying and chip smuggling](https://fortune.com/2026/11/12/nvidia-exit-jensen-huang-affair-trump-preserve-documents-spying-chip-smuggling)\n3. [Nvidia board preparing to oust CEO Jensen Huang, name interim CEO](https://www.semafor.com/article/11/11/2026/nvidia-board-preparing-to-oust-ceo-jensen-huang-name-interim-ceo)\n4. [Nvidia board is preparing to oust CEO Jensen Huang over two affairs](https://qz.com/nvidia-board-oust-jensen-huang-ceo-affairs-111"
+    },
+    {
+      "type": "token",
+      "text": "226)\n5. [Big Wall Street analyst calls Thursday like Nvidia](https://www.cnbc.com/2026/11/12/big-wall-street-analyst-calls-thursday-like-nvidia.html)\n6. [NVIDIA Sets Conference Call for Third-Quarter Financial Results](https://nvidianews.nvidia.com/news/nvidia-sets-conference-call-for-third-quarter-financial-results-6928873)\n7. Market database, 2026-11-11\n\nOne caveat: there is still no official Nvidia statement or board resolution on Huang's status, and the alleged Chinese-spy link is unproven in public reporting.\n\nSince this is a stock story — are you following NVDA as an investment, or just tracking the news?"
+    },
+    {
+      "type": "usage",
+      "reply": {
+        "input_tokens": 91250,
+        "cached_tokens": 54016,
+        "output_tokens": 4865
+      },
+      "chat": {
+        "input_tokens": 91250,
+        "output_tokens": 4865,
+        "cached_tokens": 54016
+      },
+      "reply_by_model": {
+        "baidu/ernie-5.5-flash-preview:free": {
+          "model_calls": 6,
+          "input_tokens": 91250,
+          "cached_tokens": 54016,
+          "output_tokens": 4865
+        }
+      },
+      "chat_by_model": {
+        "baidu/ernie-5.5-flash-preview:free": {
+          "model_calls": 6,
+          "input_tokens": 91250,
+          "cached_tokens": 54016,
+          "output_tokens": 4865
+        }
+      }
+    },
+    {
+      "type": "done"
+    }
+  ],
+  "history": [
+    {
+      "role": "user",
+      "content": "Research the latest news about NVIDIA in two sentences, with sources.",
+      "activity": [
+        {
+          "tier": "standard",
+          "type": "routing",
+          "model": "baidu/ernie-5.5-flash-preview:free",
+          "reason": "standard model",
+          "profile": "balanced",
+          "difficulty": "medium"
+        },
+        {
+          "name": "research",
+          "type": "agent"
+        },
+        {
+          "args": {
+            "name": "web-research"
+          },
+          "name": "load_skill",
+          "type": "tool_call"
+        },
+        {
+          "args": {
+            "query": "NVIDIA news",
+            "topic": "news",
+            "max_results": 10
+          },
+          "name": "tavily_tavily_search",
+          "type": "tool_call"
+        },
+        {
+          "args": {
+            "query": "Nvidia earnings latest quarter results",
+            "time_range": "month",
+            "max_results": 10
+          },
+          "name": "tavily_tavily_search",
+          "type": "tool_call"
+        },
+        {
+          "name": "load_skill",
+          "type": "tool_result",
+          "content": "1. Plan 2–4 focused queries before searching: the core question, plus the angles a good answer needs (numbers, dates, who/what, opposing views).\n2. Use the web search tool (`tavily_tavily_search`). Search in English, and also in Vietnamese when the topic is about Vietnam or the user writes Vietnamese.\n3. For news or anything that changes, prefer recent results and note each result's date. Say \"as of <date>\" in the finding.\n4. When a result looks important but its snippet is thin, read the page with the extract tool (`tavily_tavily_extract`) instead of guessing from the snippet. Extract at most 2–3 pages.\n5. Prefer primary or reputable sources (official sites, filings, major outlets, papers) over blogs and forums. When sources disagree, record both, each with its source.\n6. Stop once the question is covered. Don't keep searching for marginal details, because every search costs a step.\n7. Every finding gets the source id of the page it came from (not the site's home page) and a quote copied from that page's result."
+        },
+        {
+          "name": "tavily_tavily_search",
+          "type": "tool_result",
+          "content": "{\"query\":\"Nvidia earnings latest quarter results\",\"follow_up_questions\":null,\"answer\":null,\"images\":[],\"results\":[{\"url\":\"https://www.alphaquery.com/stock/NVDA/earnings-history\",\"title\":\"NVIDIA Corporation (NVDA) - Earnings History\",\"content\":\"# NVIDIA Corporation (NVDA)\\n\\n# Earnings Announcements: Estimated vs Actual\\n\\nOn 2026-05-20, NVIDIA Corporation (NVDA) announced earnings per share of $1.87\\nfor the fiscal quarter ending 2026-04-30, beating the average analyst estimate of $1.70.\\n\\nThe next expected annoucement date for quarterly earnings is 2026-08-26, with an average estimated earnings per share of $2.01\\nfor the fiscal quarter ending 2026-07-31. [...] | Announcement Date | Fiscal Quarter End | Estimated EPS | Actual EPS |\\n ---  --- |\\n| 2026-05-20 | 2026-04-30 | $1.70 | $1.87 |\\n| 2026-02-25 | 2026-01-31 | $1.45 | $1.57 |\\n| 2025-11-19 | 2025-10-31 | $1.18 | $1.24 |\\n| 2025-08-27 | 2025-07-31 | $0.94 | $0.99 |\\n| 2025-05-28 | 2025-04-30 | $0.80 | $0.77 |\\n| 2025-02-26 | 2025-01-31 | $0.79 | $0.85 |\\n| 2024-11-20 | 2024-10-31 | $0.70 | $0.78 |\\n| 2024-08-28 | 2024-07-31 | $0.60 | $0.65 |\\n| 2024-05-22 | 2024-04-30 | $0.51 | $0.58 | [...] | 2024-02-21 | 2024-01-31 | $0.42 | $0.49 |\\n| 2023-11-21 | 2023-10-31 | $0.30 | $0.38 |\\n| 2023-08-23 | 2023-07-31 | $0.18 | $0.25 |\\n| 2023-05-24 | 2023-04-30 | $0.06 | $0.09 |\\n| 2023-02-22 | 2023-01-31 | $0.05 | $0.06 |\\n| 2022-11-16 | 2022-10-31 | $0.04 | $0.03 |\\n| 2022-08-24 | 2022-07-31 | $0.03 | $0.03 |\\n| 2022-05-25 | 2022-04-30 | $0.11 | $0.12 |\\n| 2022-02-16 | 2022-01-31 | $0.10 | $0.11 |\\n| 2021-11-17 | 2021-10-31 | $0.09 | $0.10 |\\n| 2021-08-18 | 2021-07-31 | $0.09 | $0.09 |\",\"score\":0.70456684,\"raw_content\":null,\"id\":\"128fc4-00\"},{\"url\":\"https://tavily.com/knowledge/company/TXRhn2TKUD7t\",\"title\":\"NVIDIA\",\"content\":\"# NVIDIA\\nID: TXRhn2TKUD7t\\nWebsite: www.nvidia.com\\nLegal name: NVIDIA Corporation\\nHeadquarters: Santa Clara, CA, United States\\nLinkedIn: www.linkedin.com/company/nvidia · 6,578,529 followers\\nIndustry: Computer Hardware Manufacturing\\nIndustry codes: SIC 73, 737, NAICS 33, 334\\nCompany type: Public Company\\nFounded: 1993\\nBusiness model: B2B, B2C\\nSaaS: no [...] - FY, 2026: revenue 215.94B gross profit 153.46B EBIT 130.39B net income 120.07B EPS 4.900000095367432 USD\\n- Q3, 2026: revenue 57.01B gross profit 41.85B EBIT 36.01B net income 31.91B EPS 1.2999999523162842 USD\\n- Q3, 2026: revenue 57.01B gross profit 41.85B EBIT 36.01B net income 31.91B EPS 1.2999999523162842 USD [...] ## Financials\\n- Stock: NVDA · IPO 1999-01-22\\n- Stock: NASDAQ:NVDA · IPO 1999-01-22\\n- Annual revenue: 215.94B USD\\n- Quarterly revenue: 57.01B USD\\n- Market cap: 3.46T USD as of 2024-10-29\\n- Q1, 2027: revenue 81.62B gross profit 61.16B EBIT 53.54B net income 58.32B EPS 2.390000104904175 USD\\n- Q1, 2027: revenue 81.62B gross profit 61.16B EBIT 53.54B net income 58.32B EPS 2.390000104904175 USD\\n- FY, 2026: revenue 215.94B gross profit 153.46B EBIT 130.39B net income 120.07B EPS 4.900000095367432 USD\",\"score\":0.6754436,\"raw_content\":null,\"id\":\"2aa14a-01\"},{\"url\":\"https://seekingalpha.com/article/4966435-nvidia-earnings-preview-ignore-the-tabloid-headlines-and-focus-on-the-data\",\"title\":\"Nvidia Earnings Preview: Ignore The Tabloid Headlines And Focus On The Data (NASDAQ:NVDA) | Seeking Alpha\",\"content\":\"NVIDIA Corporation (NVDA) has become one of the most profitable companies in the world. In its latest reported quarter, the company recorded revenue of $96.2B (+106% y/y). Data Center accounted for a record\\n\\nThis article was written by [...] ### Recommended For You [...] ## Investing Groups\\n\\n## Portfolios\\n\\n## Find & Compare\\n\\n# Nvidia Earnings Preview: Ignore The Tabloid Headlines And Focus On The Data\\n\\n## Summary\\n\\nNvidia headquarters in Silicon Valley \\n\\nSundry Photography/iStock Editorial via Getty Images\\n\\nNvidia headquarters in Silicon Valley\\n\\nSundry Photography/iStock Editorial via Getty Images\",\"score\":0.6675812,\"raw_content\":null,\"id\":\"ac73d4-02\"},{\"url\":\"h"
+        },
+        {
+          "name": "tavily_tavily_search",
+          "type": "tool_result",
+          "content": "{\"query\":\"NVIDIA news\",\"follow_up_questions\":null,\"answer\":null,\"images\":[],\"results\":[{\"url\":\"https://tavily.com/knowledge/company/TXRhn2TKUD7t\",\"title\":\"NVIDIA\",\"content\":\"# NVIDIA\\nID: TXRhn2TKUD7t\\nWebsite: www.nvidia.com\\nLegal name: NVIDIA Corporation\\nHeadquarters: Santa Clara, CA, United States\\nLinkedIn: www.linkedin.com/company/nvidia · 6,578,529 followers\\nIndustry: Computer Hardware Manufacturing\\nIndustry codes: SIC 73, 737, NAICS 33, 334\\nCompany type: Public Company\\nFounded: 1993\\nBusiness model: B2B, B2C\\nSaaS: no [...] ## M&A\\n- Hugging Face, Inc. (2026-08-01): 12.90B USD\\n- Kumo.AI, Inc. (2026-06-01): 400.00M USD\\n- Illumex Technologies, Inc. (2026-02-01): 60.00M USD\\n- Groq, Inc. (2025-12-01): 20.00B USD\\n- SchedMD LLC (2025-12-01)\\n- Enfabrica Corp. (2025-09-01): 900.00M USD\\n- Solver (2025-09-01)\\n- CentML, Inc. (2025-06-01) [...] - FY, 2026: revenue 215.94B gross profit 153.46B EBIT 130.39B net income 120.07B EPS 4.900000095367432 USD\\n- Q3, 2026: revenue 57.01B gross profit 41.85B EBIT 36.01B net income 31.91B EPS 1.2999999523162842 USD\\n- Q3, 2026: revenue 57.01B gross profit 41.85B EBIT 36.01B net income 31.91B EPS 1.2999999523162842 USD\",\"score\":0.64047897,\"raw_content\":null,\"id\":\"6cbc06-00\"},{\"url\":\"https://www.cnbc.com/2026/11/12/big-wall-street-analyst-calls-thursday-like-nvidia.html\",\"title\":\"Big Wall Street analyst calls Thursday like Nvidia\",\"content\":\"stock due to the increasing turmoil at Nvidia. \\\"We are downgrading shares of NVDA and removing our price target following reports (WSJ, NYT) of founding CEO Jensen Huang's imminent departure amidst allegations of a 2nd extramarital affair.\\\" Bernstein downgrades Nvidia to market perform from outperform Bernstein said in a note to clients late Wednesday night that it had no choice but to downgrade the stock. \\\"We admit to struggling mightily with this call, and can sympathize with the case to buy [...] pressures.\\\" \\\"We downgrade GIS to Neutral, as we now see risk to its dividend level, along with ongoing operating pressures.\\\" Barclays upgrades Reliance to overweight from equal weight Barclays upgraded the steel company and says it sees higher steel prices. \\\"We upgrade RS to Overweight from Equal Weight, reflecting higher 2027/28 estimates on tighter supply, stronger volumes and margins.\\\" Oppenheimer downgrades Nvidia to perform from outperform The firm downgraded the stock due to the [...] concern over the future of mRNA based vaccines and therapies. Meanwhile, MRVI has also reorganized with new management (6/9/25) and reduced annualized expenses by +$65M.\\\" William Blair upgrades Advanced Micro Devices to outperform from market perform William Blair says AMD can benefit from the turmoil at Nvidia. \\\"Meanwhile, Nvidia is facing increased scrutiny and a potential leadership vacuum, and while ASIC competition remains a risk to Instinct (particularly at Meta [META $628.07; Outperform]\",\"score\":0.580091,\"published_date\":\"Thu, 12 Nov 2026 12:58:09 GMT\",\"raw_content\":null,\"id\":\"5ac2fb-01\"}],\"response_time\":1.74,\"request_id\":\"98230161-ee27-4aff-a875-98a1996a5f98\",\"auth_mode\":\"keyed\"}\n\n[source ids] cite these pages by id in your notes:\nS562e = NVIDIA (https://tavily.com/knowledge/company/TXRhn2TKUD7t)\nScaad = Big Wall Street analyst calls Thursday like Nvidia (https://www.cnbc.com/2026/11/12/big-wall-street-analyst-calls-thursday-like-nvidia.html)"
+        },
+        {
+          "args": {
+            "query": "Jensen Huang departure Nvidia CEO",
+            "topic": "news",
+            "time_range": "week",
+            "max_results": 10
+          },
+          "name": "tavily_tavily_search",
+          "type": "tool_call"
+        },
+        {
+          "args": {
+            "query": "Nvidia stock news November 2026",
+            "topic": "news",
+            "time_range": "week",
+            "max_results": 10
+          },
+          "name": "tavily_tavily_search",
+          "type": "tool_call"
+        },
+        {
+          "args": {
+            "query": "SELECT trade_date, close, adj_close, volume FROM market.daily_prices WHERE ticker='NVDA' AND trade_date >= DATE '2026-10-25' ORDER BY trade_date"
+          },
+          "name": "run_sql",
+          "type": "tool_call"
+        },
+        {
+          "name": "run_sql",
+          "type": "tool_result",
+          "content": "| trade_date | close | adj_close | volume |\n| --- | --- | --- | --- |\n| 2026-10-26 | 216.0000 | 216.0000 | 90829300 |\n| 2026-10-27 | 217.9400 | 217.9400 | 84799700 |\n| 2026-10-28 | 215.3800 | 215.3800 | 93030200 |\n| 2026-10-29 | 213.6600 | 213.6600 | 77568100 |\n| 2026-10-30 | 204.6400 | 204.6400 | 168386400 |\n| 2026-11-02 | 202.0600 | 202.0600 | 119272200 |\n| 2026-11-03 | 206.6900 | 206.6900 | 91943400 |\n| 2026-11-04 | 200.1300 | 200.1300 | 149033300 |\n| 2026-11-05 | 181.6000 | 181.6000 | 306127800 |\n| 2026-11-06 | 186.6400 | 186.6400 | 180212300 |\n| 2026-11-09 | 178.6700 | 178.6700 | 462719300 |\n| 2026-11-10 | 168.8900 | 168.8900 | 429273200 |\n| 2026-11-11 | 173.7300 | 173.7300 | 313417400 |\n(13 rows; table tf7e6b5)"
+        },
+        {
+          "name": "tavily_tavily_search",
+          "type": "tool_result",
+          "content": "{\"query\":\"Jensen Huang departure Nvidia CEO\",\"follow_up_questions\":null,\"answer\":null,\"images\":[],\"results\":[{\"url\":\"https://www.businessinsider.com/nvidia-stock-drop-jensen-huang-affair-nvda-outlook-dan-ives-2026-11\",\"title\":\"Jensen Huang's Departure Would Shave 30% Off Nvidia Stock, Dan Ives Says - Business Insider\",\"content\":\"If Huang were to depart, Ives said that Nvidia stock would fall 25% to 30%, implying a drop to around $122 per share.\\n\\n\\\"We believe if Jensen was removed as CEO, Nvidia is worth a lot less (25%-30%) as a company/stock and would change the future direction of the company and create a dramatically different competitive environment around AI GPUs both in the US and globally especially for China,\\\" Ives, a senior managing director at Yorkville Ives, wrote in a note. [...] \\\"Jensen is the core DNA of Nvidia and its AI success and ambitions are heavily tied to him staying on as CEO. Jensen is not replaceable,\\\" Ives said. \\\"There is no other person on the management team bench that can step in seamlessly as CEO.\\\"\\n\\nThe dilemma extends to the broader stock market and the economy, as well. Nvidia, which was the world's largest company by market-cap before the recent stock slide, has been a pillar of the AI-led bull market. [...] Jensen Huang is worth about 30% of Nvidia's total value.\\n\\nThat's according to prominent tech bull Dan Ives, who said on Tuesday that Huang's departure from the AI chip titan would whittle its value by nearly a third.\\n\\nHuang is embroiled in a scandal related to an affair with a suspected Chinese spy. The woman, Alice Huang, has been an executive at Singaporean data firm Megaspeed, a company with ties to big Chinese tech firms.\",\"score\":0.8830044,\"published_date\":\"Tue, 10 Nov 2026 15:26:00 GMT\",\"raw_content\":null,\"id\":\"6846cb-00\"},{\"url\":\"https://finance.yahoo.com/markets/stocks/articles/bettors-see-55-chance-jensen-120132587.html\",\"title\":\"Bettors See a 55% Chance Jensen Huang Is Out as Nvidia CEO Before 2029\",\"content\":\"As of about 11 p.m. ET on Monday, November 9, 2026, traders on Kalshi, the CFTC-regulated prediction market, put the chance that Jensen Huang leaves as CEO of NVIDIA (NASDAQ:NVDA) before January 1, 2029 at about 53% to 55%. Yes contracts were offered at 55 cents, and recent trades went through at 53 to 54 cents. [...] Nvidia (NVDA) sank 4% to $179, its lowest close since April, after Jensen Huang admitted he fell short and the board opened an investigation.\\n Thin trading undercuts the 2029 reading: about 11,000 contracts changed hands, versus 225,000 in the before-2027 market, which prices only a 13% to 14% exit chance.\\n Any announced departure pays out on the Yes contract, including retirement or health, so the 2029 price covers every path out and not only a firing. [...] A Yes contract pays only when Huang actually leaves the job, and the exit is announced before the deadline, as naming a future departure date is insufficient and any reason counts, including retirement or health.\\n\\nThe 2029 price therefore covers every path out of the CEO's office, with a firing as one path among several. A rival market counting only leaving or removal put an announcement by December 31, 2026 at about 15.5%.\\n\\n## Thin Trading Weakens the 2029 Reading\",\"score\":0.86108357,\"published_date\":\"Tue, 10 Nov 2026 11:00:00 GMT\",\"raw_content\":null,\"id\":\"5669a4-01\"},{\"url\":\"https://news.kalshi.com/p/jensen-huang-exit-odds-nvidia-ceo\",\"title\":\"Jensen Huang exit odds: Nvidia CEO departure chances hit 44%\",\"content\":\"As it stands, the market-implied probability for Huang to be out as Nvidia CEO before July 1, 2027, jumped as high as 44% on Nov. 8, 2026, before falling back to roughly 30% at the time of writing.\\n\\nMeanwhile, the chances of him being out by January 1, 2028, hit 44% before settling at 36%, while January 1, 2029, is trading at 40%.\\n\\nThe Nvidia chief sent a memo to his employees admitting to being unfaithful to his wife and issued an apology to his family and employees. [."
+        },
+        {
+          "name": "tavily_tavily_search",
+          "type": "tool_result",
+          "content": "{\"query\":\"Nvidia stock news November 2026\",\"follow_up_questions\":null,\"answer\":null,\"images\":[],\"results\":[{\"url\":\"https://www.aljazeera.com/economy/2026/11/12/nvidia-shares-plunge-amid-reports-board-to-discuss-ceo-huangs-future\",\"title\":\"Nvidia shares plunge amid reports board to discuss CEO Huang’s future | Technology News | Al Jazeera\",\"content\":\"By John Power\\n\\nPublished On 12 Nov 202612 Nov 2026\\n\\nChip giant Nvidia’s stock price has tumbled amid reports that its board of directors is meeting to consider the future of CEO Jensen Huang.\\n\\nNvidia shares fell more than 8 percent in after-hours trading on Wednesday as question swirled over Huang’s position at the top of the $4.2 trillion company. [...] Save\\n\\nShare\\n\\nHuang\\n\\n(FILES) Nvidia CEO Jensen Huang speaks during a press conference at Computex in Taipei on June 2, 2026. Huang has admitted to having an affair, reportedly with a Chinese executive at a Singapore-based company that the United States suspects of smuggling AI microchips into China. The scandal has focused attention on how China, a major artificial-intelligence power in itself, obtains the cutting-edge chips despite US export restrictions. (Photo by I-Hwa Cheng / AFP) (AFP) [...] Live\\n\\nLive\\n\\nDEVELOPING STORYDEVELOPING STORY,\\n\\nEconomy|Technology\\n\\n# Nvidia shares plunge amid reports board to discuss CEO Huang’s future\\n\\nChip giants stock price falls more than 8 percent amid speculation over co-founder’s future.\\n\\nSave\\n\\nShare\\n\\nHuang\",\"score\":0.93694025,\"published_date\":\"Thu, 12 Nov 2026 00:43:26 GMT\",\"raw_content\":null,\"id\":\"f64acf-00\"},{\"url\":\"https://global.morningstar.com/en-ca/stocks/nvidia-watching-potential-succession-plan-any-signs-customer-impact\",\"title\":\"Nvidia: Watching Potential Succession Plan and Any Signs of Customer Impact\",\"content\":\"1.   Home\\n2.   Stocks\\n3.   Nvidia: Watching Potential Succession Plan and Any Signs of Customer Impact \\n\\n# Nvidia: Watching Potential Succession Plan and Any Signs of Customer Impact\\n\\nAmid reports about a second affair and Huang’s possible ouster, we think Nvidia stock remains undervalued.\\n\\nImage 2\\n\\nBrian Colello, CPANov 12, 2026\\n\\nShare\\n\\nImage 3: Nvidia signage outside the company headquarters.\\n\\nAaron M. Sprecher via AP\\n\\n## Key Morningstar Metrics for NVIDIA [...] #### Nvidia: Investigation Into CEO Huang Casts Dark Cloud Over Company's Bright AI Future Brian Colello, CPA Nov 9, 2026\\n   #### AMD Earnings: Strong Data Center Outlook Points to Upside for Stock Brian Colello, CPA Nov 4, 2026\\n   #### Intel Earnings: PC Winter Has Arrived, Offsetting Healthy AI Growth Brian Colello, CPA Oct 30, 2026\\n   #### Nvidia: Hugging Face Acquisition Both a Wise Offensive and Defensive Move Brian Colello, CPA Sep 3, 2026 [...] Image 4 ### Anthropic: We See the Stock as Undervalued in the IPO Pricing Range There is meaningful upside as Anthropic is pricing its stock as a reflection of current sentiment, not the company’s fundamentals. Malik Ahmed Khan, CFA Nov 11, 2026Image 5 ### Why Morningstar Thinks Anthropic Is Worth USD 1.7 Trillion A look at how we arrive at our base-case valuation for the AI lab, along with bull and bear scenarios. Malik Ahmed Khan, CFA Nov 9, 2026Image 6 ### Chasing New Frontiers: We See\",\"score\":0.8991304,\"published_date\":\"Thu, 12 Nov 2026 01:52:24 GMT\",\"raw_content\":null,\"id\":\"074c40-01\"},{\"url\":\"https://www.cnbc.com/2026/11/09/nvidia-jensen-huang-chinese-spy-investigation.html\",\"title\":\"Nvidia stock falls as scrutiny turns to Huang’s relationship with alleged Chinese spy\",\"content\":\"Published Mon, Nov 9 2026\\n4:05 AM EST\\nUpdated 5 Min Ago\\nApril Roach\\n@/in/april-roach-901033140/\\n@April\\\\_\\\\_Roach\\nWATCH LIVE\\nThis is breaking news. Please refresh for updates.\\nChoose CNBC as your preferred source on Google and never miss a moment from the most trusted name in business news. [...] Pro News\\nJosh Brown\\nMike Santoli\\nCalls of the Day\\nMy Portfolio\\nLivestream\\nFull Episodes\\nStock Screener\\nMarket Forecast\\nOptions"
+        },
+        {
+          "args": {
+            "urls": [
+              "https://fortune.com/2026/11/12/nvidia-exit-jensen-huang-affair-trump-preserve-documents-spying-chip-smuggling",
+              "https://www.aljazeera.com/economy/2026/11/12/nvidia-shares-plunge-amid-reports-board-to-discuss-ceo-huangs-future"
+            ],
+            "query": "Nvidia board oust Jensen Huang stock reaction latest",
+            "extract_depth": "advanced"
+          },
+          "name": "tavily_tavily_extract",
+          "type": "tool_call"
+        },
+        {
+          "name": "tavily_tavily_extract",
+          "type": "tool_result",
+          "content": "{\"results\":[{\"url\":\"https://fortune.com/2026/11/12/nvidia-exit-jensen-huang-affair-trump-preserve-documents-spying-chip-smuggling\",\"title\":\"Nvidia preps exit for Huang as Trump Administration faces probe into spying and chip smuggling | Fortune\",\"raw_content\":\"## Nvidia fallout is splitting markets in two\\n\\nNvidia shares lost 5.54% overnight after the board convened to discuss replacing CEO Jensen Huang. Shay Boloor, chief market strategist at The Futurum Group, thinks the selloff is overcooked. The company’s “ecosystem [was] already firmly established long before this fiasco so I don’t see next 12 to 18 months of revenue suddenly disappearing if Jensen were to leave,” he told Fortune. [...] ## Good morning. On Fortune’s radar today:\\n\\n Nvidia board preps exit for Jensen Huang.\\n Huang’s affair with a subordinate was caught on video.\\n We have a list of Huang’s possible replacements.\\n Congress preps probe of White House, chip exports, and Chinese spying.\\n Markets: A divided house.\\n AI’s $1 trillion annual cash transfer between buyers and suppliers.\\n The “misery index” rises.\\n This Cisco exec will walk out of meetings if staff use too many corporate acronyms.\\n\\n### ONE BIG THING\\n\\n## Nvidia appoints CEO search agency to find replacement for Jensen Huang as Congress preps probe into White House and chip exports [...] A decision has been made. It is all but certain that Jensen Huang’s time as CEO is coming to an end. Nvidia’s board met last night to discuss how to prepare for his removal. Since then, we have learned that they selected an outside firm to find candidates to replace him and that the board is considering naming a temporary CEO while the search goes on, according to Bloomberg. \\n\\nRecommended Video\\n\\nHere are Huang’s possible replacements, per the FT:\",\"images\":[]},{\"url\":\"https://www.aljazeera.com/economy/2026/11/12/nvidia-shares-plunge-amid-reports-board-to-discuss-ceo-huangs-future\",\"title\":\"Nvidia shares plunge amid reports board to discuss CEO Huang’s future | Technology News | Al Jazeera\",\"raw_content\":\"[Live](/video/live)\\n\\n[Live](/video/live)\\n\\n**DEVELOPING STORY**DEVELOPING STORY,\\n\\n[Economy](/economy/)|[Technology](/tag/technology/)\\n\\n# Nvidia shares plunge amid reports board to discuss CEO Huang’s future\\n\\n*Chip giants stock price falls more than 8 percent amid speculation over co-founder’s future.*\\n\\nSave\\n\\nShare\\n\\n![Huang](/wp-content/uploads/2026/11/AFP__20261110__D6YZ8T3__v1__MidRes__FilesTaiwanChinaUsSemiconductorsAiNvidia-1794443885.jpg?resize=770%2C513&quality=80)\\n\\n(FILES) Nvidia CEO Jensen Huang speaks during a press conference at Computex in Taipei on June 2, 2026. Huang has admitted to having an affair, reportedly with a Chinese executive at a Singapore-based company that the United States suspects of smuggling AI microchips into China. The scandal has focused attention on how China, a major artificial-intelligence power in itself, obtains the cutting-edge chips despite US export restrictions. (Photo by I-Hwa Cheng / AFP) (AFP)\\n\\n[![](/wp-content/uploads/2020/09/jp-1730786685-rotated.jpg?resize=96%2C96&quality=80)](/author/powerj)\\n\\nBy [John Power](/author/powerj)\\n\\nPublished On 12 Nov 202612 Nov 2026\\n\\nChip giant Nvidia’s stock price has tumbled amid reports that its board of directors is meeting to consider the future of CEO Jensen Huang.\\n\\nNvidia shares fell more than 8 percent in after-hours trading on Wednesday as question swirled over Huang’s position at the top of the $4.2 trillion company.\\n\\nThe plunge comes after the New York Times, the Financial Times and the Wall Street Journal reported that Nvidia’s board of directors would discuss Huang’s position amid controversy over his personal life.\\n\\nNvidia did not immediately respond to Al Jazeera’s requests for comment.\\n\\nThe reported meeting comes amid reports that Huang engaged in an extramarital relationship with an Nvidia employee, in addition to an affair with a woman accused of working the Chinese intelligence"
+        },
+        {
+          "args": {
+            "query": "Nvidia board decision Huang November 12 2026",
+            "topic": "news",
+            "time_range": "day",
+            "max_results": 10
+          },
+          "name": "tavily_tavily_search",
+          "type": "tool_call"
+        },
+        {
+          "args": {
+            "query": "Nvidia Q3 FY2027 earnings preview November 17 expectations",
+            "time_range": "week",
+            "max_results": 10
+          },
+          "name": "tavily_tavily_search",
+          "type": "tool_call"
+        },
+        {
+          "name": "tavily_tavily_search",
+          "type": "tool_result",
+          "content": "{\"query\":\"Nvidia Q3 FY2027 earnings preview November 17 expectations\",\"follow_up_questions\":null,\"answer\":null,\"images\":[],\"results\":[{\"url\":\"https://www.instagram.com/reel/DfmfzgTlZBG\",\"title\":\"Instagram\",\"content\":\"Here’s what Wall Street expects:  \\n📅 Q3 FY2027 results on Nov 17  \\n💰 Revenue: about $108.9B (company guidance: $108B ± 2%)  \\n📊 EPS forecast: $2.47  \\n📈 The stock hit a record close above $239 on Oct 6  \\n  \\nBeyond data centers, Nvidia’s AI push now reaches robotics and self-driving cars. The real question is whether the AI boom can keep its momentum.  \\n  \\nCan Nvidia beat expectations again? Drop your prediction below 👇  \\n  \\nFollow for more market insights [...] Figures are analyst estimates. Trading involves risk. Not investment advice.  \\n  \\n#Nvidia #NVDA #StockMarket #EarningsSeason #AIStocks   \\n  \\n[Nvidia earnings, NVDA stock, Nvidia Q3 results, Nvidia revenue estimate, Nvidia EPS forecast, AI stocks 2026, Nvidia earnings date, Earnings preview, AI boom, Stock market news] [...] ## No comments yet.\\n\\nStart the conversation.\\n\\nLog in to like or comment.\\n\\nMore posts from stockpulsefx\\n\\nPhoto by STOCKPULSEFX on November 11, 2026. May be an image of poster, card and text.\\n\\nVideo by STOCKPULSEFX on November 05, 2026. May be an image of card, candle and text.\\n\\nVideo by STOCKPULSEFX on November 05, 2026. May be an image of screen and text.\\n\\nPhoto by STOCKPULSEFX on November 05, 2026. May be an image of calendar, poster and text.\",\"score\":0.7897206,\"raw_content\":null,\"id\":\"448949-00\"},{\"url\":\"https://shattered.io/nvidia-holds-support-nasdaq-100-rebounds-3-4-percent-earnings-2026\",\"title\":\"Nvidia Holds Support as Nasdaq 100 Gains 3.4% [2026]\",\"content\":\"| Metric | Q2 FY2027 (actual) | Q3 FY2027 (expected) | Implied change |\\n ---  --- |\\n| Revenue | $96.2 billion | $108.8 billion | About 13% sequential (our arithmetic) |\\n| Year-over-year growth | 106% | 91% | Growth rate slows 15 points |\\n| EPS | Not cited here | $2.47 or $2.49 | 0.8% gap between sources |\\n| Reporting date | Period ended July 26, 2026 | Nov. 17, 2026, 5:00 p.m. EST | Quarter ends October 2026 |\\n\\n### Two EPS Numbers, One Small Gap [...] The next test arrives on Tuesday, November 17, 2026, at 5:00 p.m. EST, when Nvidia reports third-quarter fiscal 2027 results. Its last report, the second-quarter release for the period ended July 26, 2026, showed $96.2 billion in revenue, up 18% from the prior quarter and 106% from a year earlier. Analysts now expect $108.8 billion for the new quarter, which would mark 91% growth. [...] The takeaway: support is holding for now, but it has not been tested by news. Tuesday’s report at 5:00 p.m. EST will do that, and the answer will matter far beyond one ticker.\\n\\n## Frequently Asked Questions\\n\\n### When does Nvidia report third-quarter fiscal 2027 earnings?\\n\\nNvidia is scheduled to report on November 17, 2026, at 5:00 p.m. EST. The quarter covers the period ending October 2026.\\n\\n### What are analysts expecting from Nvidia this quarter?\",\"score\":0.728362,\"raw_content\":null,\"id\":\"1784c9-01\"},{\"url\":\"https://www.indmoney.com/blog/us-stocks/nvidia-stock-fall-michael-burry-heck-of-a-trade\",\"title\":\"Nvidia Stock Falls Over 30%: Michael Burry Sees a ‘Heck of a Trade’ Ahead\",\"content\":\"The next scheduled financial checkpoint is Nvidia’s November 17 Q3 FY2027 results. Compare the announcement with the existing revenue and margin guidance, then examine whether management changes its expectations for customer deployments, memory costs and future profitability. [...] |  |  |\\n --- |\\n| Business measure | Latest reported result or company outlook |\\n| Q2 FY2027 revenue | $96.2 billion, up 106% year on year |\\n| Q2 data-centre revenue | $89.0 billion, up 117% year on year |\\n| Q2 GAAP gross margin | 75.0% |\\n| Q3 FY2027 revenue guidance | $108 billion, plus or minus 2% |\\n| Q3 gross-margin guidance | 74.0%, plus or minus 0.5 percentage points | [...] However, Nvidia had already warned that rising memory co"
+        },
+        {
+          "name": "tavily_tavily_search",
+          "type": "tool_result",
+          "content": "{\"query\":\"Nvidia board decision Huang November 12 2026\",\"follow_up_questions\":null,\"answer\":null,\"images\":[],\"results\":[{\"url\":\"https://www.moomoo.com/community/feed/the-capital-breakdown-thursday-november-12-2026-117603259580421\",\"title\":\"📊 THE CAPITAL BREAKDOWN: Thursday, November 12, 2026 - moomoo Community\",\"content\":\"decide whether to remove Jensen Huang as CEO. No decision has been announced. Nvidia is down almost 6% premarket and futures are lower. Jobless claims are at 8:30, and Cisco and Applied Materials report tonight. [...] 📌 After the bell: the New York Times reported Huang had a second affair, with Kimberly Powell, Nvidia's VP of health care, who reports to him. The board met Wednesday evening to discuss Huang's future as its leader. Bloomberg reported the board has been working with an outside firm on possible replacements and is considering an interim CEO. Huang has no clear No. 2, having said he doesn't believe in succession planning. Shares slid more than 8% after hours. [...] 1:00: 30-year Treasury auction\\n\\nWeekly oil inventories (moved for the holiday)\\n\\nAfter the close: $Cisco (CSCO.US)$, $Applied Materials (AMAT.US)$, $NEBIUS (NBIS.US)$   \\n\\nAny time: Nvidia board decision on Huang\\n\\nFri: October PPI (est. +0.4%, core +0.3%)\\n\\nNext week: Nvidia earnings Tue Nov 17 after the close. GTA VI launches Nov 19.\\n\\n⚡ BOTTOM LINE\",\"score\":0.8727061,\"published_date\":\"Thu, 12 Nov 2026 11:00:00 GMT\",\"raw_content\":null,\"id\":\"4fb894-00\"},{\"url\":\"https://qz.com/nvidia-board-oust-jensen-huang-ceo-affairs-111226\",\"title\":\"Nvidia board is preparing to oust CEO Jensen Huang over two affairs\",\"content\":\"Quartz\\n\\nNvidia board is preparing to oust CEO Jensen Huang over two affairs\\n\\nBusiness News\\n\\n# Nvidia's board is preparing to oust Jensen Huang over two affairs\\n\\nNvidia stock fell 8% after hours Wednesday, and the company has not announced a decision on the CEO's future\\n\\nBy Cris Tolomia·2 min read·Updated November 12, 2026\\n\\nAdd QZ to Google\\n\\nPATRICK T. FALLON / Getty Images [...] Nvidia$NVDA's board is getting ready to push out CEO Jensen Huang following two extramarital affairs, according to The Wall Street Journal. The board convened Wednesday to consider Huang's future, and Nvidia has yet to disclose any decision.\\n\\nNvidiastock fell 8% in after-hours trading Wednesday to $159.95, after closing at $173.73. The stock was off nearly 8% ahead of Thursday's open. [...] China’s Foreign Ministry has called the espionage allegation unsubstantiated. Nvidiais scheduled to report fiscal third-quarter earnings on Nov. 17. Three House Republican committee chairs have asked Huang to appear for a private session with lawmakers on Nov. 18.\\n\\nDaily Brief\\n\\n## The essential business news, delivered fresh every morning.\\n\\nJoin 500,000+ readers who start their day with Quartz.\\n\\nBy subscribing, you agree to our Terms of Service and Privacy Policy.\",\"score\":0.84767824,\"published_date\":\"Thu, 12 Nov 2026 12:44:23 GMT\",\"raw_content\":null,\"id\":\"9e8dba-01\"},{\"url\":\"https://quantumzeitgeist.com/nvidia-board-weighs-huang-two-reported\",\"title\":\"Nvidia Board Weighs Huang’s Future After Two Reported Affairs\",\"content\":\"Nvidia’s board now faces a decision regarding founder Jensen Huang following reports of a romantic relationship with Kimberly Powell, the chipmaker’s Vice-President of Healthcare and an employee of more than 18 years. This revelation deepens a scandal that began days prior with news of an affair involving Alice Huang, an executive at an Nvidia client suspected of ties to Chinese intelligence, the company says. [...] Skip to content\\n\\nQuantum Zeitgeist\\n\\nTechnology News, Technology\\n\\n# Nvidia board weighs Huang’s future after two reported affairs\\n\\nAvatar of Ivy Delaney\\n\\nNovember 12, 2026 by Ivy Delaney\\n\\n   A large screen displays technical specifications alongside a chip illustration, set on a dark stage with purple lighting. [...] November 12, 2026 A scientist adjusts controls beside a large, golden, cylin"
+        },
+        {
+          "text": "",
+          "type": "token"
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "agent": "orchestrator",
+      "content": "Nvidia's board was preparing to oust founder and CEO Jensen Huang after he admitted an affair and reporting linked one of the relationships to a suspected Chinese spy, meeting on the evening of Nov 11 to weigh his future and hiring an outside firm to search for a replacement, with no decision disclosed as of Nov 12.[1][2][3] The market reaction was immediate — NVDA closed at $173.73 on Nov 11 and fell about 8% after hours to $159.95, roughly 20% below its Oct 26 close — and Bernstein and Oppenheimer both downgraded the stock, with the company's Q3 FY2027 results due Nov 17.[4][5][6]\n\nSources\n\n1. [Exclusive | Nvidia is Preparing to Oust Nvidia CEO Jensen Huang - WSJ](https://www.wsj.com/business/nvidia-is-preparing-to-oust-nvidia-ceo-jensen-huang-30f421ad)\n2. [Nvidia preps exit for Huang as Trump Administration faces probe into spying and chip smuggling](https://fortune.com/2026/11/12/nvidia-exit-jensen-huang-affair-trump-preserve-documents-spying-chip-smuggling)\n3. [Nvidia board preparing to oust CEO Jensen Huang, name interim CEO](https://www.semafor.com/article/11/11/2026/nvidia-board-preparing-to-oust-ceo-jensen-huang-name-interim-ceo)\n4. [Nvidia board is preparing to oust CEO Jensen Huang over two affairs](https://qz.com/nvidia-board-oust-jensen-huang-ceo-affairs-111226)\n5. [Big Wall Street analyst calls Thursday like Nvidia](https://www.cnbc.com/2026/11/12/big-wall-street-analyst-calls-thursday-like-nvidia.html)\n6. [NVIDIA Sets Conference Call for Third-Quarter Financial Results](https://nvidianews.nvidia.com/news/nvidia-sets-conference-call-for-third-quarter-financial-results-6928873)\n7. Market database, 2026-11-11\n\nOne caveat: there is still no official Nvidia statement or board resolution on Huang's status, and the alleged Chinese-spy link is unproven in public reporting.\n\nSince this is a stock story — are you following NVDA as an investment, or just tracking the news?",
+      "team": null,
+      "tool_calls": [],
+      "charts": []
+    }
+  ],
+  "usage": {
+    "reply": {
+      "input_tokens": 91250,
+      "cached_tokens": 54016,
+      "output_tokens": 4865
+    },
+    "chat": {
+      "input_tokens": 91250,
+      "output_tokens": 4865,
+      "cached_tokens": 54016
+    },
+    "reply_by_model": {
+      "baidu/ernie-5.5-flash-preview:free": {
+        "model_calls": 6,
+        "input_tokens": 91250,
+        "cached_tokens": 54016,
+        "output_tokens": 4865
+      }
+    },
+    "chat_by_model": {
+      "baidu/ernie-5.5-flash-preview:free": {
+        "model_calls": 6,
+        "input_tokens": 91250,
+        "cached_tokens": 54016,
+        "output_tokens": 4865
+      }
+    }
+  }
+}

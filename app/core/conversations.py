@@ -4,7 +4,7 @@ import uuid
 
 from sqlalchemy import delete, func, select, update
 
-from app.core.db import conversations, get_engine
+from app.core.db import conversations, get_engine, turn_activity
 
 
 def create_conversation(user_id: str, kind: str, first_message: str) -> dict:
@@ -118,3 +118,25 @@ def get_conversation_usage(user_id: str, conversation_id: str) -> dict | None:
             .where(conversations.c.id == conversation_id, conversations.c.user_id == user_id)
         ).first()
     return _usage_of(row) if row else None
+
+
+def save_turn_activity(user_id: str, conversation_id: str, turn: int, events: list[dict]) -> None:
+    with get_engine().begin() as conn:
+        conn.execute(
+            turn_activity.insert().values(
+                user_id=user_id, conversation_id=conversation_id, turn=turn, events=events
+            )
+        )
+
+
+def get_turn_activity(user_id: str, conversation_id: str) -> dict[int, list[dict]]:
+    with get_engine().begin() as conn:
+        rows = conn.execute(
+            select(turn_activity.c.turn, turn_activity.c.events)
+            .where(turn_activity.c.user_id == user_id, turn_activity.c.conversation_id == conversation_id)
+            .order_by(turn_activity.c.id)
+        ).all()
+    result: dict[int, list[dict]] = {}
+    for turn, events in rows:
+        result.setdefault(turn, []).extend(events)
+    return result

@@ -1,0 +1,180 @@
+{
+  "name": "vi",
+  "message": "5 công ty có vốn hoá lớn nhất là những công ty nào?",
+  "events": [
+    {
+      "type": "conversation",
+      "id": "d3dd077f-6755-4f48-bd51-6e1b29344066",
+      "title": "5 công ty có vốn hoá lớn nhất là những công ty nào?"
+    },
+    {
+      "type": "routing",
+      "difficulty": "medium",
+      "profile": "balanced",
+      "tier": "standard",
+      "model": "baidu/ernie-5.5-flash-preview:free",
+      "reason": "standard model"
+    },
+    {
+      "type": "agent",
+      "name": "orchestrator"
+    },
+    {
+      "type": "agent",
+      "name": "sql"
+    },
+    {
+      "type": "tool_call",
+      "name": "run_sql",
+      "args": {
+        "query": "SELECT ticker, name, sector, market_cap, currency, updated_at FROM market.stocks ORDER BY market_cap DESC LIMIT 5"
+      },
+      "agent": "sql"
+    },
+    {
+      "type": "tool_result",
+      "name": "run_sql",
+      "content": "| ticker | name | sector | market_cap | currency | updated_at |\n| --- | --- | --- | --- | --- | --- |\n| AAPL | Apple Inc. | Technology | 5064611069952 | USD | 2026-11-11 13:39:07.739229+00:00 |\n| NVDA | NVIDIA Corporation | Technology | 4078186790912 | USD | 2026-11-11 13:39:07.739229+00:00 |\n| MSFT | Microsoft Corporation | Technology | 3959349575680 | USD | 2026-11-11 13:39:07.739229+00:00 |\n| GOOGL | Alphabet Inc. | Communication Services | 3533049692160 | USD | 2026-11-11 13:39:07.739229+00:00 |\n| AMZN | Amazon.com, Inc. | Consumer Cyclical | 2928954572800 | USD | 2026-11-11 13:39:07.739229+00:00 |\n(5 rows; table td87629)",
+      "agent": "sql"
+    },
+    {
+      "type": "token",
+      "text": "Top 5 công ty có vốn hoá lớn nhất trong cơ sở dữ liệu (số liệu vốn hoá tính đến 2026-11-11):\n\n| # | Mã | Công ty | Ngành | Vốn hoá (USD) |\n|---|---|---|---|---|\n| 1 | AAPL | Apple Inc. | Technology | 5,064,611,069,952 (~5,06"
+    },
+    {
+      "type": "token",
+      "text": " nghìn tỷ) |\n| 2 | NVDA | NVIDIA Corporation | Technology | 4,078,186,790,912 (~4,08 nghìn tỷ) |\n| 3 | MSFT | Microsoft Corporation | Technology | 3,959,349,575,680 (~3,96 nghìn tỷ) |\n| 4 | GOOGL | Alphabet Inc. | Communication Services | 3,533,049,692,160 (~3,53 nghìn tỷ) |\n| 5 | AMZN | Amazon.com, Inc. | Consumer Cyclical | 2,928,954,572,800 (~2,93 nghìn tỷ) |\n\nCả 5 đều là công ty Mỹ niêm yết trên sàn NMS (Nasdaq)."
+    },
+    {
+      "type": "usage",
+      "reply": {
+        "input_tokens": 9064,
+        "cached_tokens": 4096,
+        "output_tokens": 355
+      },
+      "chat": {
+        "input_tokens": 9064,
+        "output_tokens": 355,
+        "cached_tokens": 4096
+      },
+      "reply_by_model": {
+        "baidu/ernie-5.5-flash-preview:free": {
+          "model_calls": 3,
+          "input_tokens": 9064,
+          "cached_tokens": 4096,
+          "output_tokens": 355
+        }
+      },
+      "chat_by_model": {
+        "baidu/ernie-5.5-flash-preview:free": {
+          "model_calls": 3,
+          "input_tokens": 9064,
+          "cached_tokens": 4096,
+          "output_tokens": 355
+        }
+      }
+    },
+    {
+      "type": "done"
+    }
+  ],
+  "history": [
+    {
+      "role": "user",
+      "content": "5 công ty có vốn hoá lớn nhất là những công ty nào?",
+      "activity": [
+        {
+          "tier": "standard",
+          "type": "routing",
+          "model": "baidu/ernie-5.5-flash-preview:free",
+          "reason": "standard model",
+          "profile": "balanced",
+          "difficulty": "medium"
+        },
+        {
+          "name": "orchestrator",
+          "type": "agent"
+        },
+        {
+          "name": "sql",
+          "type": "agent"
+        },
+        {
+          "args": {
+            "query": "SELECT ticker, name, sector, market_cap, currency, updated_at FROM market.stocks ORDER BY market_cap DESC LIMIT 5"
+          },
+          "name": "run_sql",
+          "type": "tool_call",
+          "agent": "sql"
+        },
+        {
+          "name": "run_sql",
+          "type": "tool_result",
+          "agent": "sql",
+          "content": "| ticker | name | sector | market_cap | currency | updated_at |\n| --- | --- | --- | --- | --- | --- |\n| AAPL | Apple Inc. | Technology | 5064611069952 | USD | 2026-11-11 13:39:07.739229+00:00 |\n| NVDA | NVIDIA Corporation | Technology | 4078186790912 | USD | 2026-11-11 13:39:07.739229+00:00 |\n| MSFT | Microsoft Corporation | Technology | 3959349575680 | USD | 2026-11-11 13:39:07.739229+00:00 |\n| GOOGL | Alphabet Inc. | Communication Services | 3533049692160 | USD | 2026-11-11 13:39:07.739229+00:00 |\n| AMZN | Amazon.com, Inc. | Consumer Cyclical | 2928954572800 | USD | 2026-11-11 13:39:07.739229+00:00 |\n(5 rows; table td87629)"
+        },
+        {
+          "text": "",
+          "type": "token"
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "agent": "sql",
+      "content": "",
+      "team": null,
+      "tool_calls": [
+        {
+          "name": "run_sql",
+          "args": {
+            "query": "SELECT ticker, name, sector, market_cap, currency, updated_at FROM market.stocks ORDER BY market_cap DESC LIMIT 5"
+          }
+        }
+      ],
+      "charts": []
+    },
+    {
+      "role": "tool",
+      "name": "run_sql",
+      "content": "| ticker | name | sector | market_cap | currency | updated_at |\n| --- | --- | --- | --- | --- | --- |\n| AAPL | Apple Inc. | Technology | 5064611069952 | USD | 2026-11-11 13:39:07.739229+00:00 |\n| NVDA | NVIDIA Corporation | Technology | 4078186790912 | USD | 2026-11-11 13:39:07.739229+00:00 |\n| MSFT | Microsoft Corporation | Technology | 3959349575680 | USD | 2026-11-11 13:39:07.739229+00:00 |\n| GOOGL | Alphabet Inc. | Communication Services | 3533049692160 | USD | 2026-11-11 13:39:07.739229+00:00 |\n| AMZN | Amazon.com, Inc. | Consumer Cyclical | 2928954572800 | USD | 2026-11-11 13:39:07.739229+00:00 |\n(5 rows; table td87629)",
+      "charts": []
+    },
+    {
+      "role": "assistant",
+      "agent": "sql",
+      "content": "Top 5 công ty có vốn hoá lớn nhất trong cơ sở dữ liệu (số liệu vốn hoá tính đến 2026-11-11):\n\n| # | Mã | Công ty | Ngành | Vốn hoá (USD) |\n|---|---|---|---|---|\n| 1 | AAPL | Apple Inc. | Technology | 5,064,611,069,952 (~5,06 nghìn tỷ) |\n| 2 | NVDA | NVIDIA Corporation | Technology | 4,078,186,790,912 (~4,08 nghìn tỷ) |\n| 3 | MSFT | Microsoft Corporation | Technology | 3,959,349,575,680 (~3,96 nghìn tỷ) |\n| 4 | GOOGL | Alphabet Inc. | Communication Services | 3,533,049,692,160 (~3,53 nghìn tỷ) |\n| 5 | AMZN | Amazon.com, Inc. | Consumer Cyclical | 2,928,954,572,800 (~2,93 nghìn tỷ) |\n\nCả 5 đều là công ty Mỹ niêm yết trên sàn NMS (Nasdaq).",
+      "team": null,
+      "tool_calls": [],
+      "charts": []
+    }
+  ],
+  "usage": {
+    "reply": {
+      "input_tokens": 9064,
+      "cached_tokens": 4096,
+      "output_tokens": 355
+    },
+    "chat": {
+      "input_tokens": 9064,
+      "output_tokens": 355,
+      "cached_tokens": 4096
+    },
+    "reply_by_model": {
+      "baidu/ernie-5.5-flash-preview:free": {
+        "model_calls": 3,
+        "input_tokens": 9064,
+        "cached_tokens": 4096,
+        "output_tokens": 355
+      }
+    },
+    "chat_by_model": {
+      "baidu/ernie-5.5-flash-preview:free": {
+        "model_calls": 3,
+        "input_tokens": 9064,
+        "cached_tokens": 4096,
+        "output_tokens": 355
+      }
+    }
+  }
+}

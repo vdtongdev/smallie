@@ -79,7 +79,7 @@ src/
 
 **shadcn mapping.** `<dialog>` -> `Dialog`; team checkbox -> `Switch`; settings -> `Tabs`, `RadioGroup`, `Select`, `Input`; accounts -> `Table`; sidebar -> `Sidebar`; buttons -> `Button`; errors -> `Sonner` toast or inline `Alert`; tool blocks and "show data" -> `Collapsible`.
 
-**Theme.** shadcn CSS variables. smallie's accent green maps to `--primary`; `--series-1..8` (light and dark values) carry over from `style.css` for charts. Dark mode follows `prefers-color-scheme`, applied by toggling the `.dark` class. No manual theme toggle in this port.
+**Theme.** shadcn CSS variables in three named colour themes: `chatroom` (default; the Sherwin-Williams Chatroom palette), `shadcn` (neutral defaults) and `smallie` (the M0 green). `?theme=<name>` sets `data-theme` on `<html>` and is remembered in `localStorage` key `theme`; unknown or missing falls back to the stored value, then `chatroom`. `--series-1..8` (light and dark values, carried over from `style.css`) stay the same in every theme, so charts keep their colours. Dark mode follows `prefers-color-scheme`, applied by toggling the `.dark` class. No manual theme toggle in this port.
 
 **Persistence.** Language and current conversation stay in `localStorage` under the same keys as `app.js`, so switching between `/` and `/next` keeps them.
 

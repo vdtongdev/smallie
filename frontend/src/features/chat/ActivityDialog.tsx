@@ -124,7 +124,6 @@ export default function ActivityDialog({ turn, open, onOpenChange }: Props) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         aria-describedby={undefined}
-        className="max-h-[85vh] overflow-y-auto"
         onOpenAutoFocus={() => {
           opener.current = document.activeElement as HTMLElement
         }}

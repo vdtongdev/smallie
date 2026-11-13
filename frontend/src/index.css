@@ -117,7 +117,6 @@
 :root[data-theme="light"] {
     /* The Chatroom light values; initTheme forces `.dark` off for it. */
     --background: #ffffff;
-    --header: #faf2dc;
     --foreground: #1b2430;
     --card: #faf2dc;
     --card-foreground: #1b2430;

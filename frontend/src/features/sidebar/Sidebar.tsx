@@ -76,7 +76,7 @@ export default function Sidebar({ conversations, currentId, busy, teamMode, onTe
           </li>
         ))}
       </ul>
-      <Button type="button" variant="ghost" onClick={onOpenSettings}>
+      <Button type="button" variant="outline" onClick={onOpenSettings}>
         {t('settings')}
       </Button>
       <UsageBox refreshKey={usageKey} />

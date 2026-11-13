@@ -7,11 +7,11 @@ const lightBlock = () => /:root\[data-theme="light"\]\s*\{([^}]*)\}/.exec(css)![
 const token = (block: string, name: string) =>
   new RegExp(`${name}:\\s*([^;]+);`).exec(block)?.[1].trim().toLowerCase()
 
-it('the Light theme main and popup surfaces are white and its header is #faf2dc', () => {
+it('the Light theme main and popup surfaces are white and it has no header override (header = background)', () => {
   const block = lightBlock()
   expect(token(block, '--background')).toBe('#ffffff')
   expect(token(block, '--popover')).toBe('#ffffff')
-  expect(token(block, '--header')).toBe('#faf2dc')
+  expect(token(block, '--header')).toBeUndefined()
 })
 
 it('every other theme has a header equal to its background', () => {

@@ -12,7 +12,7 @@ import json
 import logging
 import os
 import time
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from typing import Any
 
 import httpx
@@ -25,6 +25,8 @@ from langgraph.pregel.remote import RemoteException, RemoteGraph
 from langgraph.runtime import Runtime
 from langgraph_sdk.client import LangGraphClient
 
+from app.agents.base import visible_user_messages, without_earlier_tool_messages
+from app.core.chat_memory import entries_from, render, save_entries
 from app.core.config import get_settings
 from app.core.llm import NoModelSettings
 from app.core.memory import TEAM_MODE, AgentContext
@@ -139,8 +141,19 @@ class RemoteAgent:
         if any(counter.model_calls >= budget for counter in counters):
             raise CallBudgetExceeded(f"This message used its {budget} model calls ({name}); "
                                      f"the {self.spec.route} agent was not called.")
+        configurable = config.get("configurable", {})
+        conversation_id = configurable.get("thread_id") or ""
+        messages = list(input.get("messages", []))
+        note = ""
+        if conversation_id:  # chat memory: the chat's saved data goes to the agent, its new tool results come back to it
+            try:
+                note = await asyncio.to_thread(render, context.user_id, conversation_id)
+            except Exception:
+                log.exception("chat data not rendered for chat %s", conversation_id)
+            context = replace(context, conversation_id=conversation_id, chat_data=note)
         # checkpoint_ns stays: RemoteGraph drops it from the request and prefixes streamed chunks with it.
-        config["configurable"] = {k: v for k, v in config.get("configurable", {}).items() if k != "thread_id"}
+        config["configurable"] = {k: v for k, v in configurable.items() if k != "thread_id"}
+        sent = {**input, "messages": without_earlier_tool_messages(messages)} if "messages" in input else input
         headers = {"x-smallie-user-id": context.user_id}
         if token := await id_token(self.url):
             headers["Authorization"] = f"Bearer {token}"
@@ -149,7 +162,7 @@ class RemoteAgent:
             async with asyncio.timeout(self.timeout_s):
                 # cancel: a run the main app stopped waiting for (timeout, chat closed) stops spending
                 # tokens; the server default "continue" would finish it uncounted.
-                output = await self.remote.ainvoke(input, config, context=asdict(context),
+                output = await self.remote.ainvoke(sent, config, context=asdict(context),
                                                    headers=headers, on_disconnect="cancel")
         except RemoteException as exc:
             raise _openai_error(exc, self.url) from exc
@@ -162,7 +175,15 @@ class RemoteAgent:
                         self.spec.route, self.url)
         for counter in counters:
             counter.add(output.get("usage") or {})
-        new = [as_message(m) for m in output.get("messages", [])][len(input.get("messages", [])):]
+        new = [as_message(m) for m in output.get("messages", [])][len(messages):]
+        if conversation_id:
+            turn = configurable.get("chat_turn") or len(visible_user_messages(messages))
+            try:
+                await asyncio.to_thread(save_entries, context.user_id, conversation_id, turn,
+                                        configurable.get("chat_step", "reply"), self.spec.route,
+                                        entries_from(new, output.get("findings")))
+            except Exception:
+                log.exception("chat data not saved for chat %s", conversation_id)
         # Only these keys: anything else (route, direct, failed) could steer the parent graph.
         result = {"messages": new}
         for key in ("findings", "tools"):

@@ -31,7 +31,7 @@ from app.core.config import get_settings
 from app.core.llm import get_chat_model, pick_model, placeholder_model
 from app.core.memory import MEMORY_TOOLS, TEAM_MODE, TOOL_SOURCE, AgentContext
 from app.core.model_settings import load_settings
-from app.core.prompts import CALL_NOTE, LAST_CALL_NOTE, MEMORIES_SECTION, NOTES_SECTION, PROFILE_SECTION, RECENT_CHATS_SECTION, SAME_RESULT, SOLO_VOICE, TEAM_VOICE, USER_SECTION, reply_language
+from app.core.prompts import CALL_NOTE, CHAT_DATA_SECTION, LAST_CALL_NOTE, MEMORIES_SECTION, NOTES_SECTION, PROFILE_SECTION, RECENT_CHATS_SECTION, SAME_RESULT, SOLO_VOICE, TEAM_VOICE, USER_SECTION, reply_language
 
 log = logging.getLogger(__name__)
 
@@ -274,6 +274,8 @@ def build_agent(
             prompt += RECENT_CHATS_SECTION.format(recent_chats=context.recent_chats)
         if prompt_extra:
             prompt += prompt_extra(request)
+        if context.chat_data:  # last: the cached prefix stays stable
+            prompt += CHAT_DATA_SECTION.format(chat_data=context.chat_data)
         return prompt
 
     # Stops runaway tool loops from burning the user's quota.

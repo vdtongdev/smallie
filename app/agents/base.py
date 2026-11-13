@@ -69,6 +69,21 @@ def turn_messages(messages: Sequence[AnyMessage]) -> list[AnyMessage]:
     return list(messages[start + 1:])
 
 
+def visible_user_messages(messages: Sequence[AnyMessage]) -> list[int]:
+    """Indexes of the user's own messages. The hidden notes the app adds (findings, attempt, team,
+    call note) are HumanMessages with a `name`."""
+    return [i for i, m in enumerate(messages) if isinstance(m, HumanMessage) and not m.name]
+
+
+def without_earlier_tool_messages(messages: Sequence[AnyMessage]) -> list[AnyMessage]:
+    """The messages without the tool-calling AIMessages and ToolMessages that come before the latest
+    user message; the chat data note carries that data instead. The current turn is unchanged."""
+    visible = visible_user_messages(messages)
+    start = visible[-1] if visible else 0
+    return [m for i, m in enumerate(messages)
+            if i >= start or not (isinstance(m, ToolMessage) or (isinstance(m, AIMessage) and m.tool_calls))]
+
+
 def is_error(text: str) -> bool:
     return text.startswith("Error")
 

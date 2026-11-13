@@ -89,6 +89,7 @@ This file describes `main` plus the 0.4.0 remote agents (section 10) and the 0.5
 │    document chunks: langchain_pg_embedding (pgvector)           │
 │    graph_nodes, graph_edges (knowledge graph)                   │
 │    market.stocks, market.daily_prices (stock data)              │
+│    chat_data (what chat agents fetched, per chat)               │
 │                                                                 │
 │  Extensions: pgvector (HNSW index up to 2000 dims, else flat)   │
 └─────────────────────────────────────────────────────────────────┘
@@ -493,6 +494,17 @@ The memory part of a chat's prompt (profile, facts, other chats) is frozen per c
 - Race rule: a snapshot whose build started before or at a clear is not saved, because it may hold the deleted data
 - Facts learned during a chat are already in its history, so the snapshot does not need them until it is rebuilt
 
+### Chat Data (per chat)
+
+The thread keeps the answers and charts of a chat, not the data behind them. Chat data keeps that data, so a later agent in the same chat can use it without fetching it again.
+
+- **What is saved:** one row per tool call of a specialist, with its arguments, its result text and the tables and charts it made (table `chat_data`). Memory tools and failed calls are left out. Research's findings are saved as one row. Each result is cut to `CHAT_DATA_ENTRY_CHARS` (6,000 characters). `RemoteAgent` writes the rows when a specialist call finishes, whether the call came from a direct route, an ask, a team task or the chart task. The orchestrator's own tool calls are not saved.
+- **Who reads it:** every agent call in the chat gets the chat's rows as one note. Agents get it last in their system prompt; the team's plan and judge get it as a `CHAT DATA` block. The note is at most `CHAT_DATA_CHARS` (24,000 characters): every entry has a header line, and the newest entries also show their content while the budget lasts. Older entries keep only the header. The chart tools also find the chat's saved tables, so "plot that" works in a later turn.
+- **Fewer repeated messages:** a specialist call in a chat does not resend the earlier tool messages of the thread, because the note carries their data. The thread itself is unchanged.
+- **Crash retry (team mode):** when the app stopped during a turn, a short "try again" asks that turn's question again, and the write-up answers it as that question. The "try again" message is left out of the steps' thread.
+- **Deletion:** rows are removed with their chat, and with their account, by `ON DELETE CASCADE`.
+- **Failures:** a failed save or render is logged and the reply goes on without the data.
+
 ### Onboarding (BOOTSTRAP)
 
 While the profile lacks a role (`has_role` or `works_at`) or a goal (`has_goal`), the orchestrator is asked to end its reply with one question about what is missing. The question only asks: the user's answer is saved by the usual fact extraction, and no tool or model call is added.
@@ -560,7 +572,7 @@ Each model request is laid out from the most stable part to the least stable, so
 3. the rest of the agent's static prompt, ending with `LANGUAGE_RULE` and `MEMORY_RULE`
 4. USER: the account name (`USER_SECTION`) and the profile (`PROFILE_SECTION`, when there is one)
 5. MEMORY: this agent's notes (`NOTES_SECTION`, when it has any), other facts (`MEMORIES_SECTION`) and recent chats (`RECENT_CHATS_SECTION`), from the chat's memory snapshot (section 8)
-6. the mode-stable extra (`prompt_extra`, e.g. the researcher's sources, skills and schema)
+6. the mode-stable extra (`prompt_extra`, e.g. the researcher's sources, skills and schema), then the chat's data note (`CHAT_DATA_SECTION`, section 8) when the chat has saved data
 7. the thread's messages
 8. the tail note: per-call text added as the last message (`build_agent(tail=...)`, `make_call_note`), never saved; on the orchestrator's first turn of an onboarding chat it ends with `BOOTSTRAP_SECTION`
 

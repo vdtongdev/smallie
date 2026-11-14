@@ -72,6 +72,14 @@ def test_next_redirects_to_root(tmp_path):
         assert r.headers["location"] == dst, src
 
 
+def test_next_redirects_on_head(tmp_path):
+    client = make_client(tmp_path, redirect=True)
+    for src, dst in [("/next", "/"), ("/next/?theme=shadcn", "/?theme=shadcn")]:
+        r = client.head(src, follow_redirects=False)
+        assert r.status_code == 308, src
+        assert r.headers["location"] == dst, src
+
+
 def test_missing_build_logs_and_api_still_works(tmp_path, caplog):
     app = FastAPI()
     router = APIRouter()

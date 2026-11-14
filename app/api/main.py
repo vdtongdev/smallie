@@ -75,8 +75,8 @@ def mount_frontend(app: FastAPI, dist: Path) -> bool:
 def add_next_redirect(app: FastAPI) -> None:
     """Old /next bookmarks land on the app at /, keeping the query string."""
 
-    @app.get("/next", include_in_schema=False)
-    @app.get("/next/{rest:path}", include_in_schema=False)
+    @app.api_route("/next", methods=["GET", "HEAD"], include_in_schema=False)
+    @app.api_route("/next/{rest:path}", methods=["GET", "HEAD"], include_in_schema=False)
     def next_redirect(request: Request) -> RedirectResponse:
         query = request.url.query
         return RedirectResponse("/" + (f"?{query}" if query else ""), status_code=308)

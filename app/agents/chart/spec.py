@@ -1,4 +1,4 @@
-"""The chart format the UI draws (`renderChart` in app/static/app.js, with Chart.js).
+"""The chart format the UI draws (`ChartCard.tsx` with `chartConfig.ts`, Chart.js).
 
 Kept small on purpose: a few chart types, labelled x values and up to 8 numeric series, so
 specs are easy to validate here and to render there. The model never writes one by hand for

@@ -5,7 +5,8 @@ paths:
   - "app/agents/factory.py"
   - "app/agents/base.py"
   - "app/api/routes_chat.py"
-  - "app/static/**"
+  - "frontend/src/features/chat/**"
+  - "frontend/src/lib/**"
 ---
 
 Team mode (task graph): code-level description.
@@ -56,7 +57,7 @@ Design: `docs/superpowers/specs/2026-10-26-team-task-graph-design.md` (the round
 
 **Custom events (stream mode `custom`, `get_stream_writer`):** `speaker` is internal: `{agent, task, ns}` tells `_events_from` which `speak:<task id>` namespace runs which agent, and is dropped. `TEAM_EVENTS` (routes_chat) reach the UI: `plan` (`tasks`, `fallback`), `plan_updated` (the added `tasks`), `wave` (`wave`, `kind` plan/challenge/conflict, `tasks`, `agents`), `task_started` (`task`, `agent` and the trace fields, sent before the task's model call so the popup shows its difficulty and model while it runs; `speak` and `draw` both emit it), `spoke` (`task`, `agent`, `text`, `tools`, `withdrew` and the trace above, replaces the `task_started` line), `review` (the `Review` plus `key`, `forced`), `synthesize` (only on a write-up), `needs_human` (`question`), `charts`, and `model_fallback` (`from_model`, `to_model`, `category`; from the `user_model` middleware, tagged with `agent`). `_events_from` finds the namespace segment that is in `speakers`: `token`/`tool_call`/`tool_result` events inside it get that `agent`, and `_to_events(in_round=True)` lets silent steps stream (research's notes are its answer).
 
-**UI (`app/static/app.js`):** every reply, team or not, has a status line (spinner, `Wave n/total` with agent badges, a challenge or follow-up note from `reviewNote`, "using <tool>", "writing"; afterwards the wave count, resolved challenges and explained differences) and an **Activity** button opening a popup (`renderActivity`) with the plan, each wave's answers and tool calls, each review and a pending question; a chart task's answer sits under `drawn`. There are no inline tool lines in the chat. A reload builds the popup from `message.team` (`teamActivity`) or the tool messages; `teamActivity` still reads the round table's `rounds`/`boards` shape, so old team chats show their rounds.
+**UI (`frontend/src/features/chat/`):** every reply, team or not, has a status line (`StatusLine.tsx`) (spinner, `Wave n/total` with agent badges, a challenge or follow-up note from `reviewNote`, "using <tool>", "writing"; afterwards the wave count, resolved challenges and explained differences) and an **Activity** button opening a popup (`ActivityDialog.tsx`) with the plan, each wave's answers and tool calls, each review and a pending question; a chart task's answer sits under `drawn`. There are no inline tool lines in the chat. A reload builds the popup from `message.team` (`teamActivity` in `frontend/src/lib/teamTranscript.ts`) or the tool messages; `teamActivity` still reads the round table's `rounds`/`boards` shape, so old team chats show their rounds.
 
 **Language:** `REPLY_LANGUAGE` is appended on every orchestrator call (from `reply_language()` of the user's messages, hidden ones left out); the team prompts take `{language}`. `MEMORIES_SECTION` ends with a line that a stored language preference never changes the reply language (AP-007).
 

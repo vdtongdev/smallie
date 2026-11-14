@@ -19,7 +19,7 @@ This file describes `main` plus the 0.4.0 remote agents (section 10) and the 0.5
 - Language toggle: English / Vietnamese
 - Document upload UI with progress tracking (PDF, DOCX)
 - Charts rendered with Chart.js
-- New UI (`frontend/`, React + Vite + Tailwind + shadcn) served at `/next`; built by `npm run build` into `frontend/dist`, in a Node 24 stage of the `Dockerfile` (no Node in the runtime image). `/` is still the old UI until the switch
+- UI (`frontend/`, React + Vite + Tailwind + shadcn) served at `/`; built by `npm run build` into `frontend/dist`, in a Node 24 stage of the `Dockerfile` (no Node in the runtime image). `FrontendFiles` in `app/api/main.py` mounts it at `/` after the `/api` routers. `/next` and `/next/...` redirect to `/` (308, query string kept). Without a build the app starts with a warning and `/api` still works
 
 **Backend**
 
@@ -932,7 +932,7 @@ Traces contain full prompts (users' messages, file passages, memories), so traci
 - Always from `main`
 - Update `CHANGELOG.md` + the version in `pyproject.toml` first
 - Main app: `gcloud run deploy smallie --source . --region asia-southeast1 ...` (public URL, login required)
-- Static UI (`app/static/`, mounted at `/` by `NoCacheStaticFiles` in `app/api/main.py`) sends `Cache-Control: no-cache`, so browsers revalidate `app.js` after a deploy (unchanged files get 304); `/api` is not affected
+- UI (`frontend/dist`, mounted at `/` by `FrontendFiles` in `app/api/main.py`) sends `Cache-Control: no-cache` for `index.html`, so browsers revalidate it after a deploy (unchanged files get 304); hashed `assets/` are cached for a year; `/api` is not affected
 - Agent servers: one image built by `gcloud builds submit --config cloudbuild.agent.yaml`, then one private service per agent (`smallie-<route>`, `--no-allow-unauthenticated`, its own env file); the main app's service account has `roles/run.invoker` on each
 - Agent servers ship with the app: `AgentContext` gained `profile` and `bootstrap` (section 8), and the servers are not kept compatible with the old context, so rebuild and deploy them in the same release
 - Neon Postgres (direct URL, no pooler): the app's database plus one small database per agent server

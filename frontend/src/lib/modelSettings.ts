@@ -6,7 +6,7 @@ export type Profile = (typeof PROFILES)[number]
 /** What the form saves and what GET /api/model-settings returns (besides `key_hint`). */
 export type Slots = { base_url: string; model: string; small_model: string; strong_model: string; profile: string }
 
-// The provider's model list is cached per endpoint; `/` and `/next` share it.
+// The provider's model list is cached per endpoint.
 const modelsKey = (baseUrl: string) => `models:${baseUrl}`
 
 export function cachedModels(baseUrl: string): string[] {

@@ -3,7 +3,8 @@ import secrets
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -19,7 +20,6 @@ from app.core.memory import open_persistence
 from app.orchestration.graph import build_assistant
 
 logging.basicConfig(level=logging.INFO)
-STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 SESSION_MAX_AGE = 60 * 60 * 24 * 30  # stay logged in for 30 days
 
 
@@ -48,15 +48,6 @@ async def lifespan(app: FastAPI):
         yield
 
 
-class NoCacheStaticFiles(StaticFiles):
-    """Browsers revalidate (ETag gives 304) instead of reusing a stale app.js."""
-
-    async def get_response(self, path, scope):
-        response = await super().get_response(path, scope)
-        response.headers["Cache-Control"] = "no-cache"
-        return response
-
-
 FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
 
 
@@ -75,10 +66,20 @@ class FrontendFiles(StaticFiles):
 
 def mount_frontend(app: FastAPI, dist: Path) -> bool:
     if not (dist / "index.html").is_file():
-        logging.warning("No frontend build at %s; /next is not served. Run `npm run build` in frontend/.", dist)
+        logging.warning("No frontend build at %s; the UI is not served. Run `npm run build` in frontend/.", dist)
         return False
-    app.mount("/next", FrontendFiles(directory=dist, html=True), name="next")
+    app.mount("/", FrontendFiles(directory=dist, html=True), name="frontend")
     return True
+
+
+def add_next_redirect(app: FastAPI) -> None:
+    """Old /next bookmarks land on the app at /, keeping the query string."""
+
+    @app.get("/next", include_in_schema=False)
+    @app.get("/next/{rest:path}", include_in_schema=False)
+    def next_redirect(request: Request) -> RedirectResponse:
+        query = request.url.query
+        return RedirectResponse("/" + (f"?{query}" if query else ""), status_code=308)
 
 
 def _session_secret() -> str:
@@ -111,5 +112,5 @@ app.include_router(routes_usage.router, prefix="/api")
 for feature in FEATURES:
     for feature_router in feature.routers:
         app.include_router(feature_router, prefix="/api")
-mount_frontend(app, FRONTEND_DIST)
-app.mount("/", NoCacheStaticFiles(directory=STATIC_DIR, html=True), name="static")
+add_next_redirect(app)
+mount_frontend(app, FRONTEND_DIST)  # last: it answers every path no route matched

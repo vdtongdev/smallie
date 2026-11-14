@@ -76,7 +76,7 @@ const TOKENS = [
   'muted-foreground', 'accent', 'accent-foreground', 'destructive', 'border', 'input', 'ring',
 ]
 
-describe.each(['chatroom', 'shadcn', 'smallie', 'light'])('theme %s', (theme) => {
+describe.each(['chatroom', 'shadcn', 'light'])('theme %s', (theme) => {
   // `light` is the Chatroom light palette with `.dark` forced off, so it has no dark block.
   describe.each(theme === 'light' ? ['light'] : ['light', 'dark'])('%s', (mode) => {
     const tokens = blocks.get(`${theme} ${mode}`)

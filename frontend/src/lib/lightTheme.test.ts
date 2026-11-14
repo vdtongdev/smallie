@@ -23,3 +23,7 @@ it('every other theme has a header equal to its background', () => {
     if (theme !== 'light') expect(token(body, '--header')).toBeUndefined()
   }
 })
+
+it('index.css has no smallie theme selector', () => {
+  expect(css).not.toContain('data-theme="smallie"')
+})

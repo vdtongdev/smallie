@@ -269,14 +269,6 @@ test('choosing Chatroom turns dark on and Light turns it off, whatever the syste
   expect(document.documentElement.classList.contains('dark')).toBe(false)
 })
 
-test('with ?theme=smallie no theme radio is checked', async () => {
-  document.documentElement.dataset.theme = 'smallie'
-  setup()
-  await loaded()
-  const group = screen.getByRole('radiogroup', { name: en.themeGroup })
-  for (const r of within(group).getAllByRole('radio')) expect(r).not.toBeChecked()
-})
-
 test('shows the provider table', async () => {
   setup()
   await loaded()

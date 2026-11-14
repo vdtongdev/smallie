@@ -296,3 +296,31 @@ Versions are `major.minor.patch`: the major version stays 0 for now, each minor 
   - The shared persona (SOUL) told every agent to say "we" for the team's work, and 1-on-1 requests had no note saying otherwise
   - Every 1-on-1 request now carries a note to speak as "I" (`SOLO_VOICE`, `make_call_note` in `app/agents/factory.py`); SOUL, the orchestrator's `AGENTS.md` and `BOOTSTRAP.md` no longer say "we"; team mode keeps its "we" note (`TEAM_VOICE`)
   - Limit: wording only; it lowers the chance of a "we", it doesn't remove it
+
+## 0.8.0 - React UI and chat memory
+- **React UI** (`frontend/`, served at `/`): the screens are rebuilt in React, TypeScript, Tailwind and shadcn/ui. The old UI in `app/static/` is deleted, and `/next` redirects to `/` (308, the query string is kept), so old links still open
+  - The same features as before: sign-in and signup, conversations, streamed answers with agent badges, tool blocks, citations, charts, documents, team mode with the Activity popup, the sidebar usage box, Settings (models and profiles), the accounts admin and the Readme
+  - The look has changed, and the Readme is shorter: it is a list of short sections
+  - Settings has a theme picker: **shadcn** (black and white, follows the system dark mode), **Chatroom** (the default, always dark) and **Light**. A browser that saved `smallie` as its theme (`?theme=smallie`) now gets Chatroom
+  - Limit: this is a port, not a redesign; the team-room chat is a later change
+- **Reloads match live** (`turn_activity` table, `app/core/conversations.py`): each reply's steps, agent badges, tools, asked agents and text written before a tool call are saved as the reply streams, so a reloaded chat shows what the live chat showed
+  - The messages API adds `activity` to each user message. Chats from before this release have none and reload as they did before
+- **Chat memory** (`chat_data` table, `app/core/chat_memory.py`): data an agent fetched earlier in a chat (tables, query results, research notes) is saved as each step finishes. Every agent in that chat then sees it in later messages: the orchestrator, the team plan, review and write-up, chart tasks, one-on-one specialists and the agents the orchestrator asks
+  - A retry after the app or an agent server stopped in the middle of a question re-asks the crashed question, and its agents use the saved data instead of querying again
+  - In a chat, earlier tool messages are no longer sent to agents; the saved data note replaces them. The note is capped by the new settings `CHAT_DATA_CHARS` (default 24000) and `CHAT_DATA_ENTRY_CHARS` (default 6000); when the total is spent, older entries keep only a header line, and an agent can still query again for the detail
+  - Deleting a chat or an account deletes its chat data
+  - Cost: the change adds no model calls by design. The cost per message was not measured (the `bench_chat` cost report was skipped), so the effect on tokens and cost is unknown. In a long chat each agent call can carry up to `CHAT_DATA_CHARS` more characters of saved data; in one-on-one chats the removed tool messages can make the input smaller
+  - Limit: the note is not summarised, and data from another chat is never shown
+- **Fix: a paused team chat reloaded without its questions and answers**
+  - While a team turn waits for your answer, its questions and answers live in the team's own checkpoint; history read only the main thread, so they were missing after a reload
+  - `thread_messages` (`app/api/routes_conversations.py`) now reads the paused team state too. The paused turn is counted once, so its activity does not start again at turn 1
+- **Fix: in team mode, an answer the assistant gave alone showed no badge until you reloaded**
+  - In a team chat, the orchestrator's answer given without a plan (no specialist needed) showed no agent badge while streaming, because the live view ignored agent events in every team turn. After a reload the saved activity showed the badge. The old UI had the same gap
+  - A team turn now shows agent badges until a plan arrives (`frontend/src/lib/turn.ts`), so the live view matches the reload
+- Tooling and other changes
+  - `scripts/record_chat.py` records real chat streams as fixtures for the React UI tests
+  - Specs and docs for the React UI, turn activity and chat memory (`ARCHITECTURE.md`, `.claude/rules/`)
+- Operator notes
+  - Two new tables, `turn_activity` and `chat_data`, are created at startup with the other app tables (`app/core/db.py`). `chat_data` is readable by the agent servers' `agent_reader` role (`READER_TABLES`), which the app grants at each start
+  - Redeploy all four agent services with the new image (`DEPLOYING.md`, section 3, steps 4 and 5): their agent code changed, and they now receive the chat data note
+  - The main image builds the React UI in a Node 24 stage (`Dockerfile`), so its first build is slower; `DEPLOYING.md` section 2 lists it

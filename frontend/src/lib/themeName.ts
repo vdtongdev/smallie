@@ -1,9 +1,9 @@
 import { localGet, localSet } from './storage'
 import { applyDark, systemDark } from './theme'
 
-export type ThemeName = 'chatroom' | 'shadcn' | 'smallie' | 'light'
-export const THEMES: readonly ThemeName[] = ['chatroom', 'shadcn', 'smallie', 'light']
-/** What the Settings picker offers; smallie stays reachable with `?theme=smallie`. */
+export type ThemeName = 'chatroom' | 'shadcn' | 'light'
+export const THEMES: readonly ThemeName[] = ['chatroom', 'shadcn', 'light']
+/** What the Settings picker offers. */
 export const PICKER_THEMES: readonly ThemeName[] = ['shadcn', 'chatroom', 'light']
 export const DEFAULT_THEME: ThemeName = 'chatroom'
 

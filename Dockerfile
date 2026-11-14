@@ -1,4 +1,4 @@
-# Build the React UI (served at /next); only its dist/ goes into the runtime image.
+# Build the React UI (served at /); only its dist/ goes into the runtime image.
 FROM node:24-slim AS frontend
 WORKDIR /frontend
 COPY frontend/package.json frontend/package-lock.json ./

@@ -2,23 +2,24 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { applyThemeName, DEFAULT_THEME, PICKER_THEMES, resolveThemeName, setThemeName, THEMES } from './themeName'
 
 describe('resolveThemeName', () => {
-  it('lists the four themes with chatroom as default', () => {
-    expect([...THEMES]).toEqual(['chatroom', 'shadcn', 'smallie', 'light'])
+  it('lists the three themes with chatroom as default', () => {
+    expect([...THEMES]).toEqual(['chatroom', 'shadcn', 'light'])
     expect(DEFAULT_THEME).toBe('chatroom')
   })
-  it('offers exactly shadcn, chatroom and light in the picker; smallie stays reachable', () => {
+  it('offers exactly shadcn, chatroom and light in the picker; smallie is gone', () => {
     expect([...PICKER_THEMES]).toEqual(['shadcn', 'chatroom', 'light'])
-    expect(resolveThemeName('?theme=smallie', null)).toBe('smallie')
+    expect(resolveThemeName('?theme=smallie', null)).toBe('chatroom')
     expect(resolveThemeName('?theme=light', null)).toBe('light')
   })
   it('prefers the query param over the stored value', () => {
-    expect(resolveThemeName('?theme=shadcn', 'smallie')).toBe('shadcn')
+    expect(resolveThemeName('?theme=shadcn', 'light')).toBe('shadcn')
   })
   it('uses the stored value without a param', () => {
-    expect(resolveThemeName('', 'smallie')).toBe('smallie')
+    expect(resolveThemeName('', 'light')).toBe('light')
+    expect(resolveThemeName('', 'smallie')).toBe('chatroom')
   })
   it('falls back to the stored value when the param is invalid', () => {
-    expect(resolveThemeName('?theme=nope', 'smallie')).toBe('smallie')
+    expect(resolveThemeName('?theme=nope', 'light')).toBe('light')
   })
   it('defaults to chatroom with nothing', () => {
     expect(resolveThemeName('', null)).toBe('chatroom')
@@ -43,9 +44,14 @@ describe('applyThemeName', () => {
     expect(localStorage.getItem('theme')).toBe('shadcn')
   })
   it('uses the stored theme and does not rewrite it when there is no param', () => {
+    localStorage.setItem('theme', 'light')
+    expect(applyThemeName()).toBe('light')
+    expect(document.documentElement.dataset.theme).toBe('light')
+  })
+  it('opens a stored smallie theme in chatroom', () => {
     localStorage.setItem('theme', 'smallie')
-    expect(applyThemeName()).toBe('smallie')
-    expect(document.documentElement.dataset.theme).toBe('smallie')
+    expect(applyThemeName()).toBe('chatroom')
+    expect(document.documentElement.dataset.theme).toBe('chatroom')
   })
   it('setThemeName sets data-theme and storage at once and re-applies dark mode', () => {
     vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} }))
@@ -66,8 +72,8 @@ describe('applyThemeName', () => {
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new Error('blocked')
     })
-    window.history.replaceState(null, '', '/?theme=smallie')
-    expect(applyThemeName()).toBe('smallie')
-    expect(document.documentElement.dataset.theme).toBe('smallie')
+    window.history.replaceState(null, '', '/?theme=shadcn')
+    expect(applyThemeName()).toBe('shadcn')
+    expect(document.documentElement.dataset.theme).toBe('shadcn')
   })
 })

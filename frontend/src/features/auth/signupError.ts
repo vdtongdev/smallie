@@ -1,6 +1,6 @@
 import type { I18nKey } from '@/i18n/en'
 
-// Port of signupError in app/static/app.js.
+// Ported from the old plain-JS UI's signupError.
 export function signupErrorKey(status: number, detail: unknown): I18nKey | string {
   if (status === 409) return 'err_taken'
   if (status === 403) return 'err_limit'

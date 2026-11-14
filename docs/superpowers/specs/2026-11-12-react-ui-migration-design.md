@@ -96,6 +96,8 @@ One PR each, branch `0.8.0/react-ui-m<N>`. Each is usable at `/next` when merged
 | M4 | The rest | settings, usage dialog, accounts admin, market status | 2 days |
 | M5 | Switch | parity checklist ticked, `base: "/"`, `dist` mounted at `/`, `app/static/` deleted, docs | half a day |
 
+M5 is done: the React UI is served at `/`, and `/next` redirects to `/`.
+
 M0-M4 may deploy at any time (nobody reaches `/next` without the link). The changelog lists the new UI under the release that ships M5.
 
 ## 4. Testing and error handling

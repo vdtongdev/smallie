@@ -1,4 +1,4 @@
-// Port of app/static/charts.js: Chart.js configuration for the server's chart specs.
+// Chart.js configuration for the server's chart specs (ported from the old plain-JS UI).
 import { Chart, type ChartConfiguration, type Plugin } from 'chart.js'
 import type { Lang } from '@/i18n'
 import type { ChartSpec } from '@/lib/types'

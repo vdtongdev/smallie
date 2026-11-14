@@ -72,8 +72,8 @@ describe('theme decides dark', () => {
     expect(isDark()).toBe(false)
   })
 
-  test('shadcn and smallie follow the system', () => {
-    for (const name of ['shadcn', 'smallie']) {
+  test('shadcn follows the system', () => {
+    for (const name of ['shadcn']) {
       document.documentElement.dataset.theme = name
       stubMedia(true)
       const stop = initTheme()

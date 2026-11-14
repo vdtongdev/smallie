@@ -6,7 +6,8 @@ paths:
   - "app/agents/skills.py"
   - "app/orchestration/formats/**"
   - "app/orchestration/orchestrator.py"
-  - "app/static/app.js"
+  - "frontend/src/features/chat/**"
+  - "frontend/src/lib/**"
   - "app/core/prompts.py"
 ---
 

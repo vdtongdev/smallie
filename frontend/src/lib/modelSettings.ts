@@ -4,7 +4,7 @@ export const PROFILES = ['economy', 'balanced', 'advanced'] as const
 export type Profile = (typeof PROFILES)[number]
 
 /** What the form saves and what GET /api/model-settings returns (besides `key_hint`). */
-export type Slots = { base_url: string; model: string; small_model: string; strong_model: string; profile: string }
+export type Slots = { base_url: string; model: string; small_model: string; strong_model: string; profile: string; image_model: string; image_model_first: boolean }
 
 // The provider's model list is cached per endpoint.
 const modelsKey = (baseUrl: string) => `models:${baseUrl}`

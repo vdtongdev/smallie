@@ -20,9 +20,9 @@ import { useModelSettings } from './useModelSettings'
 
 type Props = { open: boolean; onOpenChange(open: boolean): void }
 type Form = Slots & { key: string }
-type Warnings = Record<'model' | 'small_model' | 'strong_model', string>
+type Warnings = Record<'model' | 'small_model' | 'strong_model' | 'image_model', string>
 
-const NO_WARNINGS: Warnings = { model: '', small_model: '', strong_model: '' }
+const NO_WARNINGS: Warnings = { model: '', small_model: '', strong_model: '', image_model: '' }
 const selectClass =
   'h-9 w-full min-w-0 rounded-md border border-input bg-popover text-popover-foreground px-2.5 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50'
 const THEME_LABEL: Record<string, I18nKey> = { shadcn: 'themeShadcn', chatroom: 'themeChatroom', light: 'themeLight' }
@@ -65,7 +65,7 @@ export default function SettingsDialog({ open, onOpenChange }: Props) {
     const key = form.key.trim()
     const base_url = form.base_url.trim()
     if (!base_url || !standard || !(key || hint)) return setStatus(t('settingsFieldsRequired'))
-    const next: Slots = { base_url, model: standard, small_model: form.small_model, strong_model: form.strong_model, profile: form.profile }
+    const next: Slots = { base_url, model: standard, small_model: form.small_model, strong_model: form.strong_model, profile: form.profile, image_model: form.image_model, image_model_first: form.image_model_first }
     if (!key && unchanged(next, loaded)) return onOpenChange(false) // nothing changed since the last load
     try {
       const res = await save(next, key)
@@ -74,6 +74,7 @@ export default function SettingsDialog({ open, onOpenChange }: Props) {
         model: res.warning || warnings.model || '',
         small_model: warnings.small_model || '',
         strong_model: warnings.strong_model || '',
+        image_model: warnings.image_model || '',
       })
       if (res.warning || Object.keys(warnings).length) setStatus(`${t('saved')}. ${res.warning || ''}`.trim())
       else onOpenChange(false)
@@ -154,6 +155,24 @@ export default function SettingsDialog({ open, onOpenChange }: Props) {
             <Warning text={warn[slot]} />
           </Field>
         ))}
+        <Field label={t('imageModel')} htmlFor="settings-image_model">
+          <select id="settings-image_model" className={selectClass} value={form.image_model} onChange={(e) => set({ image_model: e.target.value })}>
+            {options(form.image_model, t('imageModelNone')).map((o) => (
+              <option key={o.value} value={o.value} className="bg-popover text-popover-foreground">{o.label}</option>
+            ))}
+          </select>
+          <Warning text={warn.image_model} />
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={form.image_model_first}
+              disabled={!form.image_model}
+              onChange={(e) => set({ image_model_first: e.target.checked })}
+            />
+            {t('imageModelFirst')}
+          </label>
+          <p className="text-sm text-muted-foreground">{t('imageModelHelp')}</p>
+        </Field>
 
         <details className="rounded-md border px-3 py-2">
           <summary className="cursor-pointer font-medium">{t('keyHelpTitle')}</summary>

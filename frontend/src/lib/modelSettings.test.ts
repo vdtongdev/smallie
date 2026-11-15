@@ -68,11 +68,11 @@ describe('modelOptions', () => {
 })
 
 describe('unchanged', () => {
-  const loaded = { base_url: 'u', model: 'm', small_model: 's', strong_model: 'g', profile: 'balanced' }
+  const loaded = { base_url: 'u', model: 'm', small_model: 's', strong_model: 'g', profile: 'balanced', image_model: '', image_model_first: false }
   it('is true when every field is equal', () => {
     expect(unchanged({ ...loaded }, loaded)).toBe(true)
   })
-  it.each(['base_url', 'model', 'small_model', 'strong_model', 'profile'])('is false when %s differs', (k) => {
+  it.each(['base_url', 'model', 'small_model', 'strong_model', 'profile', 'image_model'])('is false when %s differs', (k) => {
     expect(unchanged({ ...loaded, [k]: 'other' }, loaded)).toBe(false)
   })
 })

@@ -74,7 +74,7 @@ test('saving with an empty key field sends api_key null, never an empty string',
   await userEvent.click(screen.getByRole('button', { name: en.save }))
   await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
   expect(puts(calls)).toHaveLength(1)
-  expect(putBody(calls)).toEqual({ base_url: A, model: 'm2', small_model: '', strong_model: '', profile: 'balanced', api_key: null })
+  expect(putBody(calls)).toEqual({ base_url: A, model: 'm2', small_model: '', strong_model: '', profile: 'balanced', image_model: null, image_model_first: false, api_key: null })
   expect(putBody(calls).api_key).toBeNull()
 })
 
@@ -312,4 +312,37 @@ test('the provider table sits in its own closed details', async () => {
   expect(details).not.toBe(screen.getByText(en.modelsHelpTitle).closest('details'))
   expect(within(details).getByText('platform.deepseek.com')).toBeInTheDocument()
   expect(within(details).getByText(en.anyOpenAI)).toBeInTheDocument()
+})
+
+test('shows the image model select with a None option', async () => {
+  cache(A, ['m1', 'vis'])
+  setup()
+  await loaded()
+  const select = screen.getByLabelText(en.imageModel)
+  expect(select.tagName).toBe('SELECT')
+  expect(within(select).getAllByRole('option').map((o) => o.textContent)).toEqual([en.imageModelNone, 'm1', 'vis'])
+  expect(select).toHaveValue('')
+  expect(screen.getByText(en.imageModelHelp)).toBeInTheDocument()
+})
+
+test('the always-use checkbox is disabled while the image model is empty', async () => {
+  cache(A, ['m1', 'vis'])
+  setup()
+  await loaded()
+  const box = screen.getByRole('checkbox', { name: en.imageModelFirst })
+  expect(box).toBeDisabled()
+  await userEvent.selectOptions(screen.getByLabelText(en.imageModel), 'vis')
+  expect(box).toBeEnabled()
+})
+
+test('saving sends image_model and image_model_first', async () => {
+  cache(A, ['m1', 'vis'])
+  const { calls } = setup({ 'PUT /api/model-settings': () => json({}) })
+  await loaded()
+  await userEvent.selectOptions(screen.getByLabelText(en.imageModel), 'vis')
+  await userEvent.click(screen.getByRole('checkbox', { name: en.imageModelFirst }))
+  await userEvent.click(screen.getByRole('button', { name: en.save }))
+  await waitFor(() => expect(puts(calls)).toHaveLength(1))
+  expect(putBody(calls).image_model).toBe('vis')
+  expect(putBody(calls).image_model_first).toBe(true)
 })

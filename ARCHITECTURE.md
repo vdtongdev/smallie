@@ -17,7 +17,7 @@ This file describes `main` plus the 0.4.0 remote agents (section 10) and the 0.5
 - Agent badges showing which agent answered
 - Real-time streaming via Server-Sent Events (SSE)
 - Language toggle: English / Vietnamese
-- Document upload UI with progress tracking (PDF, DOCX)
+- Document upload UI with progress tracking (PDF, DOCX, images)
 - Charts rendered with Chart.js
 - UI (`frontend/`, React + Vite + Tailwind + shadcn) served at `/`; built by `npm run build` into `frontend/dist`, in a Node 24 stage of the `Dockerfile` (no Node in the runtime image). `FrontendFiles` in `app/api/main.py` mounts it at `/` after the `/api` routers. `/next` and `/next/...` redirect to `/` (308, query string kept). Without a build the app starts with a warning and `/api` still works
 
@@ -69,7 +69,7 @@ This file describes `main` plus the 0.4.0 remote agents (section 10) and the 0.5
 │    GET  /api/agents        ─ Agent info + labels                │
 │    POST /api/signup        ─ Create account (max 20)            │
 │    GET  /api/conversations ─ Conversation list                  │
-│    POST /api/documents     ─ Upload files (PDF/DOCX)            │
+│    POST /api/documents     ─ Upload files (PDF, DOCX, images)   │
 │                                                                 │
 │  Assistant Graph (built once at startup):                       │
 │    START → router → {docs|sql|chart|research|orchestrator|team} │
@@ -294,21 +294,27 @@ When the orchestrator calls `handoff(agent)`:
 
 ### What It Does
 
-Answers from the user's uploaded PDF/DOCX files using RAG (Retrieval-Augmented Generation).
+Answers from the user's uploaded PDF, DOCX and image files using RAG (Retrieval-Augmented Generation).
 
 ### Upload & Ingestion
 
-1. The user uploads a file via POST `/api/documents`
+1. The user uploads a file via POST `/api/documents`: PDF, DOCX, PNG, JPG, JPEG or WEBP. An image file is refused (400) when the user has no model settings, because it could never be read
 2. A FastAPI background task:
-   - splits it into chunks: 800 characters, 120 overlap
+   - splits the text into chunks: 800 characters, 120 overlap
+   - reads the images: every image in a PDF or DOCX (a scanned PDF is one image per page), or the image file itself. Up to 20 per file; images under 100 px are skipped, the rest are shrunk to 1600 px and sent as JPEG. Each image is read once, at upload, into a plain-text description plus every piece of text on it
+   - the image readings become chunks after the text chunks, starting `[Image N, p. P]` (no page for an image file or DOCX), with metadata `kind="image"`, `image` and `page`; text chunks have no `kind`
    - embeds each chunk with baai/bge-m3 (1024 dims)
    - stores them in the pgvector collection "documents", with deterministic ids `"{document_id}:{i}"` (used for deletion)
-   - sets the status to "ready" or "failed"
+   - sets the status to "ready" or "failed". A file fails only with no text and no readable image ("No text or readable images found."). It records `image_count` (images read) and `images_unread` (images found but not read)
 3. Document card (best effort, never changes the status):
-   - one model call on the start of the file: type, summary, up to 10 entities
+   - one model call on the file's text (up to 4,500 characters), then its image readings, 6,000 characters in all, so an entity seen only in an image reaches the graph. A text-only file keeps the 6,000 characters of text: type, summary, up to 10 entities
    - stored in the knowledge graph as File -mentions-> Entity edges
    - `documents.summary` is shown in the file list
    - `documents.card_embedding`: a vector of `"<filename>: <summary>"` (filename alone without a card), embedded in the same request as the entities; `scripts.build_graph` backfills it, `scripts.reindex` resizes it
+
+**Cost per upload** (the user's model calls; calls per chat message are unchanged): an image file is 1 reading + 1 card. A PDF or DOCX is 1 card + up to 20 readings, plus 1 failed call when the chat model can't take images.
+
+**Limit:** the image model is used only when the server returns an error for images (OpenRouter returns 404 for a model without image input). A server that silently drops the image (some Ollama or llama.cpp setups) is not detected, and that model's reading is made up. "Always read images with the image model" in Settings avoids this.
 
 ### Search
 
@@ -321,6 +327,7 @@ Answers from the user's uploaded PDF/DOCX files using RAG (Retrieval-Augmented G
 ### Citations
 
 - Format: `[filename, p. N]`
+- Image readings: a passage starting `[Image N` is a reading of an image, not the image; the docs agent cites it as `[filename]` or `[filename, p. N]` and says plainly when the reading does not cover the detail asked. No image agent and no new tool: `search_documents` searches the readings with the text. The docs prompts (`app/agents/docs/`) changed, so the docs agent server must be redeployed
 
 ### Route Info
 
@@ -956,9 +963,9 @@ Every account, the admin's included, chats on its own model server: an OpenAI-co
 
 ### Storage
 
-- Table `model_settings`: `user_id` (PK, FK to `users`, deleted with the account), `base_url`, `model` (the standard model), `small_model` and `strong_model` (both nullable), `profile` (`economy`, `balanced` or `advanced`, default `balanced`), `api_key` (Fernet token), `updated_at`. Created by `init_db`, which also adds the three 0.6.0 columns with `ADD COLUMN IF NOT EXISTS`; `READER_TABLES` lists the table, so `agent_reader` can SELECT it. An existing row with only `model` set runs every task on `model`.
+- Table `model_settings`: `user_id` (PK, FK to `users`, deleted with the account), `base_url`, `model` (the standard model), `small_model` and `strong_model` (both nullable), `profile` (`economy`, `balanced` or `advanced`, default `balanced`), `api_key` (Fernet token), `updated_at`, and `image_model` (nullable: the image fallback, on the same endpoint and key) and `image_model_first` (default false: images go straight to the image model). Created by `init_db`, which also adds the three 0.6.0 columns and the two image columns with `ADD COLUMN IF NOT EXISTS`; `READER_TABLES` lists the table, so `agent_reader` can SELECT it. An existing row with only `model` set runs every task on `model`.
 - `MODEL_KEY_SECRET` (Fernet key) encrypts the key. It is required at startup of the main app and of every agent server. Changing it makes saved keys unreadable, so users enter them again.
-- `GET /api/model-settings` returns `base_url`, `model`, `small_model`, `strong_model`, `profile` and `key_hint` (`sk-…` + last 4), never the key. `PUT` saves (`profile` must be one of the three, else 400; each set model not listed by the endpoint gets a warning naming its slot), `DELETE` clears. `GET /api/model-settings/models` lists the endpoint's model ids for the dropdowns (empty on any failure). All three are scoped by `user_id` (`app/api/routes_model_settings.py`, `app/core/model_settings.py`).
+- `GET /api/model-settings` returns `base_url`, `model`, `small_model`, `strong_model`, `image_model`, `image_model_first`, `profile` and `key_hint` (`sk-…` + last 4), never the key. `PUT` saves (`profile` must be one of the three, else 400; each set model not listed by the endpoint gets a warning naming its slot), `DELETE` clears. `GET /api/model-settings/models` lists the endpoint's model ids for the dropdowns (empty on any failure). All three are scoped by `user_id` (`app/api/routes_model_settings.py`, `app/core/model_settings.py`).
 
 ### Saving: the connection check
 
@@ -973,6 +980,7 @@ Every account, the admin's included, chats on its own model server: an OpenAI-co
 - `get_chat_model(user_id, tier="standard")` (`app/core/llm.py`) loads the user's row, applies `pick_model` for the tier, checks endpoint safety and returns a `ChatOpenAI` client for that endpoint, key and model (temperature 0, `stream_usage=True`, `max_retries=1`). `_build_chat_model` is `lru_cache`d on (base_url, model, api_key, streaming), so saving new settings yields a new client; the endpoint check runs when a client is built. No row raises `NoModelSettings`. It never reads `EMBED_API_KEY`.
 - **Agents** (`app/agents/factory.py`): a `user_model` middleware, first in the list, picks each call's model from the user's settings and the run's tier (`AgentContext.tier`, a name, never a key), and holds the fallback below. `build_agent` gets a placeholder model with no usable key, so a call that skipped the middleware fails rather than spending anyone's key.
 - **Direct calls** pass the `user_id` they already have: the team planner and judge, fact extraction, document cards.
+- **Image reading** (`image_models(user_id)`, `app/core/llm.py`): the models to try in order, non-streaming. With `image_model_first` and a slot set, only the image model. With a slot set, the standard model then the image model: after a failure the image model is used for the rest of the file (`unsupported` or `model_not_found` only). With the slot empty, only the standard model (no fallback; the images stay unread).
 - **Agent servers** call the same `get_chat_model`. They read the row themselves as `agent_reader` and decrypt it with the same `MODEL_KEY_SECRET`. The key never travels in request bodies, headers or `AgentContext`, so it stays out of traces and run records.
 - **Errors**: `openai.AuthenticationError` and `RateLimitError` messages name the user's server host. The OpenRouter `usage.cost` capture stays, so a cost figure shows only when the endpoint reports one.
 

@@ -7,7 +7,7 @@ from app.agents import factory
 from app.agents.docs import agent as docs_agent
 from app.agents.docs import tools as docs_tools
 from app.agents.research import agent as research_agent
-from app.core.memory import AgentContext
+from app.core.memory import TEAM_MODE, AgentContext
 from tests.scripted import ScriptedModel
 
 READING = ("[Screenshot 2026-11-14 112705.png]\n[Image 1] CPU-Z SPD tab: Slot #1, Kingston 8 GB DDR4-3200 "
@@ -77,3 +77,66 @@ async def test_solo_research_agent_is_not_forced_to_search_documents(monkeypatch
     workflow = research_agent.build_research_workflow()
     await workflow.ainvoke({"messages": [HumanMessage(QUESTION)]}, context=AgentContext(user_id="u"))
     assert model.forced and model.forced[0] != "search_documents", model.forced
+
+
+class IgnoresToolChoiceModel(ScriptedModel):
+    """Never returns a tool call, whatever tool_choice says; answers from any tool result it sees."""
+
+    def _next(self, messages) -> AIMessage:
+        results = [m.text for m in messages if m.type == "tool"]
+        if results:
+            return AIMessage(f"From the files: {results[-1]}")
+        return AIMessage("I can't view images.")
+
+
+def _ignoring_model(monkeypatch, search=None):
+    model = IgnoresToolChoiceModel(replies=iter(()), prompts=[], tools=[])
+    monkeypatch.setattr(factory, "get_chat_model", lambda *a, **k: model)
+    monkeypatch.setattr(docs_tools, "search_with_graph", search or (lambda user_id, query, entity="": READING))
+    return model
+
+
+async def test_docs_answers_from_the_reading_even_when_the_model_ignores_tool_choice(monkeypatch):
+    model = _ignoring_model(monkeypatch)
+    agent = docs_agent.build_docs_agent()
+    result = await agent.ainvoke({"messages": [HumanMessage(QUESTION)]}, context=AgentContext(user_id="u"))
+    assert "KVR32N22S8/8" in result["messages"][-1].text
+    assert len(model.prompts) == 1
+
+
+async def test_prefetch_searches_the_users_own_message(monkeypatch):
+    queries = []
+
+    def search(user_id, query, entity=""):
+        queries.append(query)
+        return READING
+
+    _ignoring_model(monkeypatch, search)
+    agent = docs_agent.build_docs_agent()
+    await agent.ainvoke({"messages": [HumanMessage(QUESTION)]}, context=AgentContext(user_id="u"))
+    assert queries == [QUESTION]
+
+
+async def test_team_speaker_counts_as_searched(monkeypatch):
+    calls = []
+
+    def search(user_id, query, entity=""):
+        calls.append(query)
+        return READING
+
+    _ignoring_model(monkeypatch, search)
+    agent = docs_agent.build_docs_agent()
+    result = await agent.ainvoke({"messages": [HumanMessage(QUESTION)]},
+                                 context=AgentContext(user_id="u", agent=TEAM_MODE, sources=frozenset({"user_files"})))
+    assert len(calls) == 1
+    turn = result["messages"][1:]
+    assert docs_agent.SPEC.gave_up(turn) is False
+
+
+async def test_no_passages_is_said_plainly(monkeypatch):
+    model = _ignoring_model(monkeypatch, lambda user_id, query, entity="": docs_tools.NO_PASSAGES)
+    agent = docs_agent.build_docs_agent()
+    result = await agent.ainvoke({"messages": [HumanMessage(QUESTION)]}, context=AgentContext(user_id="u"))
+    assert any(m.type == "tool" and m.text == docs_tools.NO_PASSAGES for m in model.prompts[0])
+    assert docs_agent.SPEC.no_result(docs_tools.NO_PASSAGES)
+    assert docs_agent.SPEC.gave_up(result["messages"][1:]) is True

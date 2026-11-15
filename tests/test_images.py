@@ -1,7 +1,11 @@
+import base64
 import io
 from pathlib import Path
 
+import httpx
+import openai
 import pytest
+from langchain_core.messages import AIMessage
 from PIL import Image
 
 from app.features.documents import images as images_mod
@@ -12,7 +16,9 @@ from app.features.documents.images import (
     MIN_IMAGE_SIDE,
     VISION_CONCURRENCY,
     images_in,
+    read_images,
 )
+from app.features.documents.prompts import IMAGE_PROMPT
 
 
 def _noise(size, mode="RGB"):
@@ -158,3 +164,129 @@ def test_decompression_bomb_is_skipped(tmp_path, monkeypatch):
     monkeypatch.setattr(Image, "MAX_IMAGE_PIXELS", 100)
     assert images_in(p) == []
     assert images_mod  # module imported
+
+
+# --- read_images ---------------------------------------------------------------
+
+
+def _err(cls, status):
+    request = httpx.Request("POST", "https://x/v1/chat/completions")
+    return cls("boom", response=httpx.Response(status, request=request), body=None)
+
+
+class FakeVision:
+    """Records every call; raises errors[image bytes] for that image, else replies text."""
+
+    def __init__(self, name, errors=None, text="a reading"):
+        self.name, self.errors, self.text = name, errors or {}, text
+        self.calls, self.configs, self.messages = [], [], []
+
+    def _reply(self, messages):
+        self.messages.append(messages)
+        url = messages[0].content[1]["image_url"]["url"]
+        raw = base64.b64decode(url.split(",", 1)[1])
+        self.calls.append(raw)
+        if raw in self.errors:
+            return self.errors[raw]
+        return AIMessage(content=self.text)
+
+    async def ainvoke(self, messages, config=None, **kw):
+        self.configs.append(config)
+        out = self._reply(messages)
+        if isinstance(out, Exception):
+            raise out
+        return out
+
+    async def abatch(self, inputs, config=None, return_exceptions=False, **kw):
+        self.configs.append(config)
+        return [self._reply(m) for m in inputs]
+
+
+def _use(monkeypatch, *models):
+    monkeypatch.setattr(images_mod, "image_models", lambda user_id: list(models))
+
+
+IMGS = [b"one", b"two", b"three"]
+
+
+async def test_chat_model_cannot_see_images_switches_for_the_file(monkeypatch):
+    chat = FakeVision("chat", {b"one": _err(openai.BadRequestError, 400)})
+    vis = FakeVision("vis", text="seen")
+    _use(monkeypatch, chat, vis)
+    assert await read_images("u", IMGS, []) == ["seen"] * 3
+    assert chat.calls == [b"one"]
+    assert vis.calls == IMGS
+
+
+async def test_model_not_found_also_switches(monkeypatch):
+    chat = FakeVision("chat", {b"one": _err(openai.NotFoundError, 404)})
+    vis = FakeVision("vis", text="seen")
+    _use(monkeypatch, chat, vis)
+    assert await read_images("u", IMGS, []) == ["seen"] * 3
+    assert chat.calls == [b"one"]
+
+
+async def test_chat_model_reads_everything(monkeypatch):
+    chat, vis = FakeVision("chat", text="chat read"), FakeVision("vis")
+    _use(monkeypatch, chat, vis)
+    assert await read_images("u", IMGS, []) == ["chat read"] * 3
+    assert vis.calls == []
+
+
+async def test_no_fallback_leaves_all_unread(monkeypatch):
+    chat = FakeVision("chat", {b"one": _err(openai.BadRequestError, 400)})
+    _use(monkeypatch, chat)
+    assert await read_images("u", IMGS, []) == [None, None, None]
+    assert len(chat.calls) == 1
+
+
+async def test_image_model_first_never_calls_chat(monkeypatch):
+    vis = FakeVision("vis", text="seen")
+    _use(monkeypatch, vis)
+    assert await read_images("u", IMGS, []) == ["seen"] * 3
+
+
+async def test_one_failure_in_batch_is_skipped(monkeypatch):
+    class Batchy(FakeVision):
+        async def abatch(self, inputs, config=None, return_exceptions=False, **kw):
+            self.configs.append(config)
+            assert return_exceptions is True
+            return [self._reply(m) for m in inputs]
+
+    chat = Batchy("chat", {b"two": _err(openai.InternalServerError, 500)})
+    _use(monkeypatch, chat)
+    assert await read_images("u", IMGS, []) == ["a reading", None, "a reading"]
+
+
+async def test_rate_limit_on_first_image_does_not_switch(monkeypatch):
+    chat = FakeVision("chat", {b"one": _err(openai.RateLimitError, 429)})
+    vis = FakeVision("vis")
+    _use(monkeypatch, chat, vis)
+    assert await read_images("u", IMGS, []) == [None, "a reading", "a reading"]
+    assert chat.calls == [b"one", b"two", b"three"]
+    assert vis.calls == []
+
+
+async def test_blank_reading_counts_as_unread(monkeypatch):
+    _use(monkeypatch, FakeVision("chat", text=" \n "))
+    assert await read_images("u", IMGS, []) == [None, None, None]
+
+
+async def test_message_carries_prompt_and_jpeg_data_url(monkeypatch):
+    chat = FakeVision("chat")
+    _use(monkeypatch, chat)
+    await read_images("u", [b"one"], [])
+    (message,) = chat.messages[0]
+    text, image = message.content
+    assert text == {"type": "text", "text": IMAGE_PROMPT}
+    assert image["type"] == "image_url"
+    assert image["image_url"]["url"].startswith("data:image/jpeg;base64,")
+
+
+async def test_calls_reach_callbacks(monkeypatch):
+    chat = FakeVision("chat")
+    _use(monkeypatch, chat)
+    marker = object()
+    await read_images("u", IMGS, [marker])
+    assert all(c["callbacks"] == [marker] for c in chat.configs)
+    assert chat.configs[-1]["max_concurrency"] == VISION_CONCURRENCY

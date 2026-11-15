@@ -1,11 +1,18 @@
 """Pull images out of uploaded files, normalised to JPEG for a vision model."""
 
+import asyncio
+import base64
 import io
 import logging
 import tempfile
 from pathlib import Path
 
+from langchain_core.messages import HumanMessage
 from PIL import Image
+
+from app.agents.factory import fallback_category
+from app.core.llm import image_models
+from app.features.documents.prompts import IMAGE_PROMPT
 
 log = logging.getLogger(__name__)
 
@@ -79,3 +86,53 @@ def images_in(path: Path) -> list[tuple[int | None, bytes]]:
     except Exception:
         log.warning("Could not extract images from %s", path.name, exc_info=True)
     return result
+
+
+def _message(jpeg: bytes) -> list[HumanMessage]:
+    url = "data:image/jpeg;base64," + base64.b64encode(jpeg).decode()
+    return [HumanMessage(content=[{"type": "text", "text": IMAGE_PROMPT}, {"type": "image_url", "image_url": {"url": url}}])]
+
+
+def _text(reply) -> str | None:
+    content = reply.content
+    if isinstance(content, list):
+        content = "".join(part.get("text", "") if isinstance(part, dict) else str(part) for part in content)
+    return content.strip() or None
+
+
+def _log_failure(exc: BaseException, number: int) -> None:
+    log.warning(
+        "Image %s was not read: category=%s status=%s",
+        number, fallback_category(exc), getattr(exc, "status_code", None), exc_info=exc,
+    )
+
+
+async def read_images(user_id: str, images: list[bytes], callbacks: list) -> list[str | None]:
+    """Read each image once; None marks one that could not be read. Image 1 is a probe: if the first
+    model cannot take images (400 or 404) and another is set, that one reads the whole file."""
+    if not images:
+        return []
+    models = await asyncio.to_thread(image_models, user_id)
+    config = {"callbacks": callbacks, "max_concurrency": VISION_CONCURRENCY}
+    model, readings = models[0], []
+    try:
+        readings.append(_text(await model.ainvoke(_message(images[0]), config=config)))
+    except Exception as exc:
+        _log_failure(exc, 1)
+        readings.append(None)
+        if fallback_category(exc) in ("unsupported", "model_not_found"):
+            if len(models) == 1:  # it cannot see images and nothing else can: the rest would fail too
+                return [None] * len(images)
+            model = models[1]
+            try:
+                readings[0] = _text(await model.ainvoke(_message(images[0]), config=config))
+            except Exception as retry_exc:
+                _log_failure(retry_exc, 1)
+    results = await model.abatch([_message(i) for i in images[1:]], config=config, return_exceptions=True)
+    for number, result in enumerate(results, start=2):
+        if isinstance(result, BaseException):
+            _log_failure(result, number)
+            readings.append(None)
+        else:
+            readings.append(_text(result))
+    return readings

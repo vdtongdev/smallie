@@ -140,3 +140,16 @@ async def test_no_passages_is_said_plainly(monkeypatch):
     assert any(m.type == "tool" and m.text == docs_tools.NO_PASSAGES for m in model.prompts[0])
     assert docs_agent.SPEC.no_result(docs_tools.NO_PASSAGES)
     assert docs_agent.SPEC.gave_up(result["messages"][1:]) is True
+
+
+async def test_failed_prefetch_search_does_not_crash_the_turn(monkeypatch):
+    def search(user_id, query, entity=""):
+        raise RuntimeError("Missing credentials")
+
+    model = _ignoring_model(monkeypatch, search)
+    agent = docs_agent.build_docs_agent()
+    result = await agent.ainvoke({"messages": [HumanMessage(QUESTION)]}, context=AgentContext(user_id="u"))
+    assert result["messages"][-1].text
+    errors = [m for m in result["messages"] if m.type == "tool" and m.name == "search_documents"]
+    assert len(errors) == 1 and errors[0].status == "error"
+    assert "Missing credentials" in errors[0].text and len(errors[0].text) < 200

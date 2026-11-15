@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import re
 import uuid
 
@@ -12,6 +13,8 @@ from app.agents.docs import tools as docs_tools
 from app.agents.docs.tools import NO_PASSAGES, search_documents
 from app.agents.factory import build_agent
 from app.core.db import documents, get_engine
+
+log = logging.getLogger(__name__)
 
 MAX_LISTED_DOCUMENTS = 30  # file names shown to the orchestrator
 MAX_CARDS = 10  # newest files shown with their card summary
@@ -74,11 +77,16 @@ async def prefetch_search(state, runtime):
     query = next((m.text for m in reversed(state["messages"]) if isinstance(m, HumanMessage) and m.name is None), "")
     if not query:
         return None
-    found = await asyncio.to_thread(docs_tools.search_with_graph, runtime.context.user_id, query)
+    status = "success"
+    try:
+        found = await asyncio.to_thread(docs_tools.search_with_graph, runtime.context.user_id, query)
+    except Exception as error:  # the turn goes on; the model sees the failure like any tool error
+        log.warning("Prefetch search failed", exc_info=True)
+        found, status = f"Error: {error!r}"[:150], "error"
     call_id = f"prefetch_{uuid.uuid4().hex[:8]}"
     return {"messages": [
         AIMessage("", tool_calls=[{"name": search_documents.name, "args": {"query": query}, "id": call_id}]),
-        ToolMessage(found, tool_call_id=call_id, name=search_documents.name),
+        ToolMessage(found, tool_call_id=call_id, name=search_documents.name, status=status),
     ]}
 
 

@@ -7,7 +7,6 @@ itself, hands off to one agent or asks several of them.
 """
 
 import asyncio
-import re
 from collections.abc import Sequence
 from typing import NotRequired
 
@@ -23,9 +22,9 @@ ORCHESTRATOR = "orchestrator"  # graph node, route, SSE `agent` name and AIMessa
 
 
 FOLLOW_UP_WORDS = 10  # a message this short, naming no agent, continues the last specialist's answer
-SMALL_TALK = re.compile(
-    r"\s*(thanks|thank you|ok|okay|great|cool|bye|hi|hello|cảm ơn|tạm biệt|chào)\s*[.!?…,]*\s*", re.IGNORECASE
-)  # the whole message; stays with the orchestrator
+SMALL_TALK_WORDS = frozenset(
+    "thanks thank you so much very a lot ok okay great cool nice bye hi hello cảm ơn bạn nhé nhiều tạm biệt chào rất".split()
+)  # a message made only of these stays with the orchestrator
 
 
 class AssistantState(AgentState):
@@ -74,9 +73,11 @@ def follow_up_route(messages: list[BaseMessage], available: list[tuple[AgentSpec
     """The route of the previous answer when the latest message is a short follow-up that
     names no agent and isn't small talk, and that agent can answer directly; else None."""
     latest = messages[-1].text
-    if len(latest.split()) > FOLLOW_UP_WORDS or SMALL_TALK.fullmatch(latest) or mentioned_routes(latest, available):
+    words = [word.strip(".!?…,;:\"'()").lower() for word in latest.split()]
+    if len(words) > FOLLOW_UP_WORDS or all(word in SMALL_TALK_WORDS for word in words) or mentioned_routes(latest, available):
         return None
-    route = previous_route(messages[:-1], message_routes(specs))
+    last_answer = next((m for m in reversed(messages[:-1]) if isinstance(m, AIMessage)), None)
+    route = message_routes(specs).get(last_answer.name) if last_answer else None
     if any(spec.route == route and spec.answers_directly for spec in specs):
         return route
     return None

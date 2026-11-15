@@ -324,3 +324,20 @@ Versions are `major.minor.patch`: the major version stays 0 for now, each minor 
   - Two new tables, `turn_activity` and `chat_data`, are created at startup with the other app tables (`app/core/db.py`). `chat_data` is readable by the agent servers' `agent_reader` role (`READER_TABLES`), which the app grants at each start
   - Redeploy all four agent services with the new image (`DEPLOYING.md`, section 3, steps 4 and 5): their agent code changed, and they now receive the chat data note
   - The main image builds the React UI in a Node 24 stage (`Dockerfile`), so its first build is slower; `DEPLOYING.md` section 2 lists it
+
+## 0.8.1 - Images in documents
+- **Documents read images** (`app/features/documents/`): upload PNG, JPG, JPEG or WEBP files, and images inside PDF and DOCX files (and scanned PDFs) are read too. There is no separate image agent; the docs agent answers from the readings
+  - Each image is read once, at upload (up to 20 per file; icons under 100 px are skipped) into a description plus the text on it
+  - The docs agent cites them as `[filename]` or `[filename, p. N]` and says plainly when a reading does not cover the detail you asked for
+  - Document cards see the image text too, so a name that appears only in an image reaches the knowledge graph
+- **Image model in Settings**: a new slot, **Image model (fallback)**, on the same endpoint and key, and the option **Always read images with the image model**
+  - The chat model is tried first. If it can't take images, the file switches to the image model for the rest of that file (at most one failed call per file)
+  - With **Always read images with the image model** on, images go straight to the image model
+  - With no image model set, images the chat model can't read stay unread, and the Documents panel shows "N images not read"
+  - Limit: a server that silently drops images (some local servers) isn't detected, so use **Always read images with the image model** there
+- **Cost per upload** (calls per chat message are unchanged): an image file is 1 reading + 1 card. A PDF or DOCX is 1 card + up to 20 readings, plus 1 failed call when the chat model can't take images
+- **Measured on 2026-11-15 with real models**: Gemma 4 26B read images directly (2 calls per image file). With DeepSeek chat, OpenRouter answered 404 "No endpoints found that support image input", and Gemini 2.5 Flash read the images, with 0 unread
+- Operator notes
+  - New columns are added at startup: `model_settings.image_model` and `model_settings.image_model_first`, `documents.image_count` and `documents.images_unread` (`app/core/db.py`)
+  - Pillow is a new dependency
+  - Redeploy the docs agent service: its prompts changed (`DEPLOYING.md`, section 3, steps 4 and 5)

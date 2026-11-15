@@ -17,6 +17,7 @@ dependencies = [
     "sqlalchemy>=2.1",
     "pypdf>=6.0",
     "docx2txt>=0.9",
+    "pillow>=12.3",
     "fastapi>=0.140",
     "uvicorn>=0.54",
     "python-multipart>=0.0.20",

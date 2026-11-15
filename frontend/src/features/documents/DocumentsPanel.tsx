@@ -20,6 +20,8 @@ type Doc = {
   filename: string
   status: 'processing' | 'ready' | 'failed'
   chunk_count: number
+  image_count?: number
+  images_unread?: number
   error: string | null
 }
 
@@ -73,7 +75,7 @@ export function DocumentsPanel() {
     <div className="flex flex-col gap-2 text-sm">
       <label className={cn(buttonVariants({ variant: 'outline' }), 'w-fit cursor-pointer')}>
         {t('upload')}
-        <input type="file" accept=".pdf,.docx" multiple className="sr-only" onChange={upload} />
+        <input type="file" accept=".pdf,.docx,.png,.jpg,.jpeg,.webp" multiple className="sr-only" onChange={upload} />
       </label>
       {error && <Alert variant="destructive">{error}</Alert>}
       <ul className="flex flex-col gap-1">
@@ -82,7 +84,12 @@ export function DocumentsPanel() {
           <li key={d.id} title={d.error ?? ''} className="flex w-fit max-w-full items-center gap-2 rounded-md border border-border px-2 py-1">
             <span className="min-w-0 truncate">{d.filename}</span>
             <span className="text-muted-foreground">
-              {t(`status_${d.status}`) + (d.status === 'ready' ? ` · ${d.chunk_count} ${t('chunks')}` : '')}
+              {t(`status_${d.status}`) +
+                (d.status === 'ready'
+                  ? ` · ${d.chunk_count} ${t('chunks')}` +
+                    (d.image_count ? ` · ${d.image_count} ${t('images')}` : '') +
+                    (d.images_unread ? ` · ${d.images_unread} ${t('imagesUnread')}` : '')
+                  : '')}
             </span>
             <AlertDialog>
               <AlertDialogTrigger

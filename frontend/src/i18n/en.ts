@@ -47,6 +47,8 @@ export const en = {
   status_ready: "ready",
   status_failed: "failed",
   chunks: "chunks",
+  images: "images",
+  imagesUnread: "images not read: set an image model in Settings",
   usedTool: "Used tool",
   result: "Result",
   thinking: "Thinking…",

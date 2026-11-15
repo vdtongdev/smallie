@@ -49,6 +49,8 @@ export const vi: Record<I18nKey, string> = {
   status_ready: "sẵn sàng",
   status_failed: "lỗi",
   chunks: "đoạn",
+  images: "ảnh",
+  imagesUnread: "ảnh chưa được đọc: hãy đặt model ảnh trong Cài đặt",
   usedTool: "Đã dùng công cụ",
   result: "Kết quả",
   thinking: "Đang suy nghĩ…",

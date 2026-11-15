@@ -26,6 +26,7 @@ export default function ReadmeVi({ marketStatus, onExample }: { marketStatus: st
         <details>
           <summary>Tài liệu</summary>
           <p>Trả lời dựa trên các tệp PDF và Word bạn tải lên, kèm trích dẫn tên tệp và số trang.</p>
+          <p>Bạn cũng có thể tải lên ảnh (PNG, JPG, WEBP). Ảnh nằm trong tệp PDF và Word, cùng các tệp PDF dạng bản quét, được model chat của bạn hoặc model ảnh đặt trong Cài đặt đọc một lần khi tải lên.</p>
           <ol>
             <li>Bấm <strong>Tải lên PDF / DOCX</strong> và chọn một hoặc nhiều tệp (tối đa 25 MB mỗi tệp).</li>
             <li>Chờ đến khi tệp hiện <em>sẵn sàng</em>. Việc xử lý mất từ vài giây đến một phút.</li>

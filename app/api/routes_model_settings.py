@@ -25,13 +25,15 @@ class ModelSettingsBody(BaseModel):
     small_model: str | None = None
     strong_model: str | None = None
     profile: str | None = None
+    image_model: str | None = None
+    image_model_first: bool = False
 
-    @field_validator("base_url", "model", "api_key", "small_model", "strong_model")
+    @field_validator("base_url", "model", "api_key", "small_model", "strong_model", "image_model")
     @classmethod
     def _strip(cls, value):
         return value.strip() if isinstance(value, str) else value
 
-    @field_validator("small_model", "strong_model")
+    @field_validator("small_model", "strong_model", "image_model")
     @classmethod
     def _empty_is_none(cls, value):
         return value or None
@@ -81,6 +83,8 @@ async def get_model_settings(user_id: str = Depends(get_current_user)):
         "small_model": saved.small_model,
         "strong_model": saved.strong_model,
         "profile": saved.profile,
+        "image_model": saved.image_model,
+        "image_model_first": saved.image_model_first,
         "key_hint": key_hint(saved.api_key),
     }
 
@@ -124,11 +128,13 @@ async def put_model_settings(body: ModelSettingsBody, user_id: str = Depends(get
         small_model=body.small_model,
         strong_model=body.strong_model,
         profile=body.profile,
+        image_model=body.image_model,
+        image_model_first=body.image_model_first,
     )
     warning = None if body.model in listed else "This server doesn't list that model; check the name."
     warnings = {
         slot: f"This server doesn't list the {slot.removesuffix('_model')} model; check the name."
-        for slot in ("small_model", "strong_model")
+        for slot in ("small_model", "strong_model", "image_model")
         if getattr(body, slot) and getattr(body, slot) not in listed
     }
     return {"saved": True, "warning": warning, "warnings": warnings}

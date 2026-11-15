@@ -2,7 +2,7 @@
 
 LangChain agents behind a FastAPI app with a small web UI. You type into one chat, and an **orchestrator** handles each message: it answers general questions itself (with a quick web search for fresh facts), hands a question to the right specialist, or asks several specialists and writes the combined answer. A **Team mode** switch next to the message box makes the orchestrator plan the work as tasks that the agents do from their own sources (in parallel or one after another), and a judge reviews the results after each step. There are four specialists today:
 
-- **Documents**: upload PDF/DOCX files and ask questions about them. Answers cite the file and page.
+- **Documents**: upload PDF, DOCX or image files (PNG, JPG, JPEG, WEBP) and ask questions about them. Images inside PDF and DOCX files, and scanned PDFs, are read too. Answers cite the file and page.
 - **Database**: ask in plain language about a stock database (200 popular stocks from Yahoo Finance via `yfinance`). The agent writes and runs read-only SQL.
 - **Charts**: say "chart", "plot" or "vẽ biểu đồ" for an interactive line, bar, area, pie or scatter chart of the stock data, or of numbers from another answer ("plot that").
 - **Research**: gathers facts from the web (Tavily), Wikipedia, arXiv, an optional external Postgres, the stock database and your files; the orchestrator writes them up with sources.
@@ -115,14 +115,14 @@ It only runs while this PC is on. For access from anywhere, see [Deploying](#dep
 
 ## Models and cost
 
-Each user sets their own model server in **Settings** (the button in the sidebar): an OpenAI-compatible endpoint, an API key and one model name, used for every chat role. Keys are stored encrypted on the server (`MODEL_KEY_SECRET`) and sent only to the endpoint you chose. The Readme dialog lists example providers. An account without settings cannot chat until it saves them. Messages, answer excerpts and uploaded documents are embedded through OpenRouter on the operator's `EMBED_API_KEY`.
+Each user sets their own model server in **Settings** (the button in the sidebar): an OpenAI-compatible endpoint, an API key and one model name, used for every chat role. An optional image model on the same endpoint reads images in documents when the chat model can't (see Documents above). Keys are stored encrypted on the server (`MODEL_KEY_SECRET`) and sent only to the endpoint you chose. The Readme dialog lists example providers. An account without settings cannot chat until it saves them. Messages, answer excerpts and uploaded documents are embedded through OpenRouter on the operator's `EMBED_API_KEY`.
 
 - The orchestrator is skipped when a message clearly points to one agent. `ORCHESTRATOR_MAX_MODEL_CALLS` (4) caps its calls per message.
 - `TEAM_MAX_TASKS` (6), `TEAM_MAX_ROUNDS` (2, per check point) and `TEAM_MAX_MESSAGE_MODEL_CALLS` (30): team mode takes 1 plan call + each task's calls + 1 judge call per reviewed step + 1 write-up. Measured on the task graph with the old fixed models: 4 calls for a stock question, 7 with a planted wrong figure, 15 with all agents.
 - `TAVILY_API_KEY`: web search (free 1,000 credits/month at https://app.tavily.com). Without it, research uses the other sources. `MCP_SERVERS` adds remote MCP servers and `EXTERNAL_DATABASE_URL` lets the researcher read another Postgres (see `.env.example`).
 - `LANGSMITH_TRACING` + `LANGSMITH_API_KEY`: records every model call, tool call and routing step as a trace. Off by default. Traces contain full prompts (users' messages, file passages), so enable it in production only if you accept that.
 - `OPENROUTER_EMBED_MODEL`: defaults to `baai/bge-m3` (multilingual, about $0.01 per 1M tokens). The free `liquid/lfm-2.5-embedding-350m:free` may keep and train on your data. After changing it or `EMBED_DIM`, stop the app and run `uv run python -m scripts.reindex`.
-- **Free-tier limits:** about 20 requests/min, and 50/day unless you bought at least $10 of credits (then 1000/day). A general question takes 1 model call, plus 1 after the reply to learn facts about you. An upload takes 1. A database or documents question takes 2–5 (+1 if handed over); a combined one 1 + each agent's calls + 1; research up to `RESEARCH_MAX_MODEL_CALLS` (8) + 1. `uv run python -m scripts.bench_chat` measures calls and latency on your models.
+- **Free-tier limits:** about 20 requests/min, and 50/day unless you bought at least $10 of credits (then 1000/day). A general question takes 1 model call, plus 1 after the reply to learn facts about you. An upload takes 1, and an image file takes 1 more for its reading (a PDF or DOCX takes 1 per image, up to 20). A database or documents question takes 2–5 (+1 if handed over); a combined one 1 + each agent's calls + 1; research up to `RESEARCH_MAX_MODEL_CALLS` (8) + 1. `uv run python -m scripts.bench_chat` measures calls and latency on your models.
 
 ## Architecture
 
@@ -148,4 +148,4 @@ Point `READONLY_DATABASE_URL` at a read-only role on your database and set `SCHE
 - **Chat errors with "the connection is closed", or old chats won't open:** Postgres restarted while the app ran. The app reconnects on its own; if not, make sure Postgres is running and restart the app.
 - **Stock questions return nothing / "relation market.stocks does not exist":** run `uv run python -m scripts.load_stocks`, then restart the app (the SQL agent reads the schema at startup). Tickers reported without price data were delisted or renamed; replace them in `app/features/market/tickers.py`.
 - **Cloud Run build fails:** `gcloud builds list --region asia-southeast1 --limit 1`, then `gcloud builds log <id> --region asia-southeast1`. `PERMISSION_DENIED` before the build starts means the `roles/run.builder` grant is missing; see [DEPLOYING.md](DEPLOYING.md).
-- **"No text found" on a PDF:** scanned or image-only PDFs need OCR, which isn't supported yet.
+- **"No text or readable images found" on a file:** the file has no text, and none of its images could be read. Check the image model in Settings (a text-only chat model can't read images without one).

@@ -82,6 +82,8 @@ model_settings = Table(
     Column("small_model", Text),  # optional tier slots; empty falls back to `model`
     Column("strong_model", Text),
     Column("profile", Text, nullable=False, server_default="balanced"),  # economy | balanced | advanced
+    Column("image_model", Text),  # optional model that reads images (app/features/documents/images.py)
+    Column("image_model_first", Boolean, nullable=False, server_default="false"),
     Column("updated_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
 )
 
@@ -95,6 +97,8 @@ documents = Table(
     Column("status", String(16), nullable=False),  # "processing" | "ready" | "failed"
     Column("error", Text),
     Column("chunk_count", Integer, nullable=False, server_default="0"),
+    Column("image_count", Integer, nullable=False, server_default="0"),  # images read (app/features/documents/images.py)
+    Column("images_unread", Integer, nullable=False, server_default="0"),  # images found but not read
     Column("summary", Text),  # "<doc type>: <one line>" from the document card (app/features/documents/card.py)
     Column("card_embedding", Vector(get_settings().embed_dim)),  # of "<filename>: <summary>", ranks files for a search
     Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
@@ -208,6 +212,10 @@ def init_db() -> None:
         ))
         # These came with the knowledge graph.
         conn.execute(text("ALTER TABLE documents ADD COLUMN IF NOT EXISTS summary text"))
+        conn.execute(text(
+            "ALTER TABLE documents ADD COLUMN IF NOT EXISTS image_count integer NOT NULL DEFAULT 0, "
+            "ADD COLUMN IF NOT EXISTS images_unread integer NOT NULL DEFAULT 0"
+        ))
         conn.execute(text(f"ALTER TABLE documents ADD COLUMN IF NOT EXISTS card_embedding vector({get_settings().embed_dim})"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS graph_built_at timestamptz"))
         conn.execute(text("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS mined_turns integer NOT NULL DEFAULT 0"))
@@ -231,4 +239,9 @@ def init_db() -> None:
             "ALTER TABLE model_settings ADD COLUMN IF NOT EXISTS small_model text, "
             "ADD COLUMN IF NOT EXISTS strong_model text, "
             "ADD COLUMN IF NOT EXISTS profile text NOT NULL DEFAULT 'balanced'"
+        ))
+        # These came with image reading.
+        conn.execute(text(
+            "ALTER TABLE model_settings ADD COLUMN IF NOT EXISTS image_model text, "
+            "ADD COLUMN IF NOT EXISTS image_model_first boolean NOT NULL DEFAULT false"
         ))

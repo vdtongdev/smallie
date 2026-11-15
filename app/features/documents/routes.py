@@ -9,14 +9,17 @@ from app.core.auth import get_current_user
 from app.core.config import get_settings
 from app.core.db import documents, get_engine
 from app.core.graph import drop_orphans
+from app.core.model_settings import load_settings
 from app.core.snapshot import clear_snapshots
 from app.features.documents.card import process_document
 from app.features.documents.ingest import SUPPORTED_SUFFIXES, delete_document_chunks
+from app.features.documents.images import IMAGE_SUFFIXES
 
 router = APIRouter(tags=["documents"])
 
 _PUBLIC_COLUMNS = (documents.c.id, documents.c.filename, documents.c.status,
-                   documents.c.error, documents.c.chunk_count, documents.c.created_at)
+                   documents.c.error, documents.c.chunk_count, documents.c.image_count,
+                   documents.c.images_unread, documents.c.created_at)
 
 
 @router.post("/documents", status_code=202)
@@ -24,9 +27,16 @@ def upload(files: list[UploadFile], background: BackgroundTasks, request: Reques
            user_id: str = Depends(get_current_user)):
     settings = get_settings()
     max_bytes = settings.max_upload_mb * 1024 * 1024
+    has_model = None
     for f in files:
-        if Path(f.filename or "").suffix.lower() not in SUPPORTED_SUFFIXES:
-            raise HTTPException(400, f"{f.filename}: only PDF and DOCX files are supported")
+        suffix = Path(f.filename or "").suffix.lower()
+        if suffix not in SUPPORTED_SUFFIXES:
+            raise HTTPException(400, f"{f.filename}: only PDF, DOCX or image files are supported")
+        if suffix in IMAGE_SUFFIXES:
+            if has_model is None:
+                has_model = load_settings(user_id) is not None
+            if not has_model:
+                raise HTTPException(400, f"{f.filename}: set your model in Settings before uploading images")
         if f.size is not None and f.size > max_bytes:
             raise HTTPException(413, f"{f.filename}: larger than {settings.max_upload_mb} MB")
 

@@ -6,7 +6,7 @@ import { cachedModels, PROFILES, storeModels, type Slots } from '@/lib/modelSett
 type Saved = Partial<Slots> & { key_hint?: string }
 export type SaveResult = { warning?: string; warnings?: Record<string, string> }
 
-const EMPTY: Slots = { base_url: '', model: '', small_model: '', strong_model: '', profile: 'balanced' }
+const EMPTY: Slots = { base_url: '', model: '', small_model: '', strong_model: '', profile: 'balanced', image_model: '', image_model_first: false }
 
 /** The saved model settings, the provider's cached model list and the calls that change them (app.js 1112-1245). */
 export function useModelSettings(open: boolean) {
@@ -38,6 +38,8 @@ export function useModelSettings(open: boolean) {
       small_model: s?.small_model ?? '',
       strong_model: s?.strong_model ?? '',
       profile,
+      image_model: s?.image_model ?? '',
+      image_model_first: s?.image_model_first ?? false,
     }
     loadedRef.current = slots
     setLoaded(slots)
@@ -71,7 +73,7 @@ export function useModelSettings(open: boolean) {
       const res = await api<SaveResult>('/model-settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...next, api_key: key || null }),
+        body: JSON.stringify({ ...next, image_model: next.image_model || null, api_key: key || null }),
       })
       const endpointChanged = next.base_url !== loadedRef.current.base_url
       await load()

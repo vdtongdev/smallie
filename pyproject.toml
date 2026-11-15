@@ -1,6 +1,6 @@
 [project]
 name = "smallie"
-version = "0.8.0"
+version = "0.8.1"
 description = "LangChain agents for document Q&A and natural-language database queries (EN/VI)"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -17,6 +17,7 @@ dependencies = [
     "sqlalchemy>=2.1",
     "pypdf>=6.0",
     "docx2txt>=0.9",
+    "pillow>=12.3",
     "fastapi>=0.140",
     "uvicorn>=0.54",
     "python-multipart>=0.0.20",

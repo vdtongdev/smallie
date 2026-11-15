@@ -146,3 +146,13 @@ def test_malformed_secret_fails_at_startup(monkeypatch):
     monkeypatch.setattr(get_settings(), "model_key_secret", "not-a-fernet-key")
     with pytest.raises(RuntimeError, match="not a valid Fernet key"):
         model_settings.require_secret()
+
+
+def test_image_slot_round_trips(make_user):
+    uid = make_user()
+    model_settings.save_settings(uid, URL, "m1", "k", image_model="vis", image_model_first=True)
+    saved = model_settings.load_settings(uid)
+    assert (saved.image_model, saved.image_model_first) == ("vis", True)
+    model_settings.save_settings(uid, URL, "m1", None, image_model=None)
+    saved = model_settings.load_settings(uid)
+    assert (saved.image_model, saved.image_model_first) == (None, False)

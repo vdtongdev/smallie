@@ -287,11 +287,11 @@ async def _research_system_prompt(monkeypatch, sources) -> str:
 
 async def test_research_prompt_omits_sources_outside_scope(monkeypatch):
     scoped = await _research_system_prompt(monkeypatch, ("web",))
-    for left_out in ("run_sql", "MARKET_SCHEMA_TEXT", "search_documents", "uploaded PDF"):
+    for left_out in ("run_sql", "MARKET_SCHEMA_TEXT", "search_documents", "uploaded files"):
         assert left_out not in scoped
     assert "tavily_*" in scoped
     everything = await _research_system_prompt(monkeypatch, ())
-    for kept in ("run_sql", "MARKET_SCHEMA_TEXT", "search_documents", "uploaded PDF", "tavily_*"):
+    for kept in ("run_sql", "MARKET_SCHEMA_TEXT", "search_documents", "uploaded files", "tavily_*"):
         assert kept in everything
 
 

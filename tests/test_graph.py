@@ -1041,3 +1041,48 @@ def test_extract_prompt_explains_replaces():
     from app.core.prompts import EXTRACT_PROMPT
 
     assert "replaces" in EXTRACT_PROMPT and "{" not in EXTRACT_PROMPT
+
+
+@requires_db
+def test_search_returns_own_image_readings_only(make_user, embeddings, chunks):
+    from app.agents.docs.tools import NO_PASSAGES, search_with_graph
+
+    alice, bob = make_user(), make_user()
+    scan_a, scan_b = add_document(alice, "scan.png"), add_document(bob, "scan.png")
+    for user, scan, who in ((alice, scan_a, "Alice"), (bob, scan_b, "Bob")):
+        chunks.add_documents([Document(f"[Image 1]\nInvoice total for {who}.", metadata={
+            "user_id": user, "document_id": scan, "filename": "scan.png", "kind": "image", "image": 1})])
+    seen_by_alice, seen_by_bob = search_with_graph(alice, "invoice total"), search_with_graph(bob, "invoice total")
+    assert "for Alice" in seen_by_alice and "for Bob" not in seen_by_alice
+    assert "for Bob" in seen_by_bob and "for Alice" not in seen_by_bob
+    assert search_with_graph(make_user(), "invoice total") == NO_PASSAGES
+
+
+@requires_db
+def test_entity_only_in_image_links_the_file(make_user, embeddings):
+    from app.features.documents.card import card_opening
+
+    user = make_user()
+    document_id = add_document(user, "report.pdf")
+    opening = card_opening([Document("Long text. " * 1000),
+                            Document("[Image 1, p. 9]\nStamp: Zephyr Corp.", metadata={"kind": "image"})])
+    entities = [name for name in ("Zephyr Corp", "Acme") if name in opening]  # what the card model would find
+    assert entities == ["Zephyr Corp"]
+    graph.save_card(user, document_id, "Report: yearly figures", entities)
+    assert graph.documents_for(user, "", "Zephyr Corp") == [document_id]
+
+
+@requires_db
+def test_deleted_while_reading_indexes_nothing(make_user, monkeypatch):
+    from app.features.documents import ingest
+
+    added = []
+    monkeypatch.setattr(ingest, "get_vector_store", lambda: SimpleNamespace(
+        add_documents=lambda docs, ids=None: added.extend(docs), delete=lambda ids: None))
+    user = make_user()
+    document_id = add_document(user, "gone.png")
+    with get_engine().begin() as conn:
+        conn.execute(delete(documents).where(documents.c.id == document_id))
+    reading = ingest.image_chunks(["A photo."], [None], "gone.png")
+    assert ingest.index_document(document_id, user, [], reading, 1, 0) == []
+    assert added == []

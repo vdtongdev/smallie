@@ -66,3 +66,33 @@ def test_unsupported_type_rejected(tmp_path: Path):
 
 def test_chunk_ids_are_deterministic():
     assert chunk_ids("doc", 3) == ["doc:0", "doc:1", "doc:2"]
+
+
+def test_image_chunks_follow_text_chunks():
+    from langchain_core.documents import Document
+
+    from app.features.documents.ingest import image_chunks
+
+    text = [Document("Body.", metadata={"filename": "f.pdf", "page": 1})]
+    images = image_chunks(["A chart.", "A table."], [2, 3], "f.pdf")
+    assert [c.page_content.split("\n")[0] for c in images] == ["[Image 1, p. 2]", "[Image 2, p. 3]"]
+    assert all(c.metadata["kind"] == "image" for c in images)
+    assert [c.metadata["image"] for c in images] == [1, 2]
+    assert [c.metadata["page"] for c in images] == [2, 3]
+    assert all("kind" not in c.metadata for c in text)
+    assert chunk_ids("d", len(text) + len(images)) == ["d:0", "d:1", "d:2"]
+
+
+def test_unread_images_keep_their_number():
+    from app.features.documents.ingest import image_chunks
+
+    chunks = image_chunks([None, "Second.", "   ", "Fourth."], [None, None, None, None], "f.docx")
+    assert [c.metadata["image"] for c in chunks] == [2, 4]
+    assert chunks[0].page_content.startswith("[Image 2]\n")
+    assert "page" not in chunks[0].metadata
+
+
+def test_image_file_has_no_text_chunks(tmp_path: Path):
+    path = tmp_path / "scan.png"
+    path.write_bytes(b"not read here")
+    assert load_and_split(path, "scan.png") == []

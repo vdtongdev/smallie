@@ -87,6 +87,18 @@ def get_chat_model(user_id: str, *, tier: str = "standard", streaming: bool = Tr
     return _build_chat_model(saved.base_url, pick_model(saved, tier)[0], saved.api_key, streaming)
 
 
+def image_models(user_id: str) -> list[ChatOpenAI]:
+    """Models that may read an image, in the order to try: the standard model, then the image
+    model; the image model alone when it is set to go first."""
+    saved = load_settings(user_id)
+    if saved is None:
+        raise NoModelSettings()
+    names = [saved.model]
+    if saved.image_model:
+        names = [saved.image_model] if saved.image_model_first else [saved.model, saved.image_model]
+    return [_build_chat_model(saved.base_url, name, saved.api_key, False) for name in names]
+
+
 def placeholder_model() -> ChatOpenAI:
     """Build-time stand-in for create_agent; calls on it fail on purpose."""
     return ChatOpenAI(model="unset", api_key="unset", base_url="https://invalid.invalid/v1")

@@ -6,7 +6,15 @@ import { buttonVariants } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { DocumentsPanel } from './DocumentsPanel'
 
-type Doc = { id: string; filename: string; status: string; chunk_count: number; error: string | null }
+type Doc = {
+  id: string
+  filename: string
+  status: string
+  chunk_count: number
+  error: string | null
+  image_count?: number
+  images_unread?: number
+}
 let docs: Doc[]
 let calls: { method: string; url: string; init?: RequestInit }[]
 let gates: Promise<void>[]
@@ -94,6 +102,24 @@ test('lists documents with status badges', async () => {
   expect(screen.getByText('b.docx').closest('li')?.getAttribute('title')).toBe('bad file')
 })
 
+test('shows image count on a ready file', async () => {
+  docs = [doc({ image_count: 3, images_unread: 0 })]
+  await mount()
+  expect(screen.getByText(/· 3 images/)).toBeTruthy()
+})
+
+test('shows the unread note', async () => {
+  docs = [doc({ image_count: 0, images_unread: 2 })]
+  await mount()
+  expect(screen.getByText(/· 2 images not read: set an image model in Settings/)).toBeTruthy()
+})
+
+test('file input accepts images', async () => {
+  await mount()
+  const input = screen.getByLabelText(en.upload) as HTMLInputElement
+  expect(input.accept).toContain('.png,.jpg,.jpeg,.webp')
+})
+
 test('shows the empty text', async () => {
   await mount()
   expect(screen.getByText(en.noDocuments)).toBeTruthy()
@@ -102,7 +128,6 @@ test('shows the empty text', async () => {
 test('upload posts each file in the files field, then reloads', async () => {
   await mount()
   const input = screen.getByLabelText(en.upload) as HTMLInputElement
-  expect(input.accept).toBe('.pdf,.docx')
   expect(input.multiple).toBe(true)
   const f1 = new File(['x'], 'a.pdf')
   const f2 = new File(['y'], 'b.docx')

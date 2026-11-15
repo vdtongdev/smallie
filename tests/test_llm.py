@@ -108,3 +108,22 @@ async def test_ask_structured_lets_errors_propagate():
     model, _, _ = _structured(RuntimeError("boom"))
     with pytest.raises(RuntimeError, match="boom"):
         await llm.ask_structured(model, dict, ["m"], {})
+
+
+@pytest.mark.parametrize("slot, first, names", [
+    ("vis", False, ["std", "vis"]),
+    ("vis", True, ["vis"]),
+    (None, True, ["std"]),
+])
+def test_image_models_order(user_settings, slot, first, names):
+    user_settings["value"] = ModelSettings("https://api.deepseek.com/v1", "std", "sk-user",
+                                           image_model=slot, image_model_first=first)
+    models = llm.image_models("u1")
+    assert [m.model_name for m in models] == names
+    assert all(m.streaming is False for m in models)
+
+
+def test_image_models_without_settings_raises(monkeypatch):
+    monkeypatch.setattr(llm, "load_settings", lambda user_id: None)
+    with pytest.raises(NoModelSettings):
+        llm.image_models("u1")

@@ -32,7 +32,7 @@ from app.core.config import get_settings
 from app.core.llm import get_chat_model, pick_model, placeholder_model
 from app.core.memory import MEMORY_TOOLS, TEAM_MODE, TOOL_SOURCE, AgentContext
 from app.core.model_settings import load_settings
-from app.core.prompts import CALL_NOTE, CHAT_DATA_SECTION, LAST_CALL_NOTE, MEMORIES_SECTION, NOTES_SECTION, PROFILE_SECTION, RECENT_CHATS_SECTION, SAME_RESULT, SOLO_VOICE, TEAM_VOICE, USER_SECTION, reply_language
+from app.core.prompts import CALL_NOTE, CHAT_DATA_SECTION, LAST_CALL_NOTE, MEMORIES_SECTION, NOTES_SECTION, PROFILE_SECTION, RECENT_CHATS_SECTION, REPLY_LANGUAGE_NOTE, SAME_RESULT, SOLO_VOICE, TEAM_VOICE, USER_SECTION, reply_language
 
 log = logging.getLogger(__name__)
 
@@ -143,8 +143,8 @@ def trim_tool_calls(state, runtime):
 
 def make_call_note(tail: Callable[[ModelRequest], str | Awaitable[str]] | None, limit: int, last_call_writes: bool):
     """Per-call text goes last in the request, so the system prompt and the messages before it stay the
-    same from call to call: `tail(request)`, then `TEAM_VOICE` in team mode (else `SOLO_VOICE`), plus on the last model call the limit allows (when the agent
-    writes then) a note naming the reply language, no tool choice, and any tool call the model makes
+    same from call to call: `tail(request)`, then `TEAM_VOICE` in team mode (else `SOLO_VOICE`), then the reply language by name (`REPLY_LANGUAGE_NOTE`), plus on the last model call the limit allows (when the agent
+    writes then) a note about the last step, no tool choice, and any tool call the model makes
     anyway dropped. The note is in the request only, not saved."""
 
     @wrap_model_call
@@ -156,9 +156,9 @@ def make_call_note(tail: Callable[[ModelRequest], str | Awaitable[str]] | None, 
         voice = TEAM_VOICE if request.runtime.context.agent == TEAM_MODE else SOLO_VOICE
         text = f"{text}\n\n{voice}" if text else voice
         last = last_call_writes and request.state.get("run_model_call_count", 0) == limit - 1
-        if last:
-            text = f"{text}\n\n" if text else ""
-            text += LAST_CALL_NOTE.format(language=reply_language(request.messages))
+        language = reply_language(request.messages)
+        note = LAST_CALL_NOTE if last else REPLY_LANGUAGE_NOTE
+        text = f"{text}\n\n{note.format(language=language)}"
         if text:
             request = request.override(messages=[*request.messages, HumanMessage(text, name=CALL_NOTE)])
         if not last:

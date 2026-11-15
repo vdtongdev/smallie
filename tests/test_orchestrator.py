@@ -135,15 +135,19 @@ async def test_delegations_run_in_parallel_and_only_the_write_up_streams(monkeyp
     events = await _run(assistant, "compare the revenue in my report with Apple's real revenue")
 
     calls = [e["name"] for e in events if e["type"] == "tool_call"]
-    assert set(calls) == {"ask_docs", "ask_sql"}
+    assert set(calls) == {"ask_docs", "ask_sql", "search_documents"}  # the docs agent's search always shows
     results = {e["name"]: e["content"] for e in events if e["type"] == "tool_result"}
     assert results["ask_sql"] == "AAPL revenue: $400B (2026-10-10)."
     # The specialists' own answers are tool results, not streamed text.
     assert _streamed(events) == "The handbook says $1B [handbook.pdf, p. 2]; the database says $400B."
 
     # The specialists only saw the orchestrator's self-contained question.
-    questions = {p[-2].content for p in model.prompts if "orchestrator" not in p[0].content and "You coordinate the team." not in p[0].content}
+    specialist_prompts = [p for p in model.prompts if "orchestrator" not in p[0].content and "You coordinate the team." not in p[0].content]
+    questions = {next(m.content for m in reversed(p) if m.type == "human" and m.name is None) for p in specialist_prompts}
     assert questions == {"What revenue does the handbook state?", "What is AAPL's revenue?"}
+    docs_prompt = next(p for p in specialist_prompts if any(m.content == "What revenue does the handbook state?" for m in p))
+    question_at = max(i for i, m in enumerate(docs_prompt) if m.type == "human" and m.name is None)
+    assert any(m.type == "tool" and m.name == "search_documents" for m in docs_prompt[question_at + 1:])
     # The write-up call got the writing rules; the deciding call didn't.
     orchestrator_prompts = [p for p in model.prompts if "You coordinate the team." in p[0].content]
     assert "CITATIONS" not in tail_of(orchestrator_prompts[0])
@@ -204,7 +208,10 @@ async def test_a_message_for_two_specialists_is_asked_of_both_and_combined(monke
 
     # Not turned into a handoff to docs, so sql could still be asked.
     assert [e["name"] for e in events if e["type"] == "agent"] == ["orchestrator"]
-    assert [e["name"] for e in events if e["type"] == "tool_call"] == ["ask_docs", "ask_sql"]
+    # The docs agent's own search always shows as a tool event; ask_docs comes before ask_sql.
+    calls = [e["name"] for e in events if e["type"] == "tool_call"]
+    assert [c for c in calls if c.startswith("ask_")] == ["ask_docs", "ask_sql"]
+    assert "search_documents" in calls
     assert _streamed(events).startswith("The handbook mentions Apple")
     first_prompt = tail_of(next(p for p in model.prompts if "You coordinate the team." in p[0].content))
     assert "touches the data of several specialists: docs, sql" in first_prompt

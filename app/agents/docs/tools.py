@@ -11,6 +11,8 @@ TOP_K = 6
 CARD_FILES = 3  # files whose card is nearest the question, when nothing names or links a file;
 # each gets one of the TOP_K passages, so a big file's many close passages can't crowd the others out
 NO_PASSAGES = "No matching passages in the user's documents."
+MAX_IMAGE_CHARS = 6000  # whole-image text one search adds; cut at a part boundary, one part may pass it
+IMAGE_PARTS_FETCHED = 50
 
 
 def search_user_chunks(user_id: str, query: str, k: int = TOP_K, document_ids: list[str] | None = None) -> str:
@@ -18,7 +20,46 @@ def search_user_chunks(user_id: str, query: str, k: int = TOP_K, document_ids: l
     where = {"user_id": {"$eq": user_id}}
     if document_ids:
         where = {"$and": [where, {"document_id": {"$in": document_ids}}]}
-    return _format(get_vector_store().similarity_search(query, k=k, filter=where))
+    return _format(whole_images(get_vector_store().similarity_search(query, k=k, filter=where), user_id, query))
+
+
+def _part_order(doc) -> int:
+    if "part" in doc.metadata:
+        return doc.metadata["part"]
+    tail = (doc.id or "").rsplit(":", 1)[-1]  # old uploads: the chunk id's number
+    return int(tail) if tail.isdigit() else 0
+
+
+def whole_images(hits, user_id: str, query: str, vector=None) -> list:
+    """Each image hit becomes one Document with all parts of that image in reading order (label once);
+    other hits stay. Two hits on one image collapse. Added text is capped by MAX_IMAGE_CHARS per call."""
+    store, budget, done, out = get_vector_store(), MAX_IMAGE_CHARS, set(), []
+    for hit in hits:
+        meta = hit.metadata
+        if meta.get("kind") != "image" or "document_id" not in meta or "image" not in meta:
+            out.append(hit)
+            continue
+        vector = vector or get_embeddings().embed_query(query)  # only when a hit is an image
+        key = (meta["document_id"], meta["image"])
+        if key in done:
+            continue
+        done.add(key)
+        where = {"$and": [{"user_id": {"$eq": user_id}}, {"document_id": {"$eq": key[0]}},
+                          {"kind": {"$eq": "image"}}, {"image": {"$eq": key[1]}}]}
+        parts = sorted(store.similarity_search_by_vector(vector, k=IMAGE_PARTS_FETCHED, filter=where),
+                       key=_part_order) or [hit]
+        label = parts[0].page_content.split("\n", 1)[0]
+        texts = []
+        for part in parts:
+            if texts and budget <= 0:
+                break
+            text = part.page_content
+            if texts and text.startswith(label + "\n"):
+                text = text[len(label) + 1:]
+            texts.append(text)
+            budget -= len(text)
+        out.append(type(hit)(page_content="\n".join(texts), metadata=meta))
+    return out
 
 
 def _format(hits) -> str:
@@ -60,7 +101,7 @@ def _search_by_cards(user_id: str, query: str) -> str:
         if key not in seen and len(hits) < TOP_K:
             seen.add(key)
             hits.append(doc)
-    return _format(hits)
+    return _format(whole_images(hits, user_id, query, vector))
 
 
 @tool

@@ -128,6 +128,8 @@ async def read_images(user_id: str, images: list[bytes], callbacks: list) -> lis
                 readings[0] = _text(await model.ainvoke(_message(images[0]), config=config))
             except Exception as retry_exc:
                 _log_failure(retry_exc, 1)
+                if fallback_category(retry_exc) in ("unsupported", "model_not_found"):
+                    return [None] * len(images)  # the last model cannot see images either
     results = await model.abatch([_message(i) for i in images[1:]], config=config, return_exceptions=True)
     for number, result in enumerate(results, start=2):
         if isinstance(result, BaseException):

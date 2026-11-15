@@ -290,3 +290,19 @@ async def test_calls_reach_callbacks(monkeypatch):
     await read_images("u", IMGS, [marker])
     assert all(c["callbacks"] == [marker] for c in chat.configs)
     assert chat.configs[-1]["max_concurrency"] == VISION_CONCURRENCY
+
+
+async def test_image_model_also_cannot_see_images_leaves_all_unread(monkeypatch):
+    chat = FakeVision("chat", {b"one": _err(openai.BadRequestError, 400)})
+    vis = FakeVision("vis", {b"one": _err(openai.BadRequestError, 400)})
+    batches = []
+    for model in (chat, vis):
+        async def abatch(inputs, config=None, return_exceptions=False, _m=model, **kw):
+            batches.append(_m.name)
+            return []
+        model.abatch = abatch
+    _use(monkeypatch, chat, vis)
+    assert await read_images("u", IMGS, []) == [None, None, None]
+    assert chat.calls == [b"one"]
+    assert vis.calls == [b"one"]
+    assert batches == []

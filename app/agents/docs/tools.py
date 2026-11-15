@@ -65,7 +65,7 @@ def _search_by_cards(user_id: str, query: str) -> str:
 
 @tool
 async def search_documents(query: str, runtime: ToolRuntime[AgentContext], entity: str = "") -> str:
-    """Search the user's uploaded PDF/DOCX documents for passages relevant to the query.
+    """Search the user's uploaded PDF, DOCX and image documents for passages relevant to the query.
 
     Args:
         query: A focused search phrase. Works in English or Vietnamese.

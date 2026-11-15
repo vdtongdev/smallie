@@ -16,7 +16,7 @@ MIN_WORD_CHARS = 5  # words of a file name that count as mentioning it
 # File-name words that don't tell one file from a question ("final", "v2"...).
 GENERIC_NAME_WORDS = frozenset({"final", "draft", "copy", "version", "update", "updated", "scan", "scanned", "edited"})
 
-HINTS = re.compile(r"\b(documents?|files?|pdfs?|docx|uploads?|uploaded|tài liệu|tệp)\b", re.IGNORECASE)
+HINTS = re.compile(r"\b(documents?|files?|pdfs?|docx|uploads?|uploaded|images?|photos?|pictures?|screenshots?|scans?|ảnh|hình ảnh|ảnh chụp|tài liệu|tệp)\b", re.IGNORECASE)
 NAMES = re.compile(
     r"\b(?:docs?|documents?|files?|pdfs?) agent\b|\bmy (?:docs?|documents?|files?|pdfs?|uploads?)\b|\buploaded (?:docs?|documents?|files?)\b"
     r"|\b(?:tài liệu|tệp) (?:của (?:tôi|mình)|đã tải)",

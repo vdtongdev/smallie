@@ -126,3 +126,18 @@ async def test_chart_words_win_over_a_ticker_but_not_over_a_mention_of_files(mon
     assert obvious_route("vẽ một con mèo", available) is None  # drawing a picture isn't a chart
     assert obvious_route("Chart my resume's skills against NVDA", available) is None  # files too: orchestrator
     assert obvious_route("plot that", available) == "chart"
+
+
+async def test_photo_question_goes_to_docs(monkeypatch):
+    monkeypatch.setattr(sql_agent, "stock_tickers", lambda: frozenset({"AAPL"}))
+    monkeypatch.setattr(docs_agent, "document_names", lambda user_id: [("holiday.jpg", None)])
+    available = await available_agents("u1", AGENTS)
+    assert obvious_route("what's in the photo", available) == "docs"
+    assert obvious_route("ảnh chụp này nói gì", available) == "docs"
+
+
+async def test_chart_words_still_go_to_chart(monkeypatch):
+    monkeypatch.setattr(sql_agent, "stock_tickers", lambda: frozenset({"AAPL"}))
+    monkeypatch.setattr(docs_agent, "document_names", lambda user_id: [("holiday.jpg", None)])
+    available = await available_agents("u1", AGENTS)
+    assert obvious_route("chart AAPL", available) == "chart"

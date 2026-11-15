@@ -82,6 +82,8 @@ model_settings = Table(
     Column("small_model", Text),  # optional tier slots; empty falls back to `model`
     Column("strong_model", Text),
     Column("profile", Text, nullable=False, server_default="balanced"),  # economy | balanced | advanced
+    Column("image_model", Text),  # optional model that reads images (app/features/documents/images.py)
+    Column("image_model_first", Boolean, nullable=False, server_default="false"),
     Column("updated_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
 )
 
@@ -231,4 +233,9 @@ def init_db() -> None:
             "ALTER TABLE model_settings ADD COLUMN IF NOT EXISTS small_model text, "
             "ADD COLUMN IF NOT EXISTS strong_model text, "
             "ADD COLUMN IF NOT EXISTS profile text NOT NULL DEFAULT 'balanced'"
+        ))
+        # These came with image reading.
+        conn.execute(text(
+            "ALTER TABLE model_settings ADD COLUMN IF NOT EXISTS image_model text, "
+            "ADD COLUMN IF NOT EXISTS image_model_first boolean NOT NULL DEFAULT false"
         ))

@@ -79,6 +79,8 @@ def test_get_never_returns_the_key(env):
         "small_model": None,
         "strong_model": None,
         "profile": "balanced",
+        "image_model": None,
+        "image_model_first": False,
         "key_hint": "sk-…1234",
     }
     assert KEY not in r.text
@@ -203,6 +205,8 @@ def test_get_returns_slots_and_profile_never_key(env):
         "small_model": "s1",
         "strong_model": None,
         "profile": "economy",
+        "image_model": None,
+        "image_model_first": False,
         "key_hint": "sk-…1234",
     }
     assert KEY not in r.text
@@ -249,3 +253,16 @@ def test_other_user_cannot_read_slots(env):
     env.user()
     assert env.client.get("/api/model-settings").status_code == 404
     assert env.client.get("/api/model-settings/models").json() == {"models": []}
+
+
+def test_image_model_in_get_and_put(env):
+    uid = env.user()
+    r = put(env, image_model=" m1 ", image_model_first=True)
+    assert r.status_code == 200
+    assert r.json()["warnings"] == {}
+    body = env.client.get("/api/model-settings").json()
+    assert body["image_model"] == "m1"
+    assert body["image_model_first"] is True
+    r = put(env, image_model="vis")
+    assert r.json()["warnings"] == {"image_model": "This server doesn't list the image model; check the name."}
+    assert load_settings(uid).image_model == "vis"

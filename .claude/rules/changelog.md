@@ -1,6 +1,6 @@
 # Changelog and versions
 
-`CHANGELOG.md` and the `version` in `pyproject.toml` follow these rules. Update both when a release is deployed or when asked to update the changelog.
+`CHANGELOG.md` and the `version` in `pyproject.toml` follow these rules. Update both in each work branch before its PR is opened.
 
 ## Version numbers: `major.minor.patch`
 
@@ -18,11 +18,12 @@
   - A single urgent fix may be its own patch if nothing else is waiting.
 - Refactors and tooling (e.g. the project restructure, the benchmark script) don't count toward the 3–5. List them under the version they shipped with.
 
-## Finding what goes in
+## Adding this branch's items
 
-1. Find the last released version in `CHANGELOG.md`, then read every commit since it: `git log --reverse --format="%h %s%n%b"` (merge commits only matter for their branch's commits).
-2. Classify each commit: **new agent** or **architecture change** (new minor), **bug fix** or **small feature** (patch), or **other** (listed under the version it shipped with). Read the commit body; one commit can hold several fixes (e.g. "also includes earlier pending work").
+1. Read the branch's own commits: `git log --reverse --format="%h %s%n%b" main..HEAD`.
+2. Classify each commit: **new agent** or **architecture change** (new minor), **bug fix** or **small feature** (patch), or **other** (listed under the version it ships with). Read the commit body; one commit can hold several fixes (e.g. "also includes earlier pending work").
 3. A bug fix is something that behaved wrongly for the user or the operator: wrong output, wrong language, wasted calls, something slow enough to be a problem, a crash. Docs-only commits (README, CLAUDE.md) aren't listed.
+4. Add the items to `CHANGELOG.md`. If the branch's version already has a heading (an earlier branch of that version), add the bullets under it, and rename the heading to `<Feature> and fixes` when a fix joins a feature. Otherwise add the new heading; the first branch of a version also sets `version` in `pyproject.toml`.
 
 ## Format
 
@@ -40,4 +41,4 @@
 ## Keep in sync
 
 - Set `version` in `pyproject.toml` to the newest changelog version, then run `uv lock` so `uv.lock` matches (the Docker build uses `uv sync --frozen`).
-- Commit the changelog, `pyproject.toml` and `uv.lock` together, e.g. `Release 0.4.0: ...`.
+- Commit the changelog, `pyproject.toml` and `uv.lock` together in the work branch, before its PR. No separate release commit at deploy.

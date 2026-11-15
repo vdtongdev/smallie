@@ -127,6 +127,11 @@ Each specialist runs as its own private Cloud Run service, all from one image (`
 - The new database columns are added automatically at the app's start (`app/core/db.py`); no manual migration.
 - Users who want images read by a text-only chat model set an **Image model (fallback)** in Settings, on the same endpoint and key. Without one, images the chat model can't read stay unread.
 
+### Release 0.8.2 (fixes)
+
+- Redeploy all four agent services (`smallie-docs`, `smallie-sql`, `smallie-research`, `smallie-chart`): the factory's call note and the docs agent's prompts and middleware run on them. Repeat steps 4 and 5 above.
+- No database change and no app env change.
+
 ## 4. Current deployment
 
 Version 0.8.1 is deployed (2026-11-15).

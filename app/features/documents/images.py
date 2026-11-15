@@ -118,9 +118,18 @@ async def read_images(user_id: str, images: list[bytes], callbacks: list) -> lis
     try:
         readings.append(_text(await model.ainvoke(_message(images[0]), config=config)))
     except Exception as exc:
-        _log_failure(exc, 1)
+        category = fallback_category(exc)
+        switching = category in ("unsupported", "model_not_found") and len(models) > 1
+        if switching:
+            log.warning(
+                "Model %s can't read images (%s, HTTP %s); switching to %s for this file",
+                getattr(model, "model_name", ""), category, getattr(exc, "status_code", None),
+                getattr(models[1], "model_name", ""),
+            )
+        else:
+            _log_failure(exc, 1)
         readings.append(None)
-        if fallback_category(exc) in ("unsupported", "model_not_found"):
+        if category in ("unsupported", "model_not_found"):
             if len(models) == 1:  # it cannot see images and nothing else can: the rest would fail too
                 return [None] * len(images)
             model = models[1]

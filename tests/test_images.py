@@ -267,6 +267,28 @@ async def test_rate_limit_on_first_image_does_not_switch(monkeypatch):
     assert vis.calls == []
 
 
+async def test_expected_switch_logs_one_line(monkeypatch, caplog):
+    chat = FakeVision("chat", {b"one": _err(openai.NotFoundError, 404)})
+    vis = FakeVision("vis", text="seen")
+    _use(monkeypatch, chat, vis)
+    with caplog.at_level("WARNING", logger=images_mod.log.name):
+        assert await read_images("u", IMGS, []) == ["seen"] * 3
+    records = [r for r in caplog.records if r.name == images_mod.log.name and r.levelname == "WARNING"]
+    assert len(records) == 1
+    assert "switching" in records[0].getMessage()
+    assert not records[0].exc_info
+
+
+async def test_unexpected_failure_keeps_traceback(monkeypatch, caplog):
+    chat = FakeVision("chat", {b"one": _err(openai.RateLimitError, 429)})
+    _use(monkeypatch, chat, FakeVision("vis"))
+    with caplog.at_level("WARNING", logger=images_mod.log.name):
+        await read_images("u", IMGS, [])
+    records = [r for r in caplog.records if r.name == images_mod.log.name and r.levelname == "WARNING"]
+    assert len(records) == 1
+    assert records[0].exc_info
+
+
 async def test_blank_reading_counts_as_unread(monkeypatch):
     _use(monkeypatch, FakeVision("chat", text=" \n "))
     assert await read_images("u", IMGS, []) == [None, None, None]

@@ -16,7 +16,8 @@ from app.features.documents.ingest import SUPPORTED_SUFFIXES, delete_document_ch
 router = APIRouter(tags=["documents"])
 
 _PUBLIC_COLUMNS = (documents.c.id, documents.c.filename, documents.c.status,
-                   documents.c.error, documents.c.chunk_count, documents.c.created_at)
+                   documents.c.error, documents.c.chunk_count, documents.c.image_count,
+                   documents.c.images_unread, documents.c.created_at)
 
 
 @router.post("/documents", status_code=202)

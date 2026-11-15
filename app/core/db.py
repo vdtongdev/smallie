@@ -97,6 +97,8 @@ documents = Table(
     Column("status", String(16), nullable=False),  # "processing" | "ready" | "failed"
     Column("error", Text),
     Column("chunk_count", Integer, nullable=False, server_default="0"),
+    Column("image_count", Integer, nullable=False, server_default="0"),  # images read (app/features/documents/images.py)
+    Column("images_unread", Integer, nullable=False, server_default="0"),  # images found but not read
     Column("summary", Text),  # "<doc type>: <one line>" from the document card (app/features/documents/card.py)
     Column("card_embedding", Vector(get_settings().embed_dim)),  # of "<filename>: <summary>", ranks files for a search
     Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
@@ -210,6 +212,10 @@ def init_db() -> None:
         ))
         # These came with the knowledge graph.
         conn.execute(text("ALTER TABLE documents ADD COLUMN IF NOT EXISTS summary text"))
+        conn.execute(text(
+            "ALTER TABLE documents ADD COLUMN IF NOT EXISTS image_count integer NOT NULL DEFAULT 0, "
+            "ADD COLUMN IF NOT EXISTS images_unread integer NOT NULL DEFAULT 0"
+        ))
         conn.execute(text(f"ALTER TABLE documents ADD COLUMN IF NOT EXISTS card_embedding vector({get_settings().embed_dim})"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS graph_built_at timestamptz"))
         conn.execute(text("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS mined_turns integer NOT NULL DEFAULT 0"))

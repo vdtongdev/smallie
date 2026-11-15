@@ -292,6 +292,173 @@ async def test_calls_reach_callbacks(monkeypatch):
     assert chat.configs[-1]["max_concurrency"] == VISION_CONCURRENCY
 
 
+# ---------- process_document: image readings in the index and the card ----------
+
+import uuid  # noqa: E402
+
+from langchain_core.documents import Document  # noqa: E402
+from langgraph.store.memory import InMemoryStore  # noqa: E402
+from sqlalchemy import select  # noqa: E402
+
+from app.core.db import documents, get_engine  # noqa: E402
+from app.core.usage import get_usage  # noqa: E402
+from app.features.documents import card as card_module  # noqa: E402
+from app.features.documents import ingest as ingest_module  # noqa: E402
+from tests.conftest import requires_db  # noqa: E402
+from tests.test_graph import make_user  # noqa: E402,F401  (fixture)
+
+
+class FakeStore:
+    def __init__(self):
+        self.added = []
+
+    def add_documents(self, docs, ids=None):
+        self.added.extend(docs)
+
+    def delete(self, ids):
+        pass
+
+
+def _new_row(user_id: str, filename: str, path: Path) -> str:
+    document_id = str(uuid.uuid4())
+    with get_engine().begin() as conn:
+        conn.execute(documents.insert().values(id=document_id, user_id=user_id, filename=filename,
+                                               path=str(path), status="processing"))
+    return document_id
+
+
+def _row(document_id: str):
+    with get_engine().connect() as conn:
+        return conn.execute(select(documents).where(documents.c.id == document_id)).mappings().one()
+
+
+@pytest.fixture
+def store(monkeypatch):
+    fake = FakeStore()
+    monkeypatch.setattr(ingest_module, "get_vector_store", lambda: fake)
+    return fake
+
+
+@pytest.fixture
+def cards(monkeypatch):
+    written = []
+
+    async def write_card(store, document_id, user_id, filename, chunks, usage=None):
+        written.append(chunks)
+        return True
+
+    monkeypatch.setattr(card_module, "write_card", write_card)
+    return written
+
+
+@requires_db
+async def test_image_only_file_with_no_reading_fails(make_user, store, cards, monkeypatch, tmp_path):
+    user, path = make_user(), tmp_path / "a.png"
+    path.write_bytes(b"x")
+    monkeypatch.setattr(card_module, "images_in", lambda p: [(None, b"jpeg")])
+
+    async def read(user_id, images, callbacks):
+        return [None]
+
+    monkeypatch.setattr(card_module, "read_images", read)
+    document_id = _new_row(user, "a.png", path)
+    await card_module.process_document(InMemoryStore(), document_id, user, path, "a.png")
+    row = _row(document_id)
+    assert (row["status"], row["error"]) == ("failed", "No text or readable images found.")
+    assert store.added == [] and cards == []
+
+
+@requires_db
+async def test_text_and_unread_images_are_ready(make_user, store, cards, monkeypatch, tmp_path):
+    user, path = make_user(), tmp_path / "a.pdf"
+    monkeypatch.setattr(card_module, "ingest_document", lambda *a: [Document("Some text.")])
+    monkeypatch.setattr(card_module, "images_in", lambda p: [(1, b"a"), (2, b"b")])
+
+    async def read(user_id, images, callbacks):
+        return [None, None]
+
+    monkeypatch.setattr(card_module, "read_images", read)
+    document_id = _new_row(user, "a.pdf", path)
+    await card_module.process_document(InMemoryStore(), document_id, user, path, "a.pdf")
+    row = _row(document_id)
+    assert (row["status"], row["images_unread"], row["image_count"], row["chunk_count"]) == ("ready", 2, 0, 1)
+    assert len(cards) == 1
+
+
+@requires_db
+async def test_readings_are_indexed_after_text_and_counted(make_user, store, cards, monkeypatch, tmp_path):
+    user, path = make_user(), tmp_path / "a.pdf"
+    monkeypatch.setattr(card_module, "ingest_document", lambda *a: [Document("Some text.")])
+    monkeypatch.setattr(card_module, "images_in", lambda p: [(1, b"a"), (2, b"b")])
+
+    async def read(user_id, images, callbacks):
+        return ["A chart.", None]
+
+    monkeypatch.setattr(card_module, "read_images", read)
+    document_id = _new_row(user, "a.pdf", path)
+    await card_module.process_document(InMemoryStore(), document_id, user, path, "a.pdf")
+    row = _row(document_id)
+    assert (row["image_count"], row["images_unread"], row["chunk_count"]) == (1, 1, 2)
+    assert [c.metadata.get("kind") for c in store.added] == [None, "image"]
+    assert all(c.metadata["user_id"] == user and c.metadata["document_id"] == document_id for c in store.added)
+    assert len(cards[0]) == 2
+
+
+@requires_db
+async def test_corrupt_image_file_fails_cleanly(make_user, store, cards, tmp_path):
+    user, path = make_user(), tmp_path / "broken.png"
+    path.write_bytes(b"this is not an image")
+    document_id = _new_row(user, "broken.png", path)
+    await card_module.process_document(InMemoryStore(), document_id, user, path, "broken.png")
+    row = _row(document_id)
+    assert (row["status"], row["error"]) == ("failed", "No text or readable images found.")
+
+
+@requires_db
+async def test_usage_of_readings_is_added(make_user, store, monkeypatch, tmp_path):
+    user, path = make_user(), tmp_path / "a.png"
+    path.write_bytes(b"x")
+    monkeypatch.setattr(card_module, "images_in", lambda p: [(None, b"jpeg")])
+
+    async def read(user_id, images, callbacks):
+        callbacks[0].input_tokens += 7
+        callbacks[0].output_tokens += 3
+        return ["A receipt."]
+
+    def no_model(*a, **k):
+        raise RuntimeError("card model down")  # the card is best effort; the readings still count
+
+    monkeypatch.setattr(card_module, "read_images", read)
+    monkeypatch.setattr(card_module, "get_chat_model", no_model)
+    document_id = _new_row(user, "a.png", path)
+    memory = InMemoryStore()
+    await card_module.process_document(memory, document_id, user, path, "a.png")
+    assert _row(document_id)["status"] == "ready"
+    total = await get_usage(memory, user)
+    assert (total["input_tokens"], total["output_tokens"]) == (7, 3)
+
+
+def test_card_opening_keeps_readings_after_long_text():
+    text = [Document("t" * 2500), Document("u" * 2500), Document("v" * 5000)]
+    reading = Document("[Image 1]\nA stamp from Zephyr Corp.", metadata={"kind": "image"})
+    opening = card_module.card_opening([*text, reading])
+    assert card_module.CARD_CHARS == 6000 and card_module.CARD_TEXT_CHARS == 4500
+    assert opening.count("t") + opening.count("u") + opening.count("v") == 4500
+    assert "Zephyr Corp" in opening
+    assert len(opening) <= 6000
+
+
+def test_card_opening_image_file_uses_whole_budget():
+    readings = [Document("r" * 5000, metadata={"kind": "image"}), Document("s" * 5000, metadata={"kind": "image"})]
+    opening = card_module.card_opening(readings)
+    assert len(opening) == 6000 and opening.count("r") == 5000 and opening.count("s") == 999
+
+
+def test_card_opening_without_readings_is_the_text_opening():
+    opening = card_module.card_opening([Document("a" * 5000), Document("b" * 5000)])
+    assert len(opening) == 6000
+
+
 async def test_image_model_also_cannot_see_images_leaves_all_unread(monkeypatch):
     chat = FakeVision("chat", {b"one": _err(openai.BadRequestError, 400)})
     vis = FakeVision("vis", {b"one": _err(openai.BadRequestError, 400)})

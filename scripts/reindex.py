@@ -15,17 +15,19 @@ from app.core.config import get_settings
 from app.core.db import documents, get_engine, graph_nodes, init_db
 from app.core.graph import embed_cards
 from app.core.llm import get_embeddings
-from app.features.documents.ingest import delete_document_chunks, ingest_document
+from app.core.usage import UsageCounter
+from app.features.documents.card import index_file
+from app.features.documents.ingest import delete_document_chunks
 from app.core.memory import MAX_INDEXED_DIMS, open_persistence
 
 
-def reindex_documents() -> None:
+async def reindex_documents() -> None:
     with get_engine().connect() as conn:
         rows = conn.execute(select(documents).where(documents.c.status != "processing")).mappings().all()
     for row in rows:
         print(f"  {row['filename']} ...", end=" ", flush=True)
-        delete_document_chunks(row["id"], row["chunk_count"])
-        ingest_document(row["id"], row["user_id"], Path(row["path"]), row["filename"])
+        await asyncio.to_thread(delete_document_chunks, row["id"], row["chunk_count"])
+        await index_file(row["id"], row["user_id"], Path(row["path"]), row["filename"], UsageCounter())
         with get_engine().connect() as conn:
             status = conn.execute(select(documents.c.status).where(documents.c.id == row["id"])).scalar_one()
         print(status)
@@ -75,6 +77,12 @@ async def reembed_memories() -> int:
         return len(items)
 
 
+def run(coroutine):
+    if sys.platform == "win32":  # psycopg's async driver fails on the Proactor loop
+        return asyncio.run(coroutine, loop_factory=asyncio.SelectorEventLoop)
+    return asyncio.run(coroutine)
+
+
 def main() -> None:
     settings = get_settings()
     if not settings.embed_api_key:
@@ -82,13 +90,10 @@ def main() -> None:
     print(f"Embedding model: {settings.openrouter_embed_model} ({settings.embed_dim} dims)")
     init_db()
     print("Documents:")
-    reindex_documents()
+    run(reindex_documents())
     print("Memories:")
     resize_memory_vectors(settings.embed_dim)
-    if sys.platform == "win32":
-        count = asyncio.run(reembed_memories(), loop_factory=asyncio.SelectorEventLoop)
-    else:
-        count = asyncio.run(reembed_memories())
+    count = run(reembed_memories())
     print(f"  re-embedded {count} memories")
     print(f"Knowledge graph: re-embedded {reembed_graph(settings.embed_dim)} entities")
     print(f"Document cards: re-embedded {reembed_cards(settings.embed_dim)}")

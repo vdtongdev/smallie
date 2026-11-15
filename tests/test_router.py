@@ -150,3 +150,47 @@ async def test_influence_is_not_a_photo(monkeypatch):
     assert obvious_route("ảnh hưởng của lạm phát", available) != "docs"
     assert obvious_route("tăng trưởng ảnh hưởng", available) != "docs"
     assert obvious_route("ảnh này nói gì", available) == "docs"
+
+
+async def test_screen_shot_in_two_words_routes_to_docs(monkeypatch):
+    monkeypatch.setattr(sql_agent, "stock_tickers", lambda: frozenset({"AAPL"}))
+    monkeypatch.setattr(docs_agent, "document_names", lambda user_id: [("holiday.jpg", None)])
+    available = await available_agents("u1", AGENTS)
+    assert obvious_route("what can you tell me about the screen shot", available) == "docs"
+    assert obvious_route("what is in the snap shot", available) == "docs"
+
+
+def _after_docs_answer(text):
+    return {"messages": [HumanMessage("what is in the file"), AIMessage("It lists RAM specs.", name="docs_agent"), HumanMessage(text)]}
+
+
+def _stub_agents(monkeypatch):
+    monkeypatch.setattr(sql_agent, "stock_tickers", lambda: frozenset({"AAPL"}))
+    monkeypatch.setattr(docs_agent, "document_names", lambda user_id: [("holiday.jpg", None)])
+
+
+async def test_short_follow_up_goes_back_to_the_previous_specialist(monkeypatch):
+    _stub_agents(monkeypatch)
+    router = router_module.build_router()
+    assert await router(_after_docs_answer("you don't give me the numbers"), _runtime()) == {"route": "docs", "direct": True}
+
+
+async def test_small_talk_after_a_specialist_stays_with_orchestrator(monkeypatch):
+    _stub_agents(monkeypatch)
+    router = router_module.build_router()
+    assert await router(_after_docs_answer("thanks!"), _runtime()) == {"route": ORCHESTRATOR, "direct": False}
+
+
+async def test_follow_up_naming_another_agent_is_not_sticky(monkeypatch):
+    _stub_agents(monkeypatch)
+    router = router_module.build_router()
+    result = await router(_after_docs_answer("and the AAPL price"), _runtime())
+    assert result["route"] != "docs"
+
+
+async def test_long_new_question_is_not_a_follow_up(monkeypatch):
+    _stub_agents(monkeypatch)
+    router = router_module.build_router()
+    text = "how many vacation days does a new employee get after year"
+    assert len(text.split()) == 11
+    assert await router(_after_docs_answer(text), _runtime()) == {"route": ORCHESTRATOR, "direct": False}

@@ -132,6 +132,12 @@ Each specialist runs as its own private Cloud Run service, all from one image (`
 - Redeploy all four agent services (`smallie-docs`, `smallie-sql`, `smallie-research`, `smallie-chart`): the factory's call note and the docs agent's prompts and middleware run on them. Repeat steps 4 and 5 above.
 - No database change and no app env change.
 
+### Release 0.8.3 (fixes)
+
+- Redeploy the docs agent service (`smallie-docs`): its prompts and first-search middleware changed. Repeat steps 4 and 5 above for it. The app itself (router) is redeployed as in section 2.
+- After deploying, run the image re-chunk once, with the app stopped: `uv run python -m scripts.rechunk_images`. It rebuilds the stored image chunks in the labelled form and re-embeds them (embeddings only, no model calls). Image readings stored before 0.8.3 keep their flat text until then.
+- No database schema change and no app env change.
+
 ## 4. Current deployment
 
 Version 0.8.1 is deployed (2026-11-15).

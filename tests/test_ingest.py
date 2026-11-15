@@ -96,3 +96,33 @@ def test_image_file_has_no_text_chunks(tmp_path: Path):
     path = tmp_path / "scan.png"
     path.write_bytes(b"not read here")
     assert load_and_split(path, "scan.png") == []
+
+
+def _dense_reading() -> str:
+    return "\n".join(f"key {n}: value {n}" for n in range(100))
+
+
+def test_every_image_chunk_starts_with_its_label():
+    from app.features.documents.ingest import image_chunks
+
+    reading = _dense_reading()
+    assert len(reading) > 1500
+    chunks = image_chunks([None, reading], [None, 3], "f.pdf")
+
+    assert len(chunks) > 1
+    assert all(c.page_content.startswith("[Image 2, p. 3]\n") for c in chunks)
+    assert [c.metadata["part"] for c in chunks] == list(range(len(chunks)))
+    assert all(len(c.page_content) <= 800 for c in chunks)
+
+
+def test_image_chunks_split_on_lines_without_overlap():
+    from app.features.documents.ingest import image_chunks
+
+    reading = _dense_reading()
+    chunks = image_chunks([None, reading], [None, 3], "f.pdf")
+
+    label = "[Image 2, p. 3]\n"
+    bodies = [c.page_content.removeprefix(label) for c in chunks]
+    assert "\n".join(bodies) == reading
+    lines = reading.split("\n")
+    assert all(line in lines for body in bodies for line in body.split("\n"))

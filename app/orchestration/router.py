@@ -15,10 +15,16 @@ from langchain_core.messages import AIMessage, BaseMessage
 from langgraph.runtime import Runtime
 
 from app.agents import registry
-from app.agents.base import AgentSpec, RouteInfo
+from app.agents.base import AgentSpec, RouteInfo, message_routes
 from app.core.memory import TEAM_MODE, AgentContext
 
 ORCHESTRATOR = "orchestrator"  # graph node, route, SSE `agent` name and AIMessage.name of the front door
+
+
+FOLLOW_UP_WORDS = 10  # a message this short, naming no agent, continues the last specialist's answer
+SMALL_TALK_WORDS = frozenset(
+    "thanks thank you so much very a lot ok okay great cool nice bye hi hello cảm ơn bạn nhé nhiều tạm biệt chào rất".split()
+)  # a message made only of these stays with the orchestrator
 
 
 class AssistantState(AgentState):
@@ -63,6 +69,20 @@ def obvious_route(message: str, available: list[tuple[AgentSpec, RouteInfo]]) ->
     return winners[0]
 
 
+def follow_up_route(messages: list[BaseMessage], available: list[tuple[AgentSpec, RouteInfo]], specs: Sequence[AgentSpec]) -> str | None:
+    """The route of the previous answer when the latest message is a short follow-up that
+    names no agent and isn't small talk, and that agent can answer directly; else None."""
+    latest = messages[-1].text
+    words = [word.strip(".!?…,;:\"'()").lower() for word in latest.split()]
+    if len(words) > FOLLOW_UP_WORDS or all(word in SMALL_TALK_WORDS for word in words) or mentioned_routes(latest, available):
+        return None
+    last_answer = next((m for m in reversed(messages[:-1]) if isinstance(m, AIMessage)), None)
+    route = message_routes(specs).get(last_answer.name) if last_answer else None
+    if any(spec.route == route and spec.answers_directly for spec in specs):
+        return route
+    return None
+
+
 def build_router(specs: Sequence[AgentSpec] = registry.AGENTS):
     async def router(state: AssistantState, runtime: Runtime[AgentContext]) -> dict:
         context = runtime.context
@@ -73,6 +93,7 @@ def build_router(specs: Sequence[AgentSpec] = registry.AGENTS):
         available = await available_agents(context.user_id, specs)
         latest = state["messages"][-1].text
         route = await asyncio.to_thread(obvious_route, latest, available)
+        route = route or follow_up_route(state["messages"], available, specs)
         return {"route": route or ORCHESTRATOR, "direct": bool(route)}
 
     return router

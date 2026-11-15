@@ -354,3 +354,20 @@ Versions are `major.minor.patch`: the major version stays 0 for now, each minor 
   - The image rule now says to answer from the stored reading, citing it like any passage
   - Cost: a docs-routed message that wouldn't have searched (e.g. a greeting) now makes one more model call
   - Operator notes: redeploy all four agent services (`DEPLOYING.md`, section 3)
+
+## 0.8.3 - Fixes
+- **Fix: agents describe an uploaded image but don't give its values**
+  - The image's reading held every value, but it was split into a description piece and a values piece; a vague question ("give me the detail of the image") only found the description piece
+  - The docs agent was told to search first, but the model provider ignored that, so it answered from the chat without searching
+  - The orchestrator answered questions about the file from its one-line file summary instead of asking the docs agent, and once invented placeholder values
+  - The reading prompt didn't ask for labels next to values or tables as tables, so some models put each label and value on its own line (a risk for other images, not the cause here)
+  - `IMAGE_PROMPT` (`app/features/documents/prompts.py`) now asks for a description, then the content as `label: value` lines and Markdown tables with every cell, `(empty)` for an empty field; units and IDs are copied as written
+  - Image chunks (`image_chunks`, `app/features/documents/ingest.py`) start with their `[Image N]` or `[Image N, p. P]` label, each carries a `part` number, and a long reading is split on lines with no overlap
+  - A search hit on any part of an image returns that image's whole reading, in order, capped at 6,000 characters per search (`whole_images`, `app/agents/docs/tools.py`). It costs at most one extra embedding call per search, and only when an image is hit
+  - The docs agent's first search runs in code before its first model call, with the user's message as the query (`prefetch_search`, `app/agents/docs/agent.py`, replacing 0.8.2's `search_first`). A failed search becomes an error tool result, not a crash. The search always shows in the chat as a `search_documents` tool event
+  - Routing (`app/orchestration/router.py`): "screen shot" routes to docs, and a short follow-up (at most 10 words, naming no other agent, not only small-talk words) goes back to the specialist whose answer came right before it
+  - Prompts: the docs agent gives every label with its value and every table row, never a placeholder; the orchestrator treats file notes as labels, not contents
+  - Measured on the user's real CPU-Z screenshot, three messages in one chat ("what can you tell me about the screen shot", "give me the detail of the image", "you don't give me the numbers"), on `deepseek/deepseek-chat`: 0.8.2 routed the first and last message to the orchestrator and the middle one to docs without a search, gave no values, and invented placeholders in the third answer; 3 calls, about $0.0056. 0.8.3 answered all three from docs, each with the part number, serial, size, speed, maker and timing values (9 of 10 checked values; the week and year were left out); 3 calls, about $0.0044
+  - Reading cost: about +$0.0001 per image on Gemini 2.5 Flash ($0.00125 against $0.00114)
+  - Limit: with a reading stored before 0.8.3 (flat text, no table), the model condenses the timings table, e.g. "tRAS: 50, 52" instead of one value per profile, and may skip fields. Uploading the image again gives the new table format; for older files run the re-chunk step below
+  - Operator notes: redeploy the docs agent service (its prompts and middleware changed) and the orchestrator's app (the router). Run `uv run python -m scripts.rechunk_images` once after deploying, with the app stopped: it rebuilds stored image chunks in the labelled form and re-embeds them, with no model calls (`DEPLOYING.md`, section 3)

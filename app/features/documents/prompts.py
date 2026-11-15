@@ -9,10 +9,17 @@ Rules:
 
 
 # Text part of the message that asks a vision model to read one image (app/features/documents/images.py); never formatted.
-IMAGE_PROMPT = """You read one image so its content can be searched later.
+IMAGE_PROMPT = """You read one image so its content can be searched later. Answer in two parts, in this order.
 
-Rules:
-1. Describe what the image shows in a few plain sentences: the kind of picture, the objects, people, layout, and the parts of a chart, table or diagram.
-2. Then transcribe every piece of text in the image exactly as written, in its original language. Keep numbers, names and symbols unchanged. Do not translate.
-3. If the image has no text, write "No text." for the transcription.
-4. Write only what is visible. Do not guess or add background knowledge."""
+DESCRIPTION:
+One to three sentences: the kind of image (screenshot, receipt, form, table, chart, photo or scanned page) and what it is about.
+
+CONTENT:
+1. Write every text and number exactly as written in the image, in its original language. Do not translate, round or summarise.
+2. For a form, a settings window, a receipt or a key-value panel, write one line per field as `<label>: <value>`.
+3. For a table, write a Markdown table with a header row. Fill every cell, including empty ones.
+4. For an empty field, write `<label>: (empty)`.
+5. Keep units, signs, decimals, codes and IDs unchanged.
+6. For a chart, write its title, its axis labels, its legend and every readable value.
+7. If the image has no text, write "No text." under CONTENT.
+8. Write only what is visible. Do not guess and do not add background knowledge."""

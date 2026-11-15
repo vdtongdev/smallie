@@ -3,6 +3,7 @@ which can't send it back or ask the same thing again and again."""
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
+from app.agents.docs import tools as docs_tools
 from app.agents.docs.agent import SPEC as DOCS
 from app.agents.sql.agent import SPEC as SQL
 from app.orchestration.fallback import attempt_summary
@@ -49,6 +50,8 @@ async def test_a_specialist_that_finds_nothing_falls_back_to_the_orchestrator(mo
         docs=[AIMessage("I couldn't find anything about salaries in your documents.")],
         orchestrator=[AIMessage("Salaries are not in the handbook; typical ranges are…")],
     )
+    monkeypatch.setattr(docs_tools, "search_with_graph",
+                        lambda user_id, query, entity="": "[handbook.pdf, p. 1]\nLeave policy: 25 days per year.")
     assistant = _assistant(monkeypatch, model)
     events = await _run(assistant, "what does the handbook say about salaries?")
 

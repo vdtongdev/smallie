@@ -28,7 +28,7 @@ export default function ReadmeEn({ marketStatus, onExample }: { marketStatus: st
           <p>Answers from the PDF and Word files you upload, and cites the file and page.</p>
           <p>You can also upload images (PNG, JPG, WEBP). Images inside PDF and Word files, and scanned PDFs, are read once at upload by your chat model, or by the image model set in Settings.</p>
           <ol>
-            <li>Click <strong>Upload PDF / DOCX</strong> and choose one or more files (up to 25 MB each).</li>
+            <li>Click <strong>Upload PDF, DOCX or image</strong> and choose one or more files: PDF, DOCX or images (PNG, JPG, WEBP), up to 25 MB each.</li>
             <li>Wait until the file shows <em>ready</em>. Indexing takes a few seconds to a minute.</li>
             <li>Ask a question. Click an example to put it in the message box:</li>
           </ol>

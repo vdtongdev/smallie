@@ -1,4 +1,4 @@
-"""PDF/DOCX -> text chunks -> embeddings in pgvector, tagged with the owner's user_id."""
+"""PDF/DOCX/image -> text chunks -> embeddings in pgvector, tagged with the owner's user_id."""
 
 import logging
 from functools import lru_cache

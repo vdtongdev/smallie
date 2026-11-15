@@ -141,3 +141,12 @@ async def test_chart_words_still_go_to_chart(monkeypatch):
     monkeypatch.setattr(docs_agent, "document_names", lambda user_id: [("holiday.jpg", None)])
     available = await available_agents("u1", AGENTS)
     assert obvious_route("chart AAPL", available) == "chart"
+
+
+async def test_influence_is_not_a_photo(monkeypatch):
+    monkeypatch.setattr(sql_agent, "stock_tickers", lambda: frozenset({"AAPL"}))
+    monkeypatch.setattr(docs_agent, "document_names", lambda user_id: [("holiday.jpg", None)])
+    available = await available_agents("u1", AGENTS)
+    assert obvious_route("ảnh hưởng của lạm phát", available) != "docs"
+    assert obvious_route("tăng trưởng ảnh hưởng", available) != "docs"
+    assert obvious_route("ảnh này nói gì", available) == "docs"

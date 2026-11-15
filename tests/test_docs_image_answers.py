@@ -6,6 +6,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from app.agents import factory
 from app.agents.docs import agent as docs_agent
 from app.agents.docs import tools as docs_tools
+from app.agents.research import agent as research_agent
 from app.core.memory import AgentContext
 from tests.scripted import ScriptedModel
 
@@ -68,3 +69,11 @@ async def test_english_question_gets_the_reply_language_named_in_the_request(mon
     request = model.prompts[0]
     after_the_question = "\n".join(m.text for m in request[request.index(next(m for m in request if m.text == QUESTION)):])
     assert "English" in after_the_question, after_the_question
+
+
+async def test_solo_research_agent_is_not_forced_to_search_documents(monkeypatch):
+    model = _model(monkeypatch)
+    monkeypatch.setattr(research_agent, "describe_schema", lambda: "")
+    workflow = research_agent.build_research_workflow()
+    await workflow.ainvoke({"messages": [HumanMessage(QUESTION)]}, context=AgentContext(user_id="u"))
+    assert model.forced and model.forced[0] != "search_documents", model.forced

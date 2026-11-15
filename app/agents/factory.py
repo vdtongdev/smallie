@@ -180,6 +180,13 @@ async def scope_tools(request: ModelRequest, handler):
         tools=[t for t in request.tools if _in_scope(t, context.sources) and t.name not in context.deny_tools]))
 
 
+def is_first_call(request: ModelRequest) -> bool:
+    """True while the turn has no tool result yet after the user's latest message."""
+    last_human = max((i for i, m in enumerate(request.messages) if isinstance(m, HumanMessage) and m.name != CALL_NOTE),
+                     default=-1)
+    return not any(isinstance(m, ToolMessage) for m in request.messages[last_human + 1:])
+
+
 @wrap_model_call
 async def source_first(request: ModelRequest, handler):
     """In a team request an agent with source tools in scope must call one on its first model call
@@ -189,9 +196,7 @@ async def source_first(request: ModelRequest, handler):
     if request.tool_choice == "none":
         return await handler(request)
     context = request.runtime.context
-    last_human = max((i for i, m in enumerate(request.messages) if isinstance(m, HumanMessage) and m.name != CALL_NOTE),
-                     default=-1)
-    first_call = not any(isinstance(m, ToolMessage) for m in request.messages[last_human + 1:])
+    first_call = is_first_call(request)
     names = [t.name for t in request.tools if (getattr(t, "metadata", None) or {}).get(TOOL_SOURCE)
              and _in_scope(t, context.sources)]
     if context.agent != TEAM_MODE or not context.sources or not first_call or not names:

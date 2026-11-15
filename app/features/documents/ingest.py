@@ -23,6 +23,18 @@ SUPPORTED_SUFFIXES = {".pdf", ".docx"} | IMAGE_SUFFIXES
 
 # ~800 characters keeps chunks well under 512 tokens even for Vietnamese text.
 _splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=120)
+# Image readings split on lines, no overlap; room is left for the label line each chunk starts with.
+_LABEL_ROOM = 40
+_image_splitter = RecursiveCharacterTextSplitter(
+    chunk_size=800 - _LABEL_ROOM, chunk_overlap=0, separators=["
+
+", "
+", " ", ""]
+)
+
+
+def IMAGE_LABEL(number: int, page: int | None) -> str:
+    return f"[Image {number}, p. {page}]" if page else f"[Image {number}]"
 
 
 @lru_cache
@@ -67,12 +79,14 @@ def image_chunks(readings: list[str | None], pages: list[int | None], filename: 
     for number, (reading, page) in enumerate(zip(readings, pages), start=1):
         if not reading or not reading.strip():
             continue
-        label = f"[Image {number}, p. {page}]" if page else f"[Image {number}]"
-        metadata = {"filename": filename, "kind": "image", "image": number}
-        if page:
-            metadata["page"] = page
-        found.append(Document(f"{label}\n{reading.strip()}", metadata=metadata))
-    return _splitter.split_documents(found)
+        label = IMAGE_LABEL(number, page)
+        for part, piece in enumerate(_image_splitter.split_text(reading.strip())):
+            metadata = {"filename": filename, "kind": "image", "image": number, "part": part}
+            if page:
+                metadata["page"] = page
+            found.append(Document(f"{label}
+{piece}", metadata=metadata))
+    return found
 
 
 def ingest_document(document_id: str, user_id: str, path: Path, filename: str) -> list[Document] | None:

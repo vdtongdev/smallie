@@ -190,7 +190,7 @@ Decides which agent or the orchestrator handles the message **without calling a 
 
 **Hints** (keyword regex):
 
-- docs: "documents", "files", "PDFs", "uploads", "tài liệu"
+- docs: "documents", "files", "PDFs", "uploads", "images", "screen shot", "tài liệu" (the full list is `HINTS` in `app/agents/docs/agent.py`)
 - sql: "stocks", "tickers", "market cap", "p/e", "cổ phiếu"
 - chart: "chart", "plot", "graph" (overrides sql for "chart AAPL")
 - research: "research", "look it up", "search online", "latest news"
@@ -209,6 +209,7 @@ Decides which agent or the orchestrator handles the message **without calling a 
 - Research always continues to the orchestrator (router → research → orchestrator writes up the findings)
 - The chart agent has `overrides=("sql",)` ("chart AAPL" goes to chart, not sql)
 - No documents uploaded: the docs agent is unavailable and skipped in routing
+- Follow-up (since 0.8.3, `follow_up_route`, `app/orchestration/router.py`): a message of at most 10 words that names no other agent, and is not only small-talk words, goes to the specialist whose answer came right before it. Only after a specialist's answer, not the orchestrator's
 
 ---
 
@@ -301,8 +302,8 @@ Answers from the user's uploaded PDF, DOCX and image files using RAG (Retrieval-
 1. The user uploads a file via POST `/api/documents`: PDF, DOCX, PNG, JPG, JPEG or WEBP. An image file is refused (400) when the user has no model settings, because it could never be read
 2. A FastAPI background task:
    - splits the text into chunks: 800 characters, 120 overlap
-   - reads the images: every image in a PDF or DOCX (a scanned PDF is one image per page), or the image file itself. Up to 20 per file; images under 100 px are skipped, the rest are shrunk to 1600 px and sent as JPEG. Each image is read once, at upload, into a plain-text description plus every piece of text on it
-   - the image readings become chunks after the text chunks, starting `[Image N, p. P]` (no page for an image file or DOCX), with metadata `kind="image"`, `image` and `page`; text chunks have no `kind`
+   - reads the images: every image in a PDF or DOCX (a scanned PDF is one image per page), or the image file itself. Up to 20 per file; images under 100 px are skipped, the rest are shrunk to 1600 px and sent as JPEG. Each image is read once, at upload (`IMAGE_PROMPT`): a DESCRIPTION, then the CONTENT as `label: value` lines and Markdown tables with every cell (`(empty)` for an empty field; units and IDs as written)
+   - the image readings become chunks after the text chunks (`image_chunks`, `app/features/documents/ingest.py`). Each chunk starts with its label, `[Image N, p. P]` (no page for an image file or DOCX), and carries metadata `kind="image"`, `image`, `part` and `page`; a long reading is split on lines with no overlap. Text chunks have no `kind`
    - embeds each chunk with baai/bge-m3 (1024 dims)
    - stores them in the pgvector collection "documents", with deterministic ids `"{document_id}:{i}"` (used for deletion)
    - sets the status to "ready" or "failed". A file fails only with no text and no readable image ("No text or readable images found."). It records `image_count` (images read) and `images_unread` (images found but not read)
@@ -323,7 +324,8 @@ Answers from the user's uploaded PDF, DOCX and image files using RAG (Retrieval-
 - Graph scope: `entity` or a known entity in the question that the graph links to some files; only those files are searched
 - No scope: the query is embedded once; the `CARD_FILES` = 3 files nearest by `card_embedding` each get one reserved slot with their best passage, nearest card first; the unscoped top `TOP_K` fills the rest, skipping duplicates, so a large file cannot crowd out a small one. With no card vectors, the plain unscoped search
 - Falls back to all files if the scoped search finds nothing
-- Search first (since 0.8.2): the docs agent's first model call of each turn must call `search_documents`, in one-to-one chats as well as team mode (`search_first` middleware, `app/agents/docs/agent.py`). A greeting or a question about the user therefore also costs one search call; a call already barred from tools stays barred. Research is not forced
+- Prefetch search (since 0.8.3, replacing 0.8.2's `search_first`): the docs agent's first search runs in code before its first model call, in one-to-one chats as well as team mode (`prefetch_search` middleware, `app/agents/docs/agent.py`), with the user's message as the query. The search is put in the history as the model's own `search_documents` call, so it always shows as a tool event. A failed search becomes an error tool result, not a crash. Research is not forced
+- Whole-image retrieval (since 0.8.3): a hit on any part of an image returns that image's whole reading, in order, capped at 6,000 characters per search (`whole_images`, `app/agents/docs/tools.py`). At most one extra embedding call per search, and only when an image is hit
 
 ### Citations
 

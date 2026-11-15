@@ -26,10 +26,7 @@ _splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=120)
 # Image readings split on lines, no overlap; room is left for the label line each chunk starts with.
 _LABEL_ROOM = 40
 _image_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=800 - _LABEL_ROOM, chunk_overlap=0, separators=["
-
-", "
-", " ", ""]
+    chunk_size=800 - _LABEL_ROOM, chunk_overlap=0, separators=["\n\n", "\n", " ", ""]
 )
 
 
@@ -84,8 +81,7 @@ def image_chunks(readings: list[str | None], pages: list[int | None], filename: 
             metadata = {"filename": filename, "kind": "image", "image": number, "part": part}
             if page:
                 metadata["page"] = page
-            found.append(Document(f"{label}
-{piece}", metadata=metadata))
+            found.append(Document(f"{label}\n{piece}", metadata=metadata))
     return found
 
 

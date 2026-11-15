@@ -95,6 +95,10 @@ Say briefly what you could not check.
 Write the answer in {language}."""
 
 
+# Last line of every call note that is not the last call; formatted with `language` (reply_language).
+REPLY_LANGUAGE_NOTE = "Reply in {language}."
+
+
 SAME_RESULT = """This is the same result as your earlier call of {name}. It has nothing new.
 Use what you already have.
 Call {name} again only to look for something else."""

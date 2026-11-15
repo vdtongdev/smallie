@@ -271,7 +271,7 @@ The "front door" agent. Answers general questions itself, asks specialists as to
 - `trim_tool_calls` middleware (`app/agents/factory.py`, every agent) drops repeated tool calls of one model reply and keeps at most 8 (`MAX_TOOL_CALLS_PER_STEP`)
 - `MAX_OUTPUT_TOKENS` (default 32768, reasoning tokens count too) ends a reply that repeats itself, instead of letting it run to 131k tokens
 - `CHAT_TEMPERATURE` (default 0.3) is the sampling temperature of chat models; at 0 a repeating reply keeps repeating, higher values let weaker models slip words of another script into Vietnamese answers
-- `make_call_note` middleware (`app/agents/factory.py`, every agent) adds the agent's tail note to every model call (section 9); on the last call the limit allows, it also makes the answer: no tool choice, `LAST_CALL_NOTE` (naming the reply language) in the same note, and any tool call the model makes anyway is dropped. The orchestrator's limit is `last_call_writes=False`, so it never writes that way
+- `make_call_note` middleware (`app/agents/factory.py`, every agent) adds the agent's tail note to every model call (section 9), ending with the reply language: `REPLY_LANGUAGE_NOTE` ("Reply in <language>.") on every call but the last; on the last call the limit allows, it also makes the answer: no tool choice, `LAST_CALL_NOTE` (naming the reply language) in place of it, and any tool call the model makes anyway is dropped. The orchestrator's limit is `last_call_writes=False`, so it never writes that way
 - `tool_errors` middleware (`app/agents/factory.py`, every agent) returns a tool's exception to the model as an error result instead of ending the run; interrupts and handoffs (`GraphBubbleUp`) pass through
 
 ### Handoff
@@ -323,6 +323,7 @@ Answers from the user's uploaded PDF, DOCX and image files using RAG (Retrieval-
 - Graph scope: `entity` or a known entity in the question that the graph links to some files; only those files are searched
 - No scope: the query is embedded once; the `CARD_FILES` = 3 files nearest by `card_embedding` each get one reserved slot with their best passage, nearest card first; the unscoped top `TOP_K` fills the rest, skipping duplicates, so a large file cannot crowd out a small one. With no card vectors, the plain unscoped search
 - Falls back to all files if the scoped search finds nothing
+- Search first (since 0.8.2): the docs agent's first model call of each turn must call `search_documents`, in one-to-one chats as well as team mode (`search_first` middleware, `app/agents/docs/agent.py`). A greeting or a question about the user therefore also costs one search call; a call already barred from tools stays barred. Research is not forced
 
 ### Citations
 
@@ -586,7 +587,7 @@ Each model request is laid out from the most stable part to the least stable, so
 7. the thread's messages
 8. the tail note: per-call text added as the last message (`build_agent(tail=...)`, `make_call_note`), never saved; on the orchestrator's first turn of an onboarding chat it ends with `BOOTSTRAP_SECTION`
 
-Items 2 to 6 are the system prompt. While the snapshot is fresh they stay the same across a chat's turns, so the provider's cache can reuse them. The tail note holds what changes per call or per day: the orchestrator's notes, reply language and (while composing) the format rules (`compose_section`), the chart agent's tables (`tables_section`), the researcher's date (`TODAY_NOTE`), and on a chat's first turn with onboarding the question (`BOOTSTRAP_SECTION`, last). The `prompt_extra` in item 6 comes after the memory sections in the code, so a new snapshot changes what follows it too.
+Items 2 to 6 are the system prompt. While the snapshot is fresh they stay the same across a chat's turns, so the provider's cache can reuse them. The tail note holds what changes per call or per day: the orchestrator's notes, the reply language (every agent, `make_call_note`) and (while composing) the format rules (`compose_section`), the chart agent's tables (`tables_section`), the researcher's date (`TODAY_NOTE`), and on a chat's first turn with onboarding the question (`BOOTSTRAP_SECTION`, last). The `prompt_extra` in item 6 comes after the memory sections in the code, so a new snapshot changes what follows it too.
 
 The prompt text lives in Markdown files, so it can be edited without touching Python: `SOUL` in `app/core/layers/SOUL.md`; the shared rules (`LANGUAGE_RULE`, `MEMORY_RULE`) in `app/core/layers/AGENTS.md`, split into sections; USER in `app/core/layers/USER.md` (sections `user`, `profile`); MEMORY in `app/core/layers/MEMORY.md` (sections `notes`, `memories`, `recent_chats`); the orchestrator and its onboarding in `app/orchestration/AGENTS.md` and `app/orchestration/BOOTSTRAP.md`; each specialist's system prompt in `app/agents/<name>/AGENTS.md` (the researcher has no `SOUL`). The Python loaders in `app/core/prompts.py` read each file once at import and build the same constants as before, so the request layout above does not change. Under `uvicorn --reload`, edits to `.md` files restart the server.
 

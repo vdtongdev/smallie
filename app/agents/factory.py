@@ -32,7 +32,7 @@ from app.core.config import get_settings
 from app.core.llm import get_chat_model, pick_model, placeholder_model
 from app.core.memory import MEMORY_TOOLS, TEAM_MODE, TOOL_SOURCE, AgentContext
 from app.core.model_settings import load_settings
-from app.core.prompts import CALL_NOTE, CHAT_DATA_SECTION, LAST_CALL_NOTE, MEMORIES_SECTION, NOTES_SECTION, PROFILE_SECTION, RECENT_CHATS_SECTION, SAME_RESULT, SOLO_VOICE, TEAM_VOICE, USER_SECTION, reply_language
+from app.core.prompts import CALL_NOTE, CHAT_DATA_SECTION, LAST_CALL_NOTE, MEMORIES_SECTION, NOTES_SECTION, PROFILE_SECTION, RECENT_CHATS_SECTION, REPLY_LANGUAGE_NOTE, SAME_RESULT, SOLO_VOICE, TEAM_VOICE, USER_SECTION, reply_language
 
 log = logging.getLogger(__name__)
 
@@ -143,8 +143,8 @@ def trim_tool_calls(state, runtime):
 
 def make_call_note(tail: Callable[[ModelRequest], str | Awaitable[str]] | None, limit: int, last_call_writes: bool):
     """Per-call text goes last in the request, so the system prompt and the messages before it stay the
-    same from call to call: `tail(request)`, then `TEAM_VOICE` in team mode (else `SOLO_VOICE`), plus on the last model call the limit allows (when the agent
-    writes then) a note naming the reply language, no tool choice, and any tool call the model makes
+    same from call to call: `tail(request)`, then `TEAM_VOICE` in team mode (else `SOLO_VOICE`), then the reply language by name (`REPLY_LANGUAGE_NOTE`), plus on the last model call the limit allows (when the agent
+    writes then) a note about the last step, no tool choice, and any tool call the model makes
     anyway dropped. The note is in the request only, not saved."""
 
     @wrap_model_call
@@ -156,9 +156,9 @@ def make_call_note(tail: Callable[[ModelRequest], str | Awaitable[str]] | None, 
         voice = TEAM_VOICE if request.runtime.context.agent == TEAM_MODE else SOLO_VOICE
         text = f"{text}\n\n{voice}" if text else voice
         last = last_call_writes and request.state.get("run_model_call_count", 0) == limit - 1
-        if last:
-            text = f"{text}\n\n" if text else ""
-            text += LAST_CALL_NOTE.format(language=reply_language(request.messages))
+        language = reply_language(request.messages)
+        note = LAST_CALL_NOTE if last else REPLY_LANGUAGE_NOTE
+        text = f"{text}\n\n{note.format(language=language)}"
         if text:
             request = request.override(messages=[*request.messages, HumanMessage(text, name=CALL_NOTE)])
         if not last:
@@ -180,6 +180,13 @@ async def scope_tools(request: ModelRequest, handler):
         tools=[t for t in request.tools if _in_scope(t, context.sources) and t.name not in context.deny_tools]))
 
 
+def is_first_call(request: ModelRequest) -> bool:
+    """True while the turn has no tool result yet after the user's latest message."""
+    last_human = max((i for i, m in enumerate(request.messages) if isinstance(m, HumanMessage) and m.name != CALL_NOTE),
+                     default=-1)
+    return not any(isinstance(m, ToolMessage) for m in request.messages[last_human + 1:])
+
+
 @wrap_model_call
 async def source_first(request: ModelRequest, handler):
     """In a team request an agent with source tools in scope must call one on its first model call
@@ -189,9 +196,7 @@ async def source_first(request: ModelRequest, handler):
     if request.tool_choice == "none":
         return await handler(request)
     context = request.runtime.context
-    last_human = max((i for i, m in enumerate(request.messages) if isinstance(m, HumanMessage) and m.name != CALL_NOTE),
-                     default=-1)
-    first_call = not any(isinstance(m, ToolMessage) for m in request.messages[last_human + 1:])
+    first_call = is_first_call(request)
     names = [t.name for t in request.tools if (getattr(t, "metadata", None) or {}).get(TOOL_SOURCE)
              and _in_scope(t, context.sources)]
     if context.agent != TEAM_MODE or not context.sources or not first_call or not names:

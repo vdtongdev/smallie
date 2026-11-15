@@ -1,12 +1,13 @@
 import asyncio
 import re
 
+from langchain.agents.middleware import wrap_model_call
 from sqlalchemy import select
 
 from app.agents.base import AgentSpec, RouteInfo
 from app.agents.docs.prompts import DOCS_SYSTEM, REVIEW, ROUTE_DESCRIPTION, TOOL_DESCRIPTION
 from app.agents.docs.tools import NO_PASSAGES, search_documents
-from app.agents.factory import build_agent
+from app.agents.factory import build_agent, is_first_call
 from app.core.db import documents, get_engine
 
 MAX_LISTED_DOCUMENTS = 30  # file names shown to the orchestrator
@@ -62,8 +63,19 @@ def make_mentions(stems: list[str]):
     return lambda message: bool(PERSONAL_FILES.search(message) or (pattern and pattern.search(message)))
 
 
+@wrap_model_call
+async def search_first(request, handler):
+    """The docs agent's first model call of a turn must call `search_documents`, in solo mode as
+    well as team mode: a weak model otherwise answers from its own context. A call already barred
+    from tools stays barred."""
+    if request.tool_choice != "none" and is_first_call(request):
+        request = request.override(tool_choice=search_documents.name)
+    return await handler(request)
+
+
 def build_docs_agent():
-    return build_agent(name="docs_agent", system_prompt=DOCS_SYSTEM, tools=[search_documents], route="docs")
+    return build_agent(name="docs_agent", system_prompt=DOCS_SYSTEM, tools=[search_documents], route="docs",
+                       middleware=[search_first])
 
 
 SPEC = AgentSpec(

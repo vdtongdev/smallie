@@ -341,3 +341,16 @@ Versions are `major.minor.patch`: the major version stays 0 for now, each minor 
   - New columns are added at startup: `model_settings.image_model` and `model_settings.image_model_first`, `documents.image_count` and `documents.images_unread` (`app/core/db.py`)
   - Pillow is a new dependency
   - Redeploy the docs agent service: its prompts changed (`DEPLOYING.md`, section 3, steps 4 and 5)
+
+## 0.8.2 - Fixes
+- **Fix: English questions answered in Vietnamese by the documents agent**
+  - The request was full of Vietnamese context (the profile, recent chats), and the reply language was named only on the last allowed call, so earlier calls could pick up the Vietnamese
+  - Every call note now ends with `REPLY_LANGUAGE_NOTE` ("Reply in <language>.", from `reply_language`) in `make_call_note` (`app/agents/factory.py`), for every agent. The last allowed call still gets `LAST_CALL_NOTE`, which names the language too
+  - Limit: this lowers the chance of the wrong language; it doesn't remove it
+- **Fix: documents agent said it can't see an uploaded image instead of answering from it**
+  - In one-to-one chats the docs agent wasn't required to search first (only team mode forced it), the prompt let it skip search for greetings, and the image rule's wording invited a refusal
+  - New `search_first` middleware (`app/agents/docs/agent.py`) forces `search_documents` on the docs agent's first model call of a turn, in one-to-one chats as well as team mode
+  - The skip-search line is removed from `app/agents/docs/AGENTS.md`
+  - The image rule now says to answer from the stored reading, citing it like any passage
+  - Cost: a docs-routed message that wouldn't have searched (e.g. a greeting) now makes one more model call
+  - Operator notes: redeploy all four agent services (`DEPLOYING.md`, section 3)

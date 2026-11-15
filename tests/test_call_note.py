@@ -5,7 +5,7 @@ from langchain_core.tools import StructuredTool
 
 from app.agents import factory
 from app.core.memory import AgentContext
-from app.core.prompts import CALL_NOTE, LAST_CALL_NOTE, SOLO_VOICE
+from app.core.prompts import CALL_NOTE, LAST_CALL_NOTE, REPLY_LANGUAGE_NOTE, SOLO_VOICE
 from tests.scripted import scripted
 
 
@@ -29,7 +29,7 @@ async def test_tail_is_the_last_message_of_every_call(monkeypatch):
     _, model = await _run(monkeypatch, lambda request: f"note {len(request.messages)}")
     for prompt, text in zip(model.prompts, ["note 1", "note 3"]):
         assert isinstance(prompt[-1], HumanMessage) and prompt[-1].name == CALL_NOTE
-        assert prompt[-1].content == f"{text}\n\n{SOLO_VOICE}"
+        assert prompt[-1].content == f"{text}\n\n{SOLO_VOICE}\n\n{REPLY_LANGUAGE_NOTE.format(language="English")}"
 
 
 async def test_system_prompt_is_identical_across_calls(monkeypatch):
@@ -45,7 +45,7 @@ async def test_tail_is_not_saved(monkeypatch):
 async def test_empty_tail_adds_no_message(monkeypatch):
     _, model = await _run(monkeypatch, lambda request: "")
     assert model.prompts[0][-2].content == "go"
-    assert model.prompts[0][-1].content == SOLO_VOICE
+    assert model.prompts[0][-1].content == f"{SOLO_VOICE}\n\n{REPLY_LANGUAGE_NOTE.format(language="English")}"
 
 
 async def test_last_call_note_joins_the_tail(monkeypatch):

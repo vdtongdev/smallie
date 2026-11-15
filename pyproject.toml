@@ -1,6 +1,6 @@
 [project]
 name = "smallie"
-version = "0.8.1"
+version = "0.8.2"
 description = "LangChain agents for document Q&A and natural-language database queries (EN/VI)"
 readme = "README.md"
 requires-python = ">=3.12"

@@ -357,8 +357,10 @@ Versions are `major.minor.patch`: the major version stays 0 for now, each minor 
 
 ## 0.8.3 - Fixes
 - **Fix: agents describe an uploaded image but don't give its values**
-  - The image reading was a plain description plus the text on the image, so a table (a row of timings, a list of part numbers and sizes) came back as loose words, and the docs agent often answered without the numbers
-  - Causes: the reading prompt did not ask for values or table cells; image chunks had no label on every piece, so a search hit on one part gave the agent a fragment with no context; the docs agent could skip its search, and the orchestrator answered from the chat instead of the file
+  - The image's reading held every value, but it was split into a description piece and a values piece; a vague question ("give me the detail of the image") only found the description piece
+  - The docs agent was told to search first, but the model provider ignored that, so it answered from the chat without searching
+  - The orchestrator answered questions about the file from its one-line file summary instead of asking the docs agent, and once invented placeholder values
+  - The reading prompt didn't ask for labels next to values or tables as tables, so some models put each label and value on its own line (a risk for other images, not the cause here)
   - `IMAGE_PROMPT` (`app/features/documents/prompts.py`) now asks for a description, then the content as `label: value` lines and Markdown tables with every cell, `(empty)` for an empty field; units and IDs are copied as written
   - Image chunks (`image_chunks`, `app/features/documents/ingest.py`) start with their `[Image N]` or `[Image N, p. P]` label, each carries a `part` number, and a long reading is split on lines with no overlap
   - A search hit on any part of an image returns that image's whole reading, in order, capped at 6,000 characters per search (`whole_images`, `app/agents/docs/tools.py`). It costs at most one extra embedding call per search, and only when an image is hit

@@ -146,7 +146,7 @@ Each specialist runs as its own private Cloud Run service, all from one image (`
 
 ## 4. Current deployment
 
-Version 0.8.1 is deployed (2026-11-15).
+Version 0.8.4 is deployed (2026-11-16).
 
 Project `smallie-review`, region `asia-southeast1`, https://smallie-976519788978.asia-southeast1.run.app, database on Neon (Singapore, Postgres 18). App logs:
 ```powershell

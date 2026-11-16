@@ -205,3 +205,19 @@ test('paperclip hidden while awaiting a team answer', async () => {
   expect(picker()).toBeNull()
   expect(screen.queryByRole('button', { name: en.attachImages })).toBeNull()
 })
+
+test('chips are not sent with a team answer', async () => {
+  const onSend = vi.fn()
+  const ui = (awaiting: boolean) => (
+    <LanguageProvider>
+      <Composer busy={false} awaiting={awaiting} draft={null} onSend={onSend} />
+    </LanguageProvider>
+  )
+  const { rerender } = render(ui(false))
+  await attach(png())
+  await screen.findByRole('img')
+  rerender(ui(true))
+  await userEvent.type(box(), 'my answer{Enter}')
+  expect(onSend).toHaveBeenCalledWith('my answer', [])
+  expect(screen.queryByRole('img')).toBeNull()
+})

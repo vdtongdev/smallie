@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { createContext, createElement, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { api } from '@/lib/api'
 
 export type Doc = {
@@ -19,10 +19,24 @@ export type Documents = {
   refresh(): Promise<void>
 }
 
+const Shared = createContext<Documents | null>(null)
+
+/** One documents state for the folder button, the pop-up and the chat box. */
+export function DocumentsProvider({ children }: { children: ReactNode }) {
+  return createElement(Shared.Provider, { value: useDocuments() }, children)
+}
+
+/** The shared state under a provider; its own instance elsewhere (a component rendered alone). */
+export function useSharedDocuments(): Documents {
+  const shared = useContext(Shared)
+  const own = useDocuments(!!shared)
+  return shared ?? own
+}
+
 const POLL_MS = 2000
 
 /** The user's files. Polls every 2 s while any file is processing; upload and remove reload the list. */
-export function useDocuments(): Documents {
+export function useDocuments(skip = false): Documents {
   const [docs, setDocs] = useState<Doc[]>([])
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const alive = useRef(true)
@@ -39,12 +53,12 @@ export function useDocuments(): Documents {
 
   useEffect(() => {
     alive.current = true
-    void refresh()
+    if (!skip) void refresh()
     return () => {
       alive.current = false
       clearTimeout(timer.current)
     }
-  }, [refresh])
+  }, [refresh, skip])
 
   const upload = useCallback(
     async (files: File[]) => {

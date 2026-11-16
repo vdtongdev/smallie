@@ -24,6 +24,8 @@ export const en = {
   attachUnread: "not read: set an image model in Settings",
   attachOnlyImages: "Only images can be attached here. Use Documents for other files.",
   attachMax: "Up to 5 images per message.",
+  imageDeleted: "image deleted",
+  noPreview: "no preview",
   attachRemove: "Remove from message",
   placeholder: "Ask about your documents or the stock market…",
   readme: "Readme",

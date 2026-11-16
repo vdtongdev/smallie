@@ -83,4 +83,4 @@ export type Usage = {
 export type Conversation = { id: string; title: string; kind: 'auto' | 'team' }
 
 /** An image attached to a chat message: its document id, file name and a URL that shows it. */
-export type Attachment = { id: string; filename: string; preview: string }
+export type Attachment = { id: string; filename: string; preview: string; deleted?: boolean }

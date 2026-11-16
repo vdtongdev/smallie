@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type 
 import { PaperclipIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
-import { useDocuments, type Doc } from '@/features/documents/useDocuments'
+import { useSharedDocuments, type Doc } from '@/features/documents/useDocuments'
 import { useLang } from '@/i18n'
 import type { Attachment } from '@/lib/types'
 import AttachmentChips, { type Chip } from './AttachmentChips'
@@ -19,7 +19,7 @@ type Item = { key: string; filename: string; preview: string; doc?: Doc; error?:
 
 export default function Composer({ busy, awaiting, draft, onSend }: Props) {
   const { t } = useLang()
-  const { docs, upload } = useDocuments()
+  const { docs, upload } = useSharedDocuments()
   const [value, setValue] = useState('')
   const [items, setItems] = useState<Item[]>([])
   const [notice, setNotice] = useState<string | null>(null)
@@ -43,6 +43,13 @@ export default function Composer({ busy, awaiting, draft, onSend }: Props) {
     el.style.height = 'auto'
     el.style.height = `${el.scrollHeight}px`
   }, [value])
+
+  // A team answer carries no images: chips present when the question arrives are dropped.
+  useEffect(() => {
+    if (!awaiting) return
+    itemsRef.current.forEach((i) => URL.revokeObjectURL(i.preview))
+    setItems([])
+  }, [awaiting])
 
   // Thumbnails are local object URLs; free them when the box goes away.
   useEffect(() => () => itemsRef.current.forEach((i) => URL.revokeObjectURL(i.preview)), [])
@@ -88,7 +95,9 @@ export default function Composer({ busy, awaiting, draft, onSend }: Props) {
   const submit = (e?: FormEvent) => {
     e?.preventDefault()
     const text = value.trim()
-    const attachments: Attachment[] = chips
+    const attachments: Attachment[] = awaiting
+      ? []
+      : chips
       .filter((c) => c.state === 'ready')
       .map((c) => ({ id: c.id!, filename: c.filename, preview: `/api/documents/${c.id}/image?size=thumb` }))
     if ((!text && attachments.length === 0) || busy || reading) return

@@ -120,7 +120,7 @@ export function useChat() {
       const resuming = !!turnsRef.current.at(-1)?.pending
       const opened = currentRef.current
       const kind = resuming || (opened ? kinds.current.get(opened) === 'team' : teamModeRef.current) ? 'team' : 'auto'
-      let turn = newTurn(message, kind === 'team')
+      let turn: Turn = { ...newTurn(message, kind === 'team'), attachments }
       setTurns((prev) => [...prev.map((t, i) => (i === prev.length - 1 && t.pending ? { ...t, pending: false } : t)), turn])
       const update = (next: Turn) => {
         turn = next

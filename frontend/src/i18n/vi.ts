@@ -26,6 +26,8 @@ export const vi: Record<I18nKey, string> = {
   attachUnread: "chưa đọc được: hãy đặt model ảnh trong Cài đặt",
   attachOnlyImages: "Ở đây chỉ đính kèm được ảnh. Các tệp khác hãy tải lên trong Tài liệu.",
   attachMax: "Mỗi tin nhắn tối đa 5 ảnh.",
+  imageDeleted: "ảnh đã xóa",
+  noPreview: "không có bản xem trước",
   attachRemove: "Bỏ khỏi tin nhắn",
   placeholder: "Hỏi về tài liệu của bạn hoặc thị trường cổ phiếu…",
   readme: "Hướng dẫn",

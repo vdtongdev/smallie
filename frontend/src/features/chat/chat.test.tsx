@@ -239,3 +239,87 @@ test('the Usage button looks like an outline button and sits at the left', async
   expect(button.parentElement).toHaveClass('justify-start')
   expect(button.parentElement).not.toHaveClass('justify-end')
 })
+
+// Images in messages
+const loaded = (attachments: { id: string; filename: string; deleted: boolean }[]) => {
+  localStorage.setItem('conversation_auto_u1', 'c1')
+  return installFetch({
+    'GET /api/conversations': () => json([{ id: 'c1', title: 't', kind: 'auto', updated_at: '' }]),
+    'GET /api/conversations/c1/messages': () =>
+      json([
+        { role: 'user', content: 'what is this', activity: null, attachments },
+        { role: 'assistant', content: 'a cat' },
+      ]),
+  })
+}
+
+test('user message shows thumbnails from the image route', async () => {
+  loaded([{ id: 'i1', filename: 'cat.png', deleted: false }])
+  renderApp()
+  const img = await screen.findByAltText('cat.png')
+  expect(img).toHaveAttribute('src', '/api/documents/i1/image?size=thumb')
+  const text = screen.getByText('what is this')
+  expect(img.compareDocumentPosition(text) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+})
+
+test('clicking a thumbnail opens the full image with its name', async () => {
+  loaded([{ id: 'i1', filename: 'cat.png', deleted: false }])
+  renderApp()
+  await userEvent.click(await screen.findByAltText('cat.png'))
+  const dialog = await screen.findByRole('dialog')
+  expect(within(dialog).getByRole('img')).toHaveAttribute('src', '/api/documents/i1/image?size=full')
+  expect(within(dialog).getByText('cat.png')).toBeInTheDocument()
+})
+
+test('deleted attachment shows image deleted', async () => {
+  loaded([{ id: 'i1', filename: 'cat.png', deleted: true }])
+  renderApp()
+  expect(await screen.findByText(en.imageDeleted)).toBeInTheDocument()
+  expect(screen.getByText('cat.png')).toBeInTheDocument()
+  expect(screen.queryByRole('img')).toBeNull()
+})
+
+test('thumbnail that fails to load shows no preview', async () => {
+  loaded([{ id: 'i1', filename: 'old.png', deleted: false }])
+  renderApp()
+  fireEvent.error(await screen.findByAltText('old.png'))
+  expect(await screen.findByText(en.noPreview)).toBeInTheDocument()
+  expect(screen.getByText('old.png')).toBeInTheDocument()
+  expect(screen.queryByAltText('old.png')).toBeNull()
+})
+
+test('just-sent message shows previews before reload', async () => {
+  installFetch({
+    'GET /api/documents': () => json([{ id: 'd1', filename: 'a.png', status: 'ready', chunk_count: 1, error: null, has_image: true }]),
+    'POST /api/documents': () => json([{ id: 'd1', filename: 'a.png', status: 'ready', chunk_count: 1, error: null, has_image: true }]),
+    'POST /api/chat/auto': () => sseResponse([{ type: 'token', text: 'ok' }, { type: 'done' }]),
+  })
+  URL.createObjectURL = vi.fn(() => 'blob:1')
+  URL.revokeObjectURL = vi.fn()
+  renderApp()
+  await input()
+  await userEvent.upload(document.querySelector('input[type="file"]') as HTMLInputElement, new File(['x'], 'a.png', { type: 'image/png' }))
+  await waitFor(() => expect(document.querySelector('[data-testid="chip-ready"], img')).toBeTruthy())
+  await userEvent.type(await input(), 'look{Enter}')
+  const imgs = await screen.findAllByAltText('a.png')
+  expect(imgs.some((i) => i.getAttribute('src') === '/api/documents/d1/image?size=thumb')).toBe(true)
+})
+
+test('attaching an image in the chat updates the folder count', async () => {
+  let listed: object[] = []
+  const d = { id: 'd1', filename: 'a.png', status: 'ready', chunk_count: 1, error: null, has_image: true }
+  installFetch({
+    'GET /api/documents': () => json(listed),
+    'POST /api/documents': () => {
+      listed = [d]
+      return json([d])
+    },
+  })
+  URL.createObjectURL = vi.fn(() => 'blob:1')
+  URL.revokeObjectURL = vi.fn()
+  renderApp()
+  const folder = await screen.findByRole('button', { name: en.documents })
+  expect(folder).toHaveTextContent('0')
+  await userEvent.upload(document.querySelector('input[type="file"]') as HTMLInputElement, new File(['x'], 'a.png', { type: 'image/png' }))
+  await waitFor(() => expect(screen.getByRole('button', { name: en.documents })).toHaveTextContent('1'))
+})

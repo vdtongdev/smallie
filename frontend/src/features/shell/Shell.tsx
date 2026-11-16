@@ -2,7 +2,7 @@ import { useState } from 'react'
 import AccountsDialog from '@/features/accounts/AccountsDialog'
 import { FolderIcon } from 'lucide-react'
 import { DocumentsDialog } from '@/features/documents/DocumentsDialog'
-import { useDocuments } from '@/features/documents/useDocuments'
+import { DocumentsProvider, useSharedDocuments } from '@/features/documents/useDocuments'
 import { Button } from '@/components/ui/button'
 import { useLang } from '@/i18n'
 import ChatView from '@/features/chat/ChatView'
@@ -14,13 +14,21 @@ import Sidebar from '@/features/sidebar/Sidebar'
 import Header from './Header'
 
 export default function Shell() {
+  return (
+    <DocumentsProvider>
+      <ShellBody />
+    </DocumentsProvider>
+  )
+}
+
+function ShellBody() {
   const [readmeOpen, setReadmeOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [accountsOpen, setAccountsOpen] = useState(false)
   // Set by Readme examples; the composer fills its input from it.
   const [draft, setDraft] = useState<Draft | null>(null)
   const [docsOpen, setDocsOpen] = useState(false)
-  const documents = useDocuments()
+  const documents = useSharedDocuments()
   const { t } = useLang()
   const chat = useChat()
   return (

@@ -79,7 +79,8 @@ async def prefetch_search(state, runtime):
         return None
     status = "success"
     try:
-        found = await asyncio.to_thread(docs_tools.search_with_graph, runtime.context.user_id, query)
+        found = await asyncio.to_thread(docs_tools.search_with_graph, runtime.context.user_id, query, "",
+                                       runtime.context.attached_documents)
     except Exception as error:  # the turn goes on; the model sees the failure like any tool error
         log.warning("Prefetch search failed", exc_info=True)
         found, status = f"Error: {error!r}"[:150], "error"

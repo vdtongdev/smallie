@@ -4,7 +4,7 @@ import uuid
 
 from sqlalchemy import delete, func, select, update
 
-from app.core.db import conversations, get_engine, turn_activity
+from app.core.db import conversations, documents, get_engine, turn_activity
 
 
 def create_conversation(user_id: str, kind: str, first_message: str) -> dict:
@@ -13,6 +13,18 @@ def create_conversation(user_id: str, kind: str, first_message: str) -> dict:
     with get_engine().begin() as conn:
         conn.execute(conversations.insert().values(**row))
     return row
+
+
+def documents_of(user_id: str, ids: list[str]) -> dict[str, dict]:
+    """The user's own files among `ids` (id -> {id, filename, status}), in one query. Others' and deleted ids are absent."""
+    if not ids:
+        return {}
+    with get_engine().connect() as conn:
+        rows = conn.execute(
+            select(documents.c.id, documents.c.filename, documents.c.status).where(
+                documents.c.user_id == user_id, documents.c.id.in_(ids))
+        ).mappings().all()
+    return {row["id"]: dict(row) for row in rows}
 
 
 def get_conversation(user_id: str, conversation_id: str) -> dict | None:

@@ -56,6 +56,7 @@ class AgentContext:
     tier: str = "standard"  # model slot for this run: small, standard or strong (a tier, never a model name or key)
     agent_notes: dict[str, str] = field(default_factory=dict)  # route -> that agent's notes as bullets; each agent renders its own
     conversation_id: str = ""  # the chat the call belongs to (set by RemoteAgent.ainvoke); chart tools read its saved tables
+    attached_documents: tuple[str, ...] = ()  # ids of the files attached to this message; the docs search reads exactly these first
     chat_data: str = ""  # the chat's saved data as one note (app/core/chat_memory.py render); rendered last in the system prompt
 
 

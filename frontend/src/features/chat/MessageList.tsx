@@ -45,7 +45,7 @@ export default function MessageList({ turns, loadError, labels, onOpenActivity, 
         const thinking = turn.running && (!turn.started || turn.waiting)
         return (
           <div key={i} className="flex flex-col gap-2">
-            {turn.user && <UserMessage text={turn.user} />}
+            {(turn.user || !!turn.attachments?.length) && <UserMessage text={turn.user} attachments={turn.attachments} />}
             <StatusLine turn={turn} labels={labels} onOpenActivity={onOpenActivity} />
             {thinking && <p className="italic text-muted-foreground">{t('thinking')}</p>}
             <AssistantBlocks

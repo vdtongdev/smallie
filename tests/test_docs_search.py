@@ -135,3 +135,52 @@ def test_other_users_images_never_join(make_user, embeddings, stored):
     assert NEAR in found
     assert "foreign secret" not in found
     assert tools.search_with_graph(other, VAGUE) != tools.NO_PASSAGES  # the other user's own row is untouched
+
+
+def _scoped_setup(stored, user):
+    """Two files named IMG_0001.jpg of one user, each with its own passage."""
+    mine, other = add_document(user, "IMG_0001.jpg"), add_document(user, "IMG_0001.jpg")
+    index(stored, user, mine, ["[Image 1]\nSerial Number: AAAA-1"], kind="text")
+    index(stored, user, other, ["[Image 1]\nSerial Number: BBBB-2"], kind="text")
+    return mine, other
+
+
+def test_attached_ids_scope_the_search(make_user, embeddings, stored):
+    user = make_user()
+    mine, _ = _scoped_setup(stored, user)
+
+    found = tools.search_with_graph(user, "serial number IMG_0001.jpg", attached=(mine,))
+
+    assert "AAAA-1" in found and "BBBB-2" not in found
+
+
+def test_short_name_attachment_scopes(make_user, embeddings, stored):
+    user = make_user()
+    mine, other = add_document(user, "a.png"), add_document(user, "b.png")
+    index(stored, user, mine, ["[Image 1]\nSerial Number: AAAA-1"], kind="text")
+    index(stored, user, other, ["[Image 1]\nSerial Number: BBBB-2"], kind="text")
+
+    found = tools.search_with_graph(user, "serial number", attached=(mine,))
+
+    assert "AAAA-1" in found and "BBBB-2" not in found
+
+
+def test_attached_falls_back_when_nothing_found(make_user, embeddings, stored):
+    user = make_user()
+    mine = add_document(user, "empty.png")  # attached, but nothing indexed for it
+    other = add_document(user, "notes.txt")
+    index(stored, user, other, ["Leave policy: 25 days"], kind="text")
+
+    found = tools.search_with_graph(user, "leave policy", attached=(mine,))
+
+    assert "Leave policy: 25 days" in found
+
+
+def test_attached_ids_filtered_by_user(make_user, embeddings, stored):
+    user, stranger = make_user(), make_user()
+    theirs = add_document(stranger, "secret.png")
+    index(stored, stranger, theirs, ["[Image 1]\nSerial Number: SECRET-9"], kind="text")
+
+    found = tools.search_with_graph(user, "serial number", attached=(theirs,))
+
+    assert "SECRET-9" not in found

@@ -8,8 +8,6 @@ import { en } from '@/i18n/en'
 import { installFetch, json, sseResponse } from '@/test/chatMock'
 
 const me = { user_id: 'u1', name: 'An', username: 'an', is_admin: false, max_accounts: 5 }
-const usageCalls = (calls: ReturnType<typeof installFetch>) => calls.filter((c) => c.url === '/api/usage').length
-const usageBody = () => json({ input_tokens: 1, output_tokens: 1, cost: 0 })
 
 beforeEach(() => {
   localStorage.clear()
@@ -71,30 +69,6 @@ test('Readme button opens the dialog and close button closes it', async () => {
   expect(screen.queryByRole('heading', { name: 'How to use smallie' })).toBeNull()
 })
 
-test('the usage box reloads /api/usage after a send finishes', async () => {
-  const calls = installFetch({
-    'GET /api/usage': usageBody,
-    'POST /api/chat/auto': () => sseResponse([{ type: 'token', text: 'hi' }, { type: 'done' }]),
-  })
-  renderApp()
-  await screen.findByText(en.usage)
-  const before = usageCalls(calls)
-  await userEvent.type(await screen.findByPlaceholderText(en.placeholder), 'q{Enter}')
-  await waitFor(() => expect(usageCalls(calls)).toBe(before + 1))
-})
-
-test('the usage box reloads after a send that ends in an error too', async () => {
-  const calls = installFetch({
-    'GET /api/usage': usageBody,
-    'POST /api/chat/auto': () => sseResponse([{ type: 'token', text: 'hi' }], new Error('boom')),
-  })
-  renderApp()
-  await screen.findByText(en.usage)
-  const before = usageCalls(calls)
-  await userEvent.type(await screen.findByPlaceholderText(en.placeholder), 'q{Enter}')
-  await waitFor(() => expect(usageCalls(calls)).toBe(before + 1))
-})
-
 test('the Accounts button shows for an admin only', async () => {
   installFetch({ 'GET /api/me': () => json({ ...me, is_admin: true }) })
   const view = renderApp()
@@ -111,4 +85,38 @@ test('the Accounts button opens the accounts dialog', async () => {
   renderApp()
   await userEvent.click(await screen.findByRole('button', { name: en.accounts }))
   expect(await screen.findByRole('heading', { name: en.accountsTitle })).toBeInTheDocument()
+})
+
+test('folder button shows the file count and opens the dialog', async () => {
+  installFetch({
+    'GET /api/documents': () =>
+      json([
+        { id: 'd1', filename: 'a.pdf', status: 'ready', error: null, chunk_count: 1, image_count: 0, images_unread: 0, has_image: false, created_at: '' },
+        { id: 'd2', filename: 'b.pdf', status: 'ready', error: null, chunk_count: 1, image_count: 0, images_unread: 0, has_image: false, created_at: '' },
+      ]),
+  })
+  renderApp()
+  const button = await screen.findByRole('button', { name: en.documents })
+  await waitFor(() => expect(button).toHaveTextContent('2'))
+  await userEvent.click(button)
+  expect(await screen.findByRole('heading', { name: en.documents })).toBeInTheDocument()
+  expect(screen.getByText('a.pdf')).toBeInTheDocument()
+})
+
+test('the old upload strip is gone from the main area', async () => {
+  installFetch()
+  renderApp()
+  await screen.findByRole('button', { name: en.documents })
+  expect(screen.queryByRole('button', { name: en.uploadFiles })).toBeNull()
+  expect(screen.queryByText(en.noDocuments)).toBeNull()
+})
+
+test('folder button shows Files and the count', async () => {
+  installFetch({
+    'GET /api/documents': () =>
+      json([{ id: 'd1', filename: 'a.pdf', status: 'ready', error: null, chunk_count: 1, image_count: 0, images_unread: 0, has_image: false, created_at: '' }]),
+  })
+  renderApp()
+  const button = await screen.findByRole('button', { name: en.documents })
+  await waitFor(() => expect(button).toHaveTextContent(`${en.files} 1`))
 })

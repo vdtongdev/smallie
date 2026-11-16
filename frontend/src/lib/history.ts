@@ -14,6 +14,8 @@ export type HistoryMessage = {
   pending?: boolean
   /** On a user message: the events the reply streamed, saved with the turn (null for older chats). */
   activity?: ChatEvent[] | null
+  /** On a user message: the attached images (the `Attached:` line is already cut from `content`). */
+  attachments?: { id: string; filename: string; deleted: boolean }[]
 }
 
 export function turnsFromHistory(messages: HistoryMessage[]): Turn[] {
@@ -42,6 +44,8 @@ export function turnsFromHistory(messages: HistoryMessage[]): Turn[] {
         turn.synthesized = replayed.synthesized
         turn.blocks.push(...replayed.blocks.slice(0, -1).filter((b) => b.kind === 'text' && b.text)) // text written before a tool call
       } else turn = newTurn(m.content)
+      if (m.attachments?.length)
+        turn.attachments = m.attachments.map((a) => ({ id: a.id, filename: a.filename, deleted: a.deleted, preview: `/api/documents/${a.id}/image?size=thumb` }))
       turn.started = true
       continue
     }

@@ -1,4 +1,4 @@
-import type { ChatEvent, ModelFallbackEvent, RoutingEvent } from './types'
+import type { Attachment, ChatEvent, ModelFallbackEvent, RoutingEvent } from './types'
 
 export type ChartSpec = {
   id: string
@@ -45,6 +45,7 @@ export type Activity = {
 }
 export type Turn = {
   user: string
+  attachments?: Attachment[]
   running: boolean
   badges: Badge[]
   /** `note: ''` marks a review: the UI builds its text from the last wave's review. */

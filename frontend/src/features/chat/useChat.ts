@@ -5,7 +5,7 @@ import { api, ApiError, postJson, unauthorized } from '@/lib/api'
 import { turnsFromHistory, type HistoryMessage } from '@/lib/history'
 import { readEvents } from '@/lib/stream'
 import { endTurn, newTurn, reduceTurn, type Turn } from '@/lib/turn'
-import type { Conversation, Usage } from '@/lib/types'
+import type { Attachment, Conversation, Usage } from '@/lib/types'
 import { localGet, localSet } from '@/lib/storage'
 
 export type Chat = ReturnType<typeof useChat>
@@ -18,7 +18,6 @@ export function useChat() {
   const [currentId, setCurrentId] = useState<string | null>(null)
   const [turns, setTurns] = useState<Turn[]>([])
   const [busy, setBusy] = useState(false)
-  const [sent, setSent] = useState(0) // counts finished sends; the sidebar usage box reloads on it
   const [usage, setUsage] = useState<Usage | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [ready, setReady] = useState(false)
@@ -110,9 +109,9 @@ export function useChat() {
   }, [uid])
 
   const send = useCallback(
-    async (text: string) => {
+    async (text: string, attachments: Attachment[] = []) => {
       const message = text.trim()
-      if (busyRef.current || !message) return
+      if (busyRef.current || (!message && attachments.length === 0)) return
       busyRef.current = true
       setBusy(true)
       const run = epoch.current
@@ -120,14 +119,14 @@ export function useChat() {
       const resuming = !!turnsRef.current.at(-1)?.pending
       const opened = currentRef.current
       const kind = resuming || (opened ? kinds.current.get(opened) === 'team' : teamModeRef.current) ? 'team' : 'auto'
-      let turn = newTurn(message, kind === 'team')
+      let turn: Turn = { ...newTurn(message, kind === 'team'), attachments }
       setTurns((prev) => [...prev.map((t, i) => (i === prev.length - 1 && t.pending ? { ...t, pending: false } : t)), turn])
       const update = (next: Turn) => {
         turn = next
         if (epoch.current === run) setTurns((prev) => [...prev.slice(0, -1), next])
       }
       try {
-        const res = await postJson(`/chat/${kind}`, { message, conversation_id: currentRef.current })
+        const res = await postJson(`/chat/${kind}`, { message, conversation_id: currentRef.current, attachments: attachments.map((a) => a.id) })
         if (res.status === 401) {
           unauthorized()
           return
@@ -156,7 +155,6 @@ export function useChat() {
       } finally {
         busyRef.current = false
         setBusy(false)
-        setSent((n) => n + 1)
         void loadConversations()
       }
     },
@@ -172,5 +170,5 @@ export function useChat() {
     [loadConversations, reset],
   )
 
-  return { conversations, currentId, turns, busy, sent, usage, loadError, ready, teamMode, setTeamMode, kind, send, open, newChat, remove }
+  return { conversations, currentId, turns, busy, usage, loadError, ready, teamMode, setTeamMode, kind, send, open, newChat, remove }
 }

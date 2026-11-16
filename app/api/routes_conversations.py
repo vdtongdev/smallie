@@ -6,11 +6,13 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from app.agents.artifacts import artifacts_from
 from app.orchestration.orchestrator import MESSAGE_ROUTES
 from app.core.auth import get_current_user
-from app.core.conversations import delete_conversation, get_conversation, get_conversation_usage, get_turn_activity, list_conversations
+from app.core.conversations import delete_conversation, documents_of, get_conversation, get_conversation_usage, get_turn_activity, list_conversations
 from app.core.memory import forget_conversation
 from app.core.snapshot import clear_snapshots
 
 router = APIRouter(tags=["conversations"])
+
+ATTACHED = "Attached: "  # starts the last line of a message that has attachments (see routes_chat._graph_text)
 
 
 @router.get("/conversations")
@@ -33,6 +35,11 @@ async def messages(conversation_id: str, request: Request, user_id: str = Depend
         if item["role"] == "user":
             turn += 1
             item["activity"] = activity.get(turn)
+    ids = list({a["id"] for m in shown for a in m.get("attachments", ())})
+    present = await asyncio.to_thread(documents_of, user_id, ids)  # one query for the whole chat
+    for item in shown:
+        for a in item.get("attachments", ()):
+            a["deleted"] = a["id"] not in present
     if paused:  # a paused team turn: the latest question is the pending one
         question = (await assistant.aget_state(config)).interrupts[0].value["question"]
         if shown and shown[-1]["role"] == "assistant" and shown[-1]["content"] == question:
@@ -82,7 +89,12 @@ def user_messages(messages: list) -> int:
 
 def _serialize(message) -> dict | None:
     if isinstance(message, HumanMessage):
-        return {"role": "user", "content": message.text}
+        files = [{"id": a["id"], "filename": a["filename"]} for a in message.additional_kwargs.get("attachments", ())]
+        text = message.text
+        if files:  # that last line only tells the models what was attached
+            head, _, last = text.rpartition("\n")
+            text = head if last.startswith(ATTACHED) else text
+        return {"role": "user", "content": text, "attachments": files}
     if isinstance(message, AIMessage):
         return {
             "role": "assistant",

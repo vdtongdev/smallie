@@ -138,6 +138,12 @@ Each specialist runs as its own private Cloud Run service, all from one image (`
 - After deploying, run the image re-chunk once, with the app stopped: `uv run python -m scripts.rechunk_images`. It rebuilds the stored image chunks in the labelled form and re-embeds them (embeddings only, no model calls). Image readings stored before 0.8.3 keep their flat text until then.
 - No database schema change and no app env change.
 
+### Release 0.8.4 (images in chat and Documents pop-up)
+
+- Redeploy all four agent services (`smallie-docs`, `smallie-sql`, `smallie-research`, `smallie-chart`): `AgentContext` gained `attached_documents` and the docs search changed. Build the agent image once, then point each service at it. Repeat steps 4 and 5 above.
+- The new table `document_images` is created at the app's start (`init_db`, `app/core/db.py`); no manual migration. Only image files uploaded after this deploy get a stored copy; older ones show "no preview" in messages.
+- No app env change and no model setting change. The app (router) is redeployed as in section 2.
+
 ## 4. Current deployment
 
 Version 0.8.1 is deployed (2026-11-15).

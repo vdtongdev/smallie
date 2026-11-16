@@ -28,7 +28,7 @@ export default function ReadmeVi({ marketStatus, onExample }: { marketStatus: st
           <p>Trả lời dựa trên các tệp PDF và Word bạn tải lên, kèm trích dẫn tên tệp và số trang.</p>
           <p>Bạn cũng có thể tải lên ảnh (PNG, JPG, WEBP). Ảnh nằm trong tệp PDF và Word, cùng các tệp PDF dạng bản quét, được model chat của bạn hoặc model ảnh đặt trong Cài đặt đọc một lần khi tải lên.</p>
           <ol>
-            <li>Bấm <strong>Tải lên PDF, DOCX hoặc ảnh</strong> và chọn một hoặc nhiều tệp: PDF, DOCX hoặc ảnh (PNG, JPG, WEBP), tối đa 25 MB mỗi tệp.</li>
+            <li>Mở <strong>Tài liệu</strong> bằng nút thư mục phía trên khung chat, rồi bấm <strong>Tải tệp lên</strong> và chọn một hoặc nhiều tệp: PDF, DOCX hoặc ảnh (PNG, JPG, WEBP), tối đa 25 MB mỗi tệp. Bạn cũng có thể đính kèm ảnh trực tiếp vào khung chat bằng nút kẹp giấy (dán hoặc kéo thả cũng được).</li>
             <li>Chờ đến khi tệp hiện <em>sẵn sàng</em>. Việc xử lý mất từ vài giây đến một phút.</li>
             <li>Đặt câu hỏi. Bấm vào một ví dụ để đưa nó vào ô soạn tin:</li>
           </ol>

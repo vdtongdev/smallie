@@ -7,8 +7,8 @@ from collections.abc import AsyncIterator
 import openai
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
-from pydantic import BaseModel, Field
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
+from pydantic import BaseModel, Field, model_validator
 from langgraph.types import Command
 from starlette.background import BackgroundTask
 
@@ -19,9 +19,9 @@ from app.agents.remote import RUN_NODE, as_message
 from app.orchestration.orchestrator import HANDOFF, MESSAGE_ROUTES
 from app.core.auth import get_current_user
 from app.core.config import get_settings
-from app.api.routes_conversations import thread_messages, user_messages
-from app.core.conversations import (add_conversation_usage, create_conversation, get_conversation, save_turn_activity,
-                                    touch_conversation)
+from app.api.routes_conversations import ATTACHED, thread_messages, user_messages
+from app.core.conversations import (add_conversation_usage, create_conversation, documents_of, get_conversation,
+                                    save_turn_activity, touch_conversation)
 from app.core.llm import NoModelSettings, pick_model, pick_tier
 from app.core.model_settings import load_settings
 from app.core.graph import extract_facts
@@ -37,8 +37,15 @@ UI_EVENTS = TEAM_EVENTS | {"model_fallback"}  # custom events the UI gets, in a 
 
 
 class ChatRequest(BaseModel):
-    message: str = Field(min_length=1, max_length=8000)
+    message: str = Field(default="", max_length=8000)  # may be empty when files are attached
     conversation_id: str | None = None
+    attachments: list[str] = Field(default_factory=list, max_length=5)  # ids of the user's ready image files
+
+    @model_validator(mode="after")
+    def _text_or_attachments(self):
+        if not self.message.strip() and not self.attachments:
+            raise ValueError("message is empty")
+        return self
 
 
 SKIPPED_EVENTS = frozenset({"usage", "done", "conversation"})  # not part of a reply's saved display events
@@ -114,11 +121,22 @@ async def chat(
         conversation = await asyncio.to_thread(get_conversation, user_id, body.conversation_id)
         if not conversation:
             raise HTTPException(404, "Conversation not found")
-    else:
-        conversation = await asyncio.to_thread(create_conversation, user_id, kind, body.message)
-
     assistant = request.app.state.assistant
     store = request.app.state.store
+    ids = list(dict.fromkeys(body.attachments))
+    found = await asyncio.to_thread(documents_of, user_id, ids)
+    if any(i not in found for i in ids):
+        raise HTTPException(404, "Attachment not found")
+    if any(found[i]["status"] != "ready" for i in ids):
+        raise HTTPException(409, "An attached file is not ready yet")
+    files = [{"id": i, "filename": found[i]["filename"]} for i in ids]
+    if files and kind == TEAM_MODE and body.conversation_id:
+        if (await assistant.aget_state({"configurable": {"thread_id": body.conversation_id}})).interrupts:
+            raise HTTPException(400, "Answer the team's question in text: files cannot be attached to the answer")
+    text = _graph_text(body.message, files)
+    if not body.conversation_id:
+        title = body.message if body.message.strip() else ", ".join(f["filename"] for f in files)
+        conversation = await asyncio.to_thread(create_conversation, user_id, kind, title)
     config = {"configurable": {"thread_id": conversation["id"]}}
     cross_chat = get_settings().cross_chat_history
     finished = False
@@ -154,9 +172,10 @@ async def chat(
                 log.exception("Reading the thread before the reply failed")
             snapshot = await chat_snapshot(request.app.state.checkpointer, user_id, conversation)
             stream = assistant.astream(
-                await _chat_input(assistant, config, kind, body.message),
+                await _chat_input(assistant, config, kind, text, files),
                 config={**config, "callbacks": [usage], "metadata": {"user_id": user_id}},  # filter traces per user
-                context=AgentContext(user_id=user_id, **snapshot, agent=kind, tier=tier),
+                context=AgentContext(user_id=user_id, **snapshot, agent=kind, tier=tier,
+                                      attached_documents=tuple(ids)),
                 stream_mode=["messages", "updates", "custom"],
                 subgraphs=True,
             )
@@ -213,13 +232,13 @@ async def chat(
         answer = pairs[-1][1] if pairs else ""
         if cross_chat:
             try:
-                await save_turn(store, user_id, conversation, body.message, answer)
+                await save_turn(store, user_id, conversation, text, answer)
             except Exception:  # noqa: BLE001
                 log.exception("Saving chat history failed")
         if answer:
             extraction = UsageCounter()
             try:
-                await extract_turn(user_id, body.message, answer, _answered_by(messages), conversation["id"], extraction)
+                await extract_turn(user_id, text, answer, _answered_by(messages), conversation["id"], extraction)
             except Exception:  # noqa: BLE001
                 log.exception("Extracting facts failed")
             try:
@@ -231,10 +250,21 @@ async def chat(
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
-async def _chat_input(assistant, config, kind: str, message: str) -> dict | Command:
-    """A paused team turn takes the message as the answer to its question; else a new user message."""
+def _graph_text(message: str, files: list[dict]) -> str:
+    """The user's text and, as its last line, the names of the attached files (only the line when there is no text)."""
+    if not files:
+        return message
+    line = ATTACHED + ", ".join(f["filename"] for f in files)
+    return f"{message}\n{line}" if message.strip() else line
+
+
+async def _chat_input(assistant, config, kind: str, message: str, files: list[dict] = ()) -> dict | Command:
+    """A paused team turn takes the message as the answer to its question; else a new user message,
+    which keeps `files` (`[{id, filename}]`) in its `additional_kwargs` for the history."""
     if kind == TEAM_MODE and (await assistant.aget_state(config)).interrupts:
         return Command(resume=message)
+    if files:
+        return {"messages": [HumanMessage(content=message, additional_kwargs={"attachments": list(files)})]}
     return {"messages": [{"role": "user", "content": message}]}
 
 

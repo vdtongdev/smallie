@@ -44,7 +44,6 @@ function ShellBody() {
           onNew={chat.newChat}
           onOpen={(id) => void chat.open(id)}
           onRemove={(id) => void chat.remove(id)}
-          usageKey={chat.sent}
           onOpenSettings={() => setSettingsOpen(true)}
         />
         <main className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 p-2">

@@ -8,8 +8,6 @@ import { en } from '@/i18n/en'
 import { installFetch, json, sseResponse } from '@/test/chatMock'
 
 const me = { user_id: 'u1', name: 'An', username: 'an', is_admin: false, max_accounts: 5 }
-const usageCalls = (calls: ReturnType<typeof installFetch>) => calls.filter((c) => c.url === '/api/usage').length
-const usageBody = () => json({ input_tokens: 1, output_tokens: 1, cost: 0 })
 
 beforeEach(() => {
   localStorage.clear()
@@ -69,30 +67,6 @@ test('Readme button opens the dialog and close button closes it', async () => {
   expect(await screen.findByRole('heading', { name: 'How to use smallie' })).toBeInTheDocument()
   await userEvent.click(screen.getByRole('button', { name: en.close }))
   expect(screen.queryByRole('heading', { name: 'How to use smallie' })).toBeNull()
-})
-
-test('the usage box reloads /api/usage after a send finishes', async () => {
-  const calls = installFetch({
-    'GET /api/usage': usageBody,
-    'POST /api/chat/auto': () => sseResponse([{ type: 'token', text: 'hi' }, { type: 'done' }]),
-  })
-  renderApp()
-  await screen.findByText(en.usage)
-  const before = usageCalls(calls)
-  await userEvent.type(await screen.findByPlaceholderText(en.placeholder), 'q{Enter}')
-  await waitFor(() => expect(usageCalls(calls)).toBe(before + 1))
-})
-
-test('the usage box reloads after a send that ends in an error too', async () => {
-  const calls = installFetch({
-    'GET /api/usage': usageBody,
-    'POST /api/chat/auto': () => sseResponse([{ type: 'token', text: 'hi' }], new Error('boom')),
-  })
-  renderApp()
-  await screen.findByText(en.usage)
-  const before = usageCalls(calls)
-  await userEvent.type(await screen.findByPlaceholderText(en.placeholder), 'q{Enter}')
-  await waitFor(() => expect(usageCalls(calls)).toBe(before + 1))
 })
 
 test('the Accounts button shows for an admin only', async () => {

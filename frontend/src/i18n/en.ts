@@ -1,9 +1,6 @@
 export const en = {
   newChat: "+ New chat",
   usage: "Usage",
-  usageTokens: "Tokens: {n}",
-  usageDetail: "{input} in · {output} out",
-  usageCost: "Cost: ${cost}",
   usageReply: "Last reply",
   usageChat: "This chat",
   usageLine: "in {in} · out {out} · cached {cached} ({rate}%)",

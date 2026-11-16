@@ -21,8 +21,6 @@ type Props = {
   onNew(): void
   onOpen(id: string): void
   onRemove(id: string): void
-  /** Unused since the total usage counter was removed; Shell still passes it. */
-  usageKey?: number
   onOpenSettings?(): void
 }
 

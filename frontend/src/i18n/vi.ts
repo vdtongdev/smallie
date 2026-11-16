@@ -3,9 +3,6 @@ import type { I18nKey } from './en'
 export const vi: Record<I18nKey, string> = {
   newChat: "+ Cuộc trò chuyện mới",
   usage: "Mức sử dụng",
-  usageTokens: "Token: {n}",
-  usageDetail: "{input} vào · {output} ra",
-  usageCost: "Chi phí: ${cost}",
   usageReply: "Câu trả lời gần nhất",
   usageChat: "Cuộc trò chuyện này",
   usageLine: "vào {in} · ra {out} · cache {cached} ({rate}%)",

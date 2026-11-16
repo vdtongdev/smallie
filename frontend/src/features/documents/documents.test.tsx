@@ -310,10 +310,10 @@ test('a long file name wraps instead of overflowing', async () => {
   expect(name.className).not.toMatch(/truncate|whitespace-nowrap/)
 })
 
-test('clicking an image thumbnail in the pop-up opens the full image with its name', async () => {
+test('clicking an image name in the pop-up opens the full image with its name', async () => {
   docs = [doc({ id: 'i1', filename: 'p.png', has_image: true })]
   await mount()
-  fireEvent.click(screen.getByRole('button', { name: 'View p.png' }))
+  fireEvent.click(screen.getByText('p.png'))
   const full = screen.getByAltText('p.png')
   expect(full.getAttribute('src')).toBe('/api/documents/i1/image?size=full')
   expect(screen.getByRole('heading', { name: 'p.png' })).toBeTruthy()
@@ -328,10 +328,33 @@ test('documents without a stored image have no viewer', async () => {
 test('closing the viewer keeps the Documents pop-up open', async () => {
   docs = [doc({ id: 'i1', filename: 'p.png', has_image: true })]
   await mount()
-  fireEvent.click(screen.getByRole('button', { name: 'View p.png' }))
+  fireEvent.click(screen.getByText('p.png'))
   expect(screen.getByAltText('p.png')).toBeTruthy()
   fireEvent.keyDown(screen.getByAltText('p.png'), { key: 'Escape' })
   await flush()
   expect(screen.queryByAltText('p.png')).toBeNull()
   expect(screen.getByRole('heading', { name: en.documents })).toBeTruthy()
+})
+
+test('the thumbnail is not clickable', async () => {
+  docs = [doc({ id: 'i1', filename: 'p.png', has_image: true })]
+  const { container } = await mount()
+  const img = container.ownerDocument.querySelector('img')!
+  expect(img.closest('button')).toBeNull()
+  fireEvent.click(img)
+  expect(screen.queryByAltText('p.png')).toBeNull()
+})
+
+test('the image name is a link-styled button', async () => {
+  docs = [doc({ id: 'i1', filename: 'p.png', has_image: true })]
+  await mount()
+  const name = screen.getByRole('button', { name: 'View p.png' })
+  expect(name).toHaveTextContent('p.png')
+  expect(name).toHaveClass('cursor-pointer', 'hover:underline', 'text-primary', 'break-words', 'min-w-0')
+})
+
+test('a non-image file name is plain text', async () => {
+  docs = [doc({ id: 'd2', filename: 'b.pdf' })]
+  await mount()
+  expect(screen.getByText('b.pdf').closest('button')).toBeNull()
 })

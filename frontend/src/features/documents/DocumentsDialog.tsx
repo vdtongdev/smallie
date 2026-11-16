@@ -69,21 +69,25 @@ export function DocumentsDialog({
             {docs.map((d) => (
               <li key={d.id} title={d.error ?? ''} className="flex items-center gap-2 rounded-md border border-border px-2 py-1">
                 {d.has_image && (
+                  <img
+                    src={`/api/documents/${d.id}/image?size=thumb`}
+                    alt=""
+                    className="size-8 shrink-0 rounded object-cover"
+                  />
+                )}
+                <div className="flex min-w-0 flex-1 flex-col">
+                {d.has_image ? (
                   <button
                     type="button"
                     aria-label={t('viewImage').replace('{name}', d.filename)}
                     onClick={() => setViewing({ id: d.id, filename: d.filename })}
-                    className="shrink-0"
+                    className="min-w-0 cursor-pointer break-words text-left text-primary hover:underline"
                   >
-                    <img
-                      src={`/api/documents/${d.id}/image?size=thumb`}
-                      alt=""
-                      className="size-8 rounded object-cover"
-                    />
+                    {d.filename}
                   </button>
+                ) : (
+                  <span className="min-w-0 break-words">{d.filename}</span>
                 )}
-                <div className="flex min-w-0 flex-1 flex-col">
-                <span className="min-w-0 break-words">{d.filename}</span>
                 <span className="text-muted-foreground">
                   {t(`status_${d.status}`) +
                     (d.status === 'ready'

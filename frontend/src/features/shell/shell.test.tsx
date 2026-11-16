@@ -144,5 +144,5 @@ test('folder button shows Files and the count', async () => {
   })
   renderApp()
   const button = await screen.findByRole('button', { name: en.documents })
-  await waitFor(() => expect(button).toHaveTextContent(`${en.files}1`))
+  await waitFor(() => expect(button).toHaveTextContent(`${en.files} 1`))
 })

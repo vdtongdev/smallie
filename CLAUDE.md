@@ -60,5 +60,5 @@ Tests that need Postgres use the `requires_db` marker (`tests/conftest.py`) and 
 - **Agents never call each other**: specialists never call one another; only the orchestrator asks or hands off to them.
 - **Sync DB or vector work** in async routes and tools goes through `asyncio.to_thread`.
 - **Config** comes from `get_settings()`; `.env.example` documents every variable.
-- **Deploy** only from `main`, with a clean working tree, so the live app always matches `main`: merge the PR, then `git checkout main && git pull`. `CHANGELOG.md` and the version in `pyproject.toml` were already updated in the branch before its PR (`.claude/rules/changelog.md`); deploy edits neither.
+- **Deploy** only from `main`, with a clean working tree, so the live app always matches `main`: merge the PR, then `git checkout main && git pull`. `CHANGELOG.md`, the version in `pyproject.toml` and the `DEPLOYING.md` "Version x.y.z is deployed" line were already updated in the branch before its PR (`.claude/rules/changelog.md`); deploy edits none of them.
 - **`*.sh` files** keep LF line endings (they run in WSL).

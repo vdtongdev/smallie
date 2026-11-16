@@ -113,3 +113,28 @@ test('the Settings button is an outline button, not ghost', () => {
   for (const cls of cn(buttonVariants({ variant: 'outline' })).split(' ')) expect(button.className).toContain(cls)
   expect(button).toHaveClass('border-border')
 })
+
+test('the sidebar has no total usage counter', async () => {
+  const fetchMock = vi.fn(async () =>
+    new Response(JSON.stringify({ input_tokens: 10, output_tokens: 5, cost: 0.001 }), {
+      headers: { 'Content-Type': 'application/json' },
+    }),
+  )
+  vi.stubGlobal('fetch', fetchMock)
+  try {
+    show()
+    await new Promise((r) => setTimeout(r, 20))
+    expect(screen.queryByText(en.usage)).toBeNull()
+    expect(fetchMock).not.toHaveBeenCalled()
+  } finally {
+    vi.unstubAllGlobals()
+  }
+})
+
+test('the Settings button is the last element at the bottom of the sidebar', () => {
+  show()
+  const button = screen.getByRole('button', { name: en.settings })
+  const aside = button.closest('aside')!
+  expect(aside.lastElementChild).toBe(button)
+  expect(button).toHaveClass('mt-auto')
+})

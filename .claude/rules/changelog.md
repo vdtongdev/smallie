@@ -42,3 +42,4 @@
 
 - Set `version` in `pyproject.toml` to the newest changelog version, then run `uv lock` so `uv.lock` matches (the Docker build uses `uv sync --frozen`).
 - Commit the changelog, `pyproject.toml` and `uv.lock` together in the work branch, before its PR. No separate release commit at deploy.
+- The branch that will be deployed (the one that takes the version's last item before release) also sets `DEPLOYING.md` section 4 "Current deployment" to `Version <x.y.z> is deployed (<expected deploy date>).`, in the same commit. A deploy never needs a docs PR of its own.

@@ -286,3 +286,26 @@ test('narrow screen stacks the upload area above the list', async () => {
   expect(zone).toHaveClass('order-first', 'md:order-last')
   expect(zone.parentElement).toHaveClass('flex-col', 'md:flex-row')
 })
+
+test('dialog is 70% wide and 60% tall', async () => {
+  await mount()
+  const dialog = screen.getByRole('dialog')
+  expect(dialog).toHaveClass('md:w-[70vw]', 'h-[60vh]', 'md:max-w-none')
+  expect(dialog.className).not.toMatch(/max-w-(lg|sm|\[)/)
+})
+
+test('the two panes have equal width', async () => {
+  await mount()
+  const zone = screen.getByTestId('drop-zone')
+  const list = screen.getByRole('list')
+  for (const pane of [zone, list]) expect(pane).toHaveClass('md:flex-1', 'md:basis-0', 'min-w-0')
+  expect(zone.className).not.toMatch(/md:w-64/)
+})
+
+test('a long file name wraps instead of overflowing', async () => {
+  docs = [doc({ filename: 'a-very-long-file-name-without-any-break-points-at-all.pdf' })]
+  await mount()
+  const name = screen.getByText('a-very-long-file-name-without-any-break-points-at-all.pdf')
+  expect(name).toHaveClass('break-words')
+  expect(name.className).not.toMatch(/truncate|whitespace-nowrap/)
+})

@@ -53,13 +53,16 @@ export function DocumentsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent aria-describedby={undefined}>
+      <DialogContent
+        aria-describedby={undefined}
+        className="flex h-[60vh] w-[calc(100vw-2rem)] max-w-none flex-col overflow-hidden md:w-[70vw] md:max-w-none"
+      >
         <DialogHeader>
           <DialogTitle>{t('documents')}</DialogTitle>
         </DialogHeader>
         {error && <Alert variant="destructive">{error}</Alert>}
-        <div className="flex flex-col gap-4 md:flex-row">
-          <ul className="flex min-w-0 flex-1 flex-col gap-1 overflow-y-auto md:max-h-96">
+        <div className="flex min-h-0 flex-1 flex-col gap-4 md:flex-row">
+          <ul className="flex min-h-0 min-w-0 flex-1 flex-col gap-1 overflow-y-auto md:flex-1 md:basis-0">
             {docs.length === 0 && <li className="text-muted-foreground">{t('noDocuments')}</li>}
             {docs.map((d) => (
               <li key={d.id} title={d.error ?? ''} className="flex items-center gap-2 rounded-md border border-border px-2 py-1">
@@ -70,7 +73,8 @@ export function DocumentsDialog({
                     className="size-8 shrink-0 rounded object-cover"
                   />
                 )}
-                <span className="min-w-0 truncate">{d.filename}</span>
+                <div className="flex min-w-0 flex-1 flex-col">
+                <span className="min-w-0 break-words">{d.filename}</span>
                 <span className="text-muted-foreground">
                   {t(`status_${d.status}`) +
                     (d.status === 'ready'
@@ -79,11 +83,12 @@ export function DocumentsDialog({
                         (d.images_unread ? ` · ${d.images_unread} ${t('imagesUnread')}` : '')
                       : '')}
                 </span>
+                </div>
                 <AlertDialog>
                   <AlertDialogTrigger
                     disabled={d.status === 'processing'}
                     aria-label={`${t('delete')} ${d.filename}`}
-                    className="disabled:opacity-50"
+                    className="shrink-0 disabled:opacity-50"
                   >
                     <XIcon className="size-4" />
                   </AlertDialogTrigger>
@@ -107,7 +112,7 @@ export function DocumentsDialog({
             onDragLeave={() => setDragging(false)}
             onDrop={onDrop}
             className={cn(
-              'order-first flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-border p-6 text-center md:order-last md:w-64 md:shrink-0',
+              'order-first flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-border p-6 text-center md:order-last min-w-0 md:flex-1 md:basis-0',
               dragging && 'border-primary',
             )}
           >

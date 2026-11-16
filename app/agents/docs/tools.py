@@ -1,4 +1,5 @@
 import asyncio
+from collections.abc import Sequence
 
 from langchain.tools import ToolRuntime, tool
 
@@ -75,9 +76,13 @@ def _format(hits) -> str:
     return "\n\n---\n\n".join(parts)
 
 
-def search_with_graph(user_id: str, query: str, entity: str = "") -> str:
-    """Passages from the files the graph links to `entity` (or to names in the query); every file
-    when the graph knows none of them."""
+def search_with_graph(user_id: str, query: str, entity: str = "", attached: Sequence[str] = ()) -> str:
+    """Passages from the `attached` files of this message when they hold any; else from the files
+    the graph links to `entity` (or to names in the query); every file when the graph knows none."""
+    if attached:
+        found = search_user_chunks(user_id, query, document_ids=list(attached))  # filtered by user_id: other users' ids give nothing
+        if found != NO_PASSAGES:
+            return found
     scope = documents_for(user_id, query, entity)
     found = search_user_chunks(user_id, query, document_ids=scope) if scope else NO_PASSAGES
     if found != NO_PASSAGES:
@@ -113,7 +118,8 @@ async def search_documents(query: str, runtime: ToolRuntime[AgentContext], entit
         entity: The person, company, place or product the question is about, if any. The search
             then looks first in the files linked to it. Leave empty otherwise.
     """
-    return await asyncio.to_thread(search_with_graph, runtime.context.user_id, query, entity)
+    return await asyncio.to_thread(search_with_graph, runtime.context.user_id, query, entity,
+                                   runtime.context.attached_documents)
 
 
 search_documents.metadata = {TOOL_SOURCE: "user_files"}

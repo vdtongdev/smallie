@@ -57,10 +57,11 @@ def mentioned_routes(message: str, available: list[tuple[AgentSpec, RouteInfo]])
     return tuple(spec.route for spec, info in available if spec.is_mentioned(message, info))
 
 
-def obvious_route(message: str, available: list[tuple[AgentSpec, RouteInfo]]) -> str | None:
+def obvious_route(message: str, available: list[tuple[AgentSpec, RouteInfo]], attached: bool = False) -> str | None:
     """The route when the message clearly points to exactly one agent and mentions no other,
-    else None (the orchestrator then asks every agent it needs)."""
-    matched = [spec for spec, info in available if spec.is_obvious(message, info)]
+    else None (the orchestrator then asks every agent it needs). A message with attached files
+    points to docs."""
+    matched = [spec for spec, info in available if spec.is_obvious(message, info) or (attached and spec.route == "docs")]
     routes = {spec.route for spec in matched}
     # One agent, or one that overrides all the others ("chart AAPL": chart over sql).
     winners = [spec.route for spec in matched if routes - {spec.route} <= set(spec.overrides)]
@@ -92,7 +93,7 @@ def build_router(specs: Sequence[AgentSpec] = registry.AGENTS):
             return {"route": context.agent, "direct": False}  # the user picked it: no fallback
         available = await available_agents(context.user_id, specs)
         latest = state["messages"][-1].text
-        route = await asyncio.to_thread(obvious_route, latest, available)
+        route = await asyncio.to_thread(obvious_route, latest, available, bool(context.attached_documents))
         route = route or follow_up_route(state["messages"], available, specs)
         return {"route": route or ORCHESTRATOR, "direct": bool(route)}
 

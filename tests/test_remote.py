@@ -517,3 +517,31 @@ async def test_internal_config_keys_never_reach_the_server():
                                "checkpoint_ns": "sql:abc", "__pregel_stream": "hook"}}
     await agent(remote).ainvoke({"messages": [as_message(HUMAN)]}, config, context=CTX)
     assert remote.calls[0]["config"]["configurable"] == {"checkpoint_ns": "sql:abc", "__pregel_stream": "hook"}
+
+
+async def test_attached_documents_travel_to_the_agent_server(monkeypatch):
+    from app.agents import factory, server
+    from tests.scripted import scripted
+
+    context = AgentContext(user_id="u-7", attached_documents=("d1", "d2"))
+    remote = FakeRemote(output={"messages": [HUMAN]})
+    await agent(remote).node({"messages": [as_message(HUMAN)]}, {}, SimpleNamespace(context=context))
+    sent = remote.calls[0]["context"]
+    assert list(sent["attached_documents"]) == ["d1", "d2"]
+
+    # The server rebuilds the context from the JSON dict: a list arrives, the tools still read the ids.
+    seen = []
+    from langchain.tools import ToolRuntime, tool
+
+    @tool
+    def peek(runtime: ToolRuntime[AgentContext]) -> str:
+        """Look."""
+        seen.append(tuple(runtime.context.attached_documents))
+        return "ok"
+
+    model = scripted(AIMessage("", tool_calls=[{"name": "peek", "args": {}, "id": "c1"}]), AIMessage("done"))
+    monkeypatch.setattr(factory, "get_chat_model", lambda *a, **k: model)
+    inner = factory.build_agent(name="sql_agent", system_prompt="x", tools=[peek], route="sql")
+    wire = {**sent, "attached_documents": list(sent["attached_documents"])}
+    await server.reporting_graph(inner).ainvoke({"messages": [HumanMessage("hi", id="u1")]}, context=wire)
+    assert seen == [("d1", "d2")]

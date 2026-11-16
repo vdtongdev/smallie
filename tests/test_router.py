@@ -222,3 +222,20 @@ async def test_follow_up_after_orchestrator_reply_is_not_sticky(monkeypatch):
     router = router_module.build_router()
     messages = _after_docs_answer("x")["messages"][:-1] + [AIMessage("Sure.", name="orchestrator"), HumanMessage("and the serial number?")]
     assert await router({"messages": messages}, _runtime()) == {"route": ORCHESTRATOR, "direct": False}
+
+
+async def test_attached_message_routes_to_docs(monkeypatch):
+    monkeypatch.setattr(docs_agent, "document_names", lambda user_id: [("handbook.pdf", None)])
+    monkeypatch.setattr(sql_agent, "stock_tickers", lambda: frozenset({"AAPL"}))
+    router = router_module.build_router()
+    state = {"messages": [HumanMessage("what is this?\nAttached: IMG_0001.jpg")]}
+    assert await router(state, _runtime(attached_documents=("d1",))) == {"route": "docs", "direct": True}
+    assert await router(state, _runtime()) == {"route": ORCHESTRATOR, "direct": False}  # nothing attached: unchanged
+
+
+async def test_attached_with_other_agent_hint_goes_to_orchestrator(monkeypatch):
+    monkeypatch.setattr(docs_agent, "document_names", lambda user_id: [("handbook.pdf", None)])
+    monkeypatch.setattr(sql_agent, "stock_tickers", lambda: frozenset({"AAPL"}))
+    router = router_module.build_router()
+    state = {"messages": [HumanMessage("compare this with AAPL\nAttached: IMG_0001.jpg")]}
+    assert await router(state, _runtime(attached_documents=("d1",))) == {"route": ORCHESTRATOR, "direct": False}

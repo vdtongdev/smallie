@@ -2568,3 +2568,23 @@ async def test_crash_retry_that_goes_alone_answers_the_crashed_question(monkeypa
     assert not any("try again" in m.text for m in prompt if isinstance(m, HumanMessage))
     assert any("REPLY LANGUAGE for this message: Vietnamese," in m.text for m in prompt)
     assert [m.text for m in await _thread(assistant, config)][-2:] == ["try again", "Alone."]
+
+
+async def test_team_tasks_keep_attached_documents(monkeypatch):
+    _profile(monkeypatch, "economy")
+    _plan(monkeypatch, Plan(tasks=[Task(id="t1", agent="docs", goal="a", difficulty="easy")]))
+    _board(monkeypatch, then=Board())
+    seen = []
+
+    class Spy(Fake):
+        async def ainvoke(self, input, config=None, **kwargs):
+            seen.append(kwargs["context"].attached_documents)
+            return await super().ainvoke(input, config, **kwargs)
+
+    log = []
+    assistant = _assistant(monkeypatch, per_agent(orchestrator=[AIMessage("Final.")]), documents=("handbook.pdf",), docs=Spy("docs", "Read it.", log=log))
+    context = replace(TEAM_CONTEXT, attached_documents=("d1", "d2"))
+    async for _ in assistant.astream(_ask("what is in the image?"), {"configurable": {"thread_id": "t10"}}, context=context,
+                                     stream_mode=["custom"], subgraphs=True):
+        pass
+    assert seen == [("d1", "d2")]

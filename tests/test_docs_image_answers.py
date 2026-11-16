@@ -47,7 +47,7 @@ VIETNAMESE_CONTEXT = dict(
 def _model(monkeypatch):
     model = SkipsOptionalToolModel(replies=iter(()), prompts=[], tools=[], forced=[])
     monkeypatch.setattr(factory, "get_chat_model", lambda *a, **k: model)
-    monkeypatch.setattr(docs_tools, "search_with_graph", lambda user_id, query, entity="": READING)
+    monkeypatch.setattr(docs_tools, "search_with_graph", lambda user_id, query, entity="", attached=(): READING)
     return model
 
 
@@ -92,7 +92,7 @@ class IgnoresToolChoiceModel(ScriptedModel):
 def _ignoring_model(monkeypatch, search=None):
     model = IgnoresToolChoiceModel(replies=iter(()), prompts=[], tools=[])
     monkeypatch.setattr(factory, "get_chat_model", lambda *a, **k: model)
-    monkeypatch.setattr(docs_tools, "search_with_graph", search or (lambda user_id, query, entity="": READING))
+    monkeypatch.setattr(docs_tools, "search_with_graph", search or (lambda user_id, query, entity="", attached=(): READING))
     return model
 
 
@@ -107,7 +107,7 @@ async def test_docs_answers_from_the_reading_even_when_the_model_ignores_tool_ch
 async def test_prefetch_searches_the_users_own_message(monkeypatch):
     queries = []
 
-    def search(user_id, query, entity=""):
+    def search(user_id, query, entity="", attached=()):
         queries.append(query)
         return READING
 
@@ -120,7 +120,7 @@ async def test_prefetch_searches_the_users_own_message(monkeypatch):
 async def test_team_speaker_counts_as_searched(monkeypatch):
     calls = []
 
-    def search(user_id, query, entity=""):
+    def search(user_id, query, entity="", attached=()):
         calls.append(query)
         return READING
 
@@ -134,7 +134,7 @@ async def test_team_speaker_counts_as_searched(monkeypatch):
 
 
 async def test_no_passages_is_said_plainly(monkeypatch):
-    model = _ignoring_model(monkeypatch, lambda user_id, query, entity="": docs_tools.NO_PASSAGES)
+    model = _ignoring_model(monkeypatch, lambda user_id, query, entity="", attached=(): docs_tools.NO_PASSAGES)
     agent = docs_agent.build_docs_agent()
     result = await agent.ainvoke({"messages": [HumanMessage(QUESTION)]}, context=AgentContext(user_id="u"))
     assert any(m.type == "tool" and m.text == docs_tools.NO_PASSAGES for m in model.prompts[0])
@@ -143,7 +143,7 @@ async def test_no_passages_is_said_plainly(monkeypatch):
 
 
 async def test_failed_prefetch_search_does_not_crash_the_turn(monkeypatch):
-    def search(user_id, query, entity=""):
+    def search(user_id, query, entity="", attached=()):
         raise RuntimeError("Missing credentials")
 
     model = _ignoring_model(monkeypatch, search)
@@ -153,3 +153,17 @@ async def test_failed_prefetch_search_does_not_crash_the_turn(monkeypatch):
     errors = [m for m in result["messages"] if m.type == "tool" and m.name == "search_documents"]
     assert len(errors) == 1 and errors[0].status == "error"
     assert "Missing credentials" in errors[0].text and len(errors[0].text) < 200
+
+
+async def test_prefetch_uses_attached_ids(monkeypatch):
+    seen = []
+
+    def search(user_id, query, entity="", attached=()):
+        seen.append(tuple(attached))
+        return READING
+
+    _ignoring_model(monkeypatch, search)
+    agent = docs_agent.build_docs_agent()
+    await agent.ainvoke({"messages": [HumanMessage(QUESTION)]},
+                        context=AgentContext(user_id="u", attached_documents=("d1", "d2")))
+    assert seen == [("d1", "d2")]

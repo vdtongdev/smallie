@@ -51,7 +51,7 @@ async def test_a_specialist_that_finds_nothing_falls_back_to_the_orchestrator(mo
         orchestrator=[AIMessage("Salaries are not in the handbook; typical ranges are…")],
     )
     monkeypatch.setattr(docs_tools, "search_with_graph",
-                        lambda user_id, query, entity="": "[handbook.pdf, p. 1]\nLeave policy: 25 days per year.")
+                        lambda user_id, query, entity="", attached=(): "[handbook.pdf, p. 1]\nLeave policy: 25 days per year.")
     assistant = _assistant(monkeypatch, model)
     events = await _run(assistant, "what does the handbook say about salaries?")
 

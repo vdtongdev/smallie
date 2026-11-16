@@ -383,9 +383,11 @@ Versions are `major.minor.patch`: the major version stays 0 for now, each minor 
   - About 150–300 KB per image file, so 500 photos take about 100 MB of the database
   - Only the owner can load them (`GET /api/documents/{id}/image?size=thumb|full`); the agent servers' database role cannot read them
   - A deleted file shows "image deleted" in its old messages
-- **Documents pop-up** (`frontend/src/features/documents/`): the upload strip above the chat is replaced by a folder button showing the file count
-  - Left: every file with its status, chunks and images; right: a drop zone and an Upload files button
+- **Documents pop-up** (`frontend/src/features/documents/`): the upload strip above the chat is replaced by a "Files N" button showing the file count
+  - The pop-up is 70% wide and 60% tall, with two equal panes and long file names wrapping
+  - Left: every file with its status, chunks and images; an image's file name opens the full image (the thumbnail is not clickable); right: a drop zone and an Upload files button
   - File sizes are not shown
+- **Sidebar**: the total usage counter at the bottom left is removed, and Settings sits there, pinned to the bottom. The per-chat Usage button under the chat box stays
 - **Limits**
   - Image files uploaded before 0.8.4 were never kept, so their messages show "no preview"; their readings still work
   - Images inside PDF and DOCX files, and scanned PDF pages, are not shown in chat; only uploaded image files get a preview

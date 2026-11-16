@@ -17,7 +17,7 @@ This file describes `main` plus the 0.4.0 remote agents (section 10) and the 0.5
 - Agent badges showing which agent answered
 - Real-time streaming via Server-Sent Events (SSE)
 - Language toggle: English / Vietnamese
-- Document upload UI with progress tracking (PDF, DOCX, images), behind a folder button above the chat (the Documents pop-up, since 0.8.4: file list on the left, drop zone and Upload files on the right)
+- Document upload UI with progress tracking (PDF, DOCX, images), behind a "Files N" button above the chat (the Documents pop-up, since 0.8.4, 70% wide and 60% tall: file list on the left, where an image's file name opens the full image; drop zone and Upload files on the right)
 - Images attached in the chat box (paperclip, paste or drop; up to 5 per message, since 0.8.4), shown as thumbnails in the user's message, with a full-size dialog
 - Charts rendered with Chart.js
 - UI (`frontend/`, React + Vite + Tailwind + shadcn) served at `/`; built by `npm run build` into `frontend/dist`, in a Node 24 stage of the `Dockerfile` (no Node in the runtime image). `FrontendFiles` in `app/api/main.py` mounts it at `/` after the `/api` routers. `/next` and `/next/...` redirect to `/` (308, query string kept). Without a build the app starts with a warning and `/api` still works

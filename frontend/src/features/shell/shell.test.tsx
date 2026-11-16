@@ -112,3 +112,27 @@ test('the Accounts button opens the accounts dialog', async () => {
   await userEvent.click(await screen.findByRole('button', { name: en.accounts }))
   expect(await screen.findByRole('heading', { name: en.accountsTitle })).toBeInTheDocument()
 })
+
+test('folder button shows the file count and opens the dialog', async () => {
+  installFetch({
+    'GET /api/documents': () =>
+      json([
+        { id: 'd1', filename: 'a.pdf', status: 'ready', error: null, chunk_count: 1, image_count: 0, images_unread: 0, has_image: false, created_at: '' },
+        { id: 'd2', filename: 'b.pdf', status: 'ready', error: null, chunk_count: 1, image_count: 0, images_unread: 0, has_image: false, created_at: '' },
+      ]),
+  })
+  renderApp()
+  const button = await screen.findByRole('button', { name: en.documents })
+  await waitFor(() => expect(button).toHaveTextContent('2'))
+  await userEvent.click(button)
+  expect(await screen.findByRole('heading', { name: en.documents })).toBeInTheDocument()
+  expect(screen.getByText('a.pdf')).toBeInTheDocument()
+})
+
+test('the old upload strip is gone from the main area', async () => {
+  installFetch()
+  renderApp()
+  await screen.findByRole('button', { name: en.documents })
+  expect(screen.queryByRole('button', { name: en.uploadFiles })).toBeNull()
+  expect(screen.queryByText(en.noDocuments)).toBeNull()
+})

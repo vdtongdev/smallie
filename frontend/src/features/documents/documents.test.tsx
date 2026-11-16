@@ -2,9 +2,13 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { LanguageProvider } from '@/i18n'
 import { en } from '@/i18n/en'
-import { buttonVariants } from '@/components/ui/button'
-import { cn } from '@/lib/utils'
-import { DocumentsPanel } from './DocumentsPanel'
+import { DocumentsDialog } from './DocumentsDialog'
+import { useDocuments } from './useDocuments'
+
+function Harness() {
+  const documents = useDocuments()
+  return <DocumentsDialog open onOpenChange={() => {}} documents={documents} />
+}
 
 type Doc = {
   id: string
@@ -14,6 +18,7 @@ type Doc = {
   error: string | null
   image_count?: number
   images_unread?: number
+  has_image?: boolean
 }
 let docs: Doc[]
 let calls: { method: string; url: string; init?: RequestInit }[]
@@ -31,6 +36,7 @@ const doc = (over: Partial<Doc> = {}): Doc => ({
   error: null,
   ...over,
 })
+const fileInput = () => screen.getByTestId('file-input') as HTMLInputElement
 const listCalls = () => calls.filter((c) => c.method === 'GET' && c.url === '/api/documents').length
 
 beforeEach(() => {
@@ -55,10 +61,10 @@ beforeEach(() => {
         await gates.shift()
         return json(200, snapshot)
       }
-      if (method === 'POST' && url === '/api/documents') return json(200, {})
+      if (method === 'POST' && url === '/api/documents') return json(200, [{ id: 'n1', filename: 'a.pdf', status: 'processing' }])
       if (method === 'DELETE') {
         docs = docs.filter((d) => url.endsWith(`/${d.id}`) === false)
-        return json(200, {})
+        return json(204)
       }
       throw new Error(`unmocked ${method} ${url}`)
     }),
@@ -83,7 +89,7 @@ async function tick(ms: number) {
 async function mount() {
   const r = render(
     <LanguageProvider>
-      <DocumentsPanel />
+      <Harness />
     </LanguageProvider>,
   )
   await flush()
@@ -116,7 +122,7 @@ test('shows the unread note', async () => {
 
 test('file input accepts images', async () => {
   await mount()
-  const input = screen.getByLabelText(en.upload) as HTMLInputElement
+  const input = fileInput()
   expect(input.accept).toContain('.png,.jpg,.jpeg,.webp')
 })
 
@@ -127,7 +133,7 @@ test('shows the empty text', async () => {
 
 test('upload posts each file in the files field, then reloads', async () => {
   await mount()
-  const input = screen.getByLabelText(en.upload) as HTMLInputElement
+  const input = fileInput()
   expect(input.multiple).toBe(true)
   const f1 = new File(['x'], 'a.pdf')
   const f2 = new File(['y'], 'b.docx')
@@ -196,7 +202,7 @@ test('delete is disabled while processing', async () => {
 test('an upload error shows a destructive alert', async () => {
   await mount()
   failNext = { status: 400, detail: 'Only PDF or DOCX' }
-  const input = screen.getByLabelText(en.upload)
+  const input = fileInput()
   fireEvent.change(input, { target: { files: [new File(['x'], 'a.txt')] } })
   await flush()
   expect(screen.getByRole('alert').textContent).toContain('Only PDF or DOCX')
@@ -224,7 +230,7 @@ test('a reload during an in-flight poll: the newer list wins and one timer remai
   ]
   await tick(2000) // poll fetch in flight, sees "processing"
   docs = [doc()]
-  fireEvent.change(screen.getByLabelText(en.upload), { target: { files: [new File(['x'], 'a.pdf')] } })
+  fireEvent.change(fileInput(), { target: { files: [new File(['x'], 'a.pdf')] } })
   await flush() // upload done, reload in flight, sees "ready"
   releaseReload()
   await tick(100)
@@ -236,19 +242,47 @@ test('a reload during an in-flight poll: the newer list wins and one timer remai
   expect(listCalls()).toBe(before)
 })
 
-test('the upload label gets exactly the classes of an outline Button, so its border shows', async () => {
-  await mount()
-  const label = screen.getByLabelText(en.upload).closest('label')!
-  const expected = [...cn(buttonVariants({ variant: 'outline' })).split(' '), 'w-fit', 'cursor-pointer']
-  expect(label.className.split(' ').sort()).toEqual(expected.sort())
-  expect(label).not.toHaveClass('border-transparent')
-})
-
-test('a document row is a compact bordered card with the delete button next to the status', async () => {
-  docs = [doc()]
+test('left list shows status, chunks, images and the unread note, no size', async () => {
+  docs = [doc({ image_count: 3, images_unread: 2, size: 12345 } as Partial<Doc>)]
   await mount()
   const row = screen.getByText('a.pdf').closest('li')!
-  expect(row).toHaveClass('border', 'rounded-md', 'w-fit')
-  expect(row).not.toHaveClass('w-full')
-  expect(screen.getByRole('button', { name: `${en.delete} a.pdf` })).not.toHaveClass('ml-auto')
+  expect(row.textContent).toContain(`${en.status_ready} · 7 ${en.chunks} · 3 ${en.images} · 2 ${en.imagesUnread}`)
+  expect(row.textContent).not.toMatch(/KB|MB|12345/)
+})
+
+test('image files with has_image show a thumbnail, others do not', async () => {
+  docs = [doc({ id: 'i1', filename: 'p.png', has_image: true }), doc({ id: 'd2', filename: 'b.pdf' })]
+  const { container } = await mount()
+  const imgs = container.ownerDocument.querySelectorAll('img')
+  expect(imgs).toHaveLength(1)
+  expect(imgs[0].getAttribute('src')).toBe('/api/documents/i1/image?size=thumb')
+  expect(screen.getByText('b.pdf').closest('li')!.querySelector('img')).toBeNull()
+})
+
+test('drop zone uploads dropped files', async () => {
+  await mount()
+  const f = new File(['x'], 'a.pdf')
+  fireEvent.drop(screen.getByText(en.dropFiles).closest('[data-testid="drop-zone"]')!, { dataTransfer: { files: [f] } })
+  await flush()
+  expect((calls.find((c) => c.method === 'POST')!.init!.body as FormData).getAll('files')).toEqual([f])
+})
+
+test('Upload files button opens the picker and uploads', async () => {
+  await mount()
+  const click = vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(() => {})
+  fireEvent.click(screen.getByRole('button', { name: en.uploadFiles }))
+  expect(click).toHaveBeenCalled()
+  click.mockRestore()
+  const f = new File(['x'], 'a.pdf')
+  fireEvent.change(fileInput(), { target: { files: [f] } })
+  await flush()
+  expect((calls.find((c) => c.method === 'POST')!.init!.body as FormData).getAll('files')).toEqual([f])
+  expect(screen.getByText(en.acceptedTypes)).toBeTruthy()
+})
+
+test('narrow screen stacks the upload area above the list', async () => {
+  await mount()
+  const zone = screen.getByTestId('drop-zone')
+  expect(zone).toHaveClass('order-first', 'md:order-last')
+  expect(zone.parentElement).toHaveClass('flex-col', 'md:flex-row')
 })

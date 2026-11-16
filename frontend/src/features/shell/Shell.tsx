@@ -1,6 +1,10 @@
 import { useState } from 'react'
 import AccountsDialog from '@/features/accounts/AccountsDialog'
-import { DocumentsPanel } from '@/features/documents/DocumentsPanel'
+import { FolderIcon } from 'lucide-react'
+import { DocumentsDialog } from '@/features/documents/DocumentsDialog'
+import { useDocuments } from '@/features/documents/useDocuments'
+import { Button } from '@/components/ui/button'
+import { useLang } from '@/i18n'
 import ChatView from '@/features/chat/ChatView'
 import type { Draft } from '@/features/chat/Composer'
 import { useChat } from '@/features/chat/useChat'
@@ -15,6 +19,9 @@ export default function Shell() {
   const [accountsOpen, setAccountsOpen] = useState(false)
   // Set by Readme examples; the composer fills its input from it.
   const [draft, setDraft] = useState<Draft | null>(null)
+  const [docsOpen, setDocsOpen] = useState(false)
+  const documents = useDocuments()
+  const { t } = useLang()
   const chat = useChat()
   return (
     <div className="flex h-screen flex-col">
@@ -33,12 +40,16 @@ export default function Shell() {
           onOpenSettings={() => setSettingsOpen(true)}
         />
         <main className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 p-2">
-          <DocumentsPanel />
+          <Button variant="outline" className="w-fit" aria-label={t('documents')} onClick={() => setDocsOpen(true)}>
+            <FolderIcon className="size-4" />
+            {documents.docs.length}
+          </Button>
           <ChatView chat={chat} draft={draft} onOpenSettings={() => setSettingsOpen(true)} />
         </main>
       </div>
       {/* Always mounted: it loads the saved settings and the provider's model list in the background after login. */}
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <DocumentsDialog open={docsOpen} onOpenChange={setDocsOpen} documents={documents} />
       <AccountsDialog open={accountsOpen} onOpenChange={setAccountsOpen} />
       <ReadmeDialog
         open={readmeOpen}

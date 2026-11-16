@@ -217,13 +217,13 @@ test('the Usage button stays hidden when all usage is zero and there is no reply
   expect(screen.queryByRole('button', { name: en.usage })).toBeNull()
 })
 
-test('the documents panel is mounted in the logged-in shell', async () => {
+test('the documents folder button is mounted in the logged-in shell', async () => {
   installFetch()
   renderApp()
-  expect(await screen.findByText(en.upload)).toBeInTheDocument()
+  expect(await screen.findByRole('button', { name: en.documents })).toBeInTheDocument()
 })
 
-test('the Usage button looks like the upload button and sits at the left', async () => {
+test('the Usage button looks like an outline button and sits at the left', async () => {
   installFetch({
     'POST /api/chat/auto': () =>
       sseResponse([

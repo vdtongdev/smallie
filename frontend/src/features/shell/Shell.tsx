@@ -50,6 +50,7 @@ function ShellBody() {
         <main className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 p-2">
           <Button variant="outline" className="w-fit" aria-label={t('documents')} onClick={() => setDocsOpen(true)}>
             <FolderIcon className="size-4" />
+            {t('files')}
             {documents.docs.length}
           </Button>
           <ChatView chat={chat} draft={draft} onOpenSettings={() => setSettingsOpen(true)} />

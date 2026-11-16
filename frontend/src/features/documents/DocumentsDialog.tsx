@@ -14,6 +14,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
+import ImageDialog from '@/features/chat/ImageDialog'
 import type { Documents } from './useDocuments'
 
 export function DocumentsDialog({
@@ -29,6 +30,7 @@ export function DocumentsDialog({
   const { docs, upload, remove } = documents
   const [error, setError] = useState('')
   const [dragging, setDragging] = useState(false)
+  const [viewing, setViewing] = useState<{ id: string; filename: string } | null>(null)
   const input = useRef<HTMLInputElement>(null)
 
   async function send(files: File[]) {
@@ -67,11 +69,18 @@ export function DocumentsDialog({
             {docs.map((d) => (
               <li key={d.id} title={d.error ?? ''} className="flex items-center gap-2 rounded-md border border-border px-2 py-1">
                 {d.has_image && (
-                  <img
-                    src={`/api/documents/${d.id}/image?size=thumb`}
-                    alt=""
-                    className="size-8 shrink-0 rounded object-cover"
-                  />
+                  <button
+                    type="button"
+                    aria-label={t('viewImage').replace('{name}', d.filename)}
+                    onClick={() => setViewing({ id: d.id, filename: d.filename })}
+                    className="shrink-0"
+                  >
+                    <img
+                      src={`/api/documents/${d.id}/image?size=thumb`}
+                      alt=""
+                      className="size-8 rounded object-cover"
+                    />
+                  </button>
                 )}
                 <div className="flex min-w-0 flex-1 flex-col">
                 <span className="min-w-0 break-words">{d.filename}</span>
@@ -134,6 +143,7 @@ export function DocumentsDialog({
           </div>
         </div>
       </DialogContent>
+      {viewing && <ImageDialog id={viewing.id} filename={viewing.filename} onClose={() => setViewing(null)} />}
     </Dialog>
   )
 }

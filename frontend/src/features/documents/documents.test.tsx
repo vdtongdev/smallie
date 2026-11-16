@@ -309,3 +309,29 @@ test('a long file name wraps instead of overflowing', async () => {
   expect(name).toHaveClass('break-words')
   expect(name.className).not.toMatch(/truncate|whitespace-nowrap/)
 })
+
+test('clicking an image thumbnail in the pop-up opens the full image with its name', async () => {
+  docs = [doc({ id: 'i1', filename: 'p.png', has_image: true })]
+  await mount()
+  fireEvent.click(screen.getByRole('button', { name: 'View p.png' }))
+  const full = screen.getByAltText('p.png')
+  expect(full.getAttribute('src')).toBe('/api/documents/i1/image?size=full')
+  expect(screen.getByRole('heading', { name: 'p.png' })).toBeTruthy()
+})
+
+test('documents without a stored image have no viewer', async () => {
+  docs = [doc({ id: 'd2', filename: 'b.pdf' }), doc({ id: 'i2', filename: 'q.png', has_image: false })]
+  await mount()
+  expect(screen.queryByRole('button', { name: /^View / })).toBeNull()
+})
+
+test('closing the viewer keeps the Documents pop-up open', async () => {
+  docs = [doc({ id: 'i1', filename: 'p.png', has_image: true })]
+  await mount()
+  fireEvent.click(screen.getByRole('button', { name: 'View p.png' }))
+  expect(screen.getByAltText('p.png')).toBeTruthy()
+  fireEvent.keyDown(screen.getByAltText('p.png'), { key: 'Escape' })
+  await flush()
+  expect(screen.queryByAltText('p.png')).toBeNull()
+  expect(screen.getByRole('heading', { name: en.documents })).toBeTruthy()
+})

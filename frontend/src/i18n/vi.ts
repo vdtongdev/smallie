@@ -17,6 +17,8 @@ export const vi: Record<I18nKey, string> = {
   usageModelUnknown: "{model}: {calls} · vào {in} · cache không rõ",
   usageCacheNote: "Một số máy chủ mô hình không lưu cache prompt, nên tỉ lệ cache có thể luôn là 0%.",
   documents: "Tài liệu",
+  files: "Tệp",
+  viewImage: "Xem {name}",
   uploadFiles: "Tải tệp lên",
   dropFiles: "Thả tệp vào đây",
   acceptedTypes: "PDF, DOCX, PNG, JPG, WEBP · tối đa 25 MB mỗi tệp",

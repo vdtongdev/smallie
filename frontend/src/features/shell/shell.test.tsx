@@ -136,3 +136,13 @@ test('the old upload strip is gone from the main area', async () => {
   expect(screen.queryByRole('button', { name: en.uploadFiles })).toBeNull()
   expect(screen.queryByText(en.noDocuments)).toBeNull()
 })
+
+test('folder button shows Files and the count', async () => {
+  installFetch({
+    'GET /api/documents': () =>
+      json([{ id: 'd1', filename: 'a.pdf', status: 'ready', error: null, chunk_count: 1, image_count: 0, images_unread: 0, has_image: false, created_at: '' }]),
+  })
+  renderApp()
+  const button = await screen.findByRole('button', { name: en.documents })
+  await waitFor(() => expect(button).toHaveTextContent(`${en.files}1`))
+})

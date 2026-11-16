@@ -15,6 +15,8 @@ export const en = {
   usageModelUnknown: "{model}: {calls} · in {in} · cached n/a",
   usageCacheNote: "Some model hosts don't cache prompts, so the cache rate can stay at 0%.",
   documents: "Documents",
+  files: "Files",
+  viewImage: "View {name}",
   uploadFiles: "Upload files",
   dropFiles: "Drop files here",
   acceptedTypes: "PDF, DOCX, PNG, JPG, WEBP · up to 25 MB each",

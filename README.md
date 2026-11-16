@@ -2,7 +2,8 @@
 
 LangChain agents behind a FastAPI app with a small web UI. You type into one chat, and an **orchestrator** handles each message: it answers general questions itself (with a quick web search for fresh facts), hands a question to the right specialist, or asks several specialists and writes the combined answer. A **Team mode** switch next to the message box makes the orchestrator plan the work as tasks that the agents do from their own sources (in parallel or one after another), and a judge reviews the results after each step. There are four specialists today:
 
-- **Documents**: upload PDF, DOCX or image files (PNG, JPG, JPEG, WEBP) and ask questions about them. Images inside PDF and DOCX files, and scanned PDFs, are read too. Answers cite the file and page.
+- **Documents**: upload PDF, DOCX or image files (PNG, JPG, JPEG, WEBP) and ask questions about them. Open Documents with the folder button above the chat, which shows the file count. Images inside PDF and DOCX files, and scanned PDFs, are read too. Answers cite the file and page.
+- **Images in chat**: attach up to 5 images with the paperclip, or paste or drop them into the chat box. Each one is read like an upload, and your message shows its thumbnail; click it to open the full image. Image files you upload from now on are kept as a small copy (about 150–300 KB each); older uploads show "no preview" in messages.
 - **Database**: ask in plain language about a stock database (200 popular stocks from Yahoo Finance via `yfinance`). The agent writes and runs read-only SQL.
 - **Charts**: say "chart", "plot" or "vẽ biểu đồ" for an interactive line, bar, area, pie or scatter chart of the stock data, or of numbers from another answer ("plot that").
 - **Research**: gathers facts from the web (Tavily), Wikipedia, arXiv, an optional external Postgres, the stock database and your files; the orchestrator writes them up with sources.

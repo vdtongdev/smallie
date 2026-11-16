@@ -17,7 +17,8 @@ This file describes `main` plus the 0.4.0 remote agents (section 10) and the 0.5
 - Agent badges showing which agent answered
 - Real-time streaming via Server-Sent Events (SSE)
 - Language toggle: English / Vietnamese
-- Document upload UI with progress tracking (PDF, DOCX, images)
+- Document upload UI with progress tracking (PDF, DOCX, images), behind a folder button above the chat (the Documents pop-up, since 0.8.4: file list on the left, drop zone and Upload files on the right)
+- Images attached in the chat box (paperclip, paste or drop; up to 5 per message, since 0.8.4), shown as thumbnails in the user's message, with a full-size dialog
 - Charts rendered with Chart.js
 - UI (`frontend/`, React + Vite + Tailwind + shadcn) served at `/`; built by `npm run build` into `frontend/dist`, in a Node 24 stage of the `Dockerfile` (no Node in the runtime image). `FrontendFiles` in `app/api/main.py` mounts it at `/` after the `/api` routers. `/next` and `/next/...` redirect to `/` (308, query string kept). Without a build the app starts with a warning and `/api` still works
 
@@ -70,6 +71,7 @@ This file describes `main` plus the 0.4.0 remote agents (section 10) and the 0.5
 │    POST /api/signup        ─ Create account (max 20)            │
 │    GET  /api/conversations ─ Conversation list                  │
 │    POST /api/documents     ─ Upload files (PDF, DOCX, images)   │
+│    GET  /api/documents/{id}/image ─ Image or thumbnail          │
 │                                                                 │
 │  Assistant Graph (built once at startup):                       │
 │    START → router → {docs|sql|chart|research|orchestrator|team} │
@@ -88,6 +90,7 @@ This file describes `main` plus the 0.4.0 remote agents (section 10) and the 0.5
 │                            checkpoint_writes                    │
 │    LangGraph store: store, store_vectors                        │
 │    document chunks: langchain_pg_embedding (pgvector)           │
+│    document_images (JPEG + thumbnail of image files)            │
 │    graph_nodes, graph_edges (knowledge graph)                   │
 │    market.stocks, market.daily_prices (stock data)              │
 │    chat_data (what chat agents fetched, per chat)               │
@@ -104,7 +107,10 @@ This file describes `main` plus the 0.4.0 remote agents (section 10) and the 0.5
 
 1. **User sends a message**
    - POST `/api/chat/{kind}`, where kind is "auto", "team" (section 11) or a specific agent route
-   - Message ≤ 8,000 characters
+   - Message ≤ 8,000 characters (may be empty when attachments are sent)
+   - Optional `attachments`: up to 5 document ids (since 0.8.4). Each must be the user's own file, else 404; a file not yet `ready` gives 409; attachments are refused (400) while a team question waits for an answer. Duplicates are dropped
+   - With attachments, the text sent to the graph gets a last line `Attached: <filename>, <filename>` (only that line when the text is empty). The user message keeps the list in `additional_kwargs["attachments"]`, and the conversation title comes from the text without that line
+   - `AgentContext.attached_documents` carries the ids for this turn only; later turns of the chat don't carry them
 2. **Authentication and context**
    - Verify the session cookie → `user_id`
    - Load or create the conversation
@@ -123,6 +129,7 @@ This file describes `main` plus the 0.4.0 remote agents (section 10) and the 0.5
      - Hints: keyword regex ("documents", "stock", "research", ...)
      - Matches: ticker symbols, file names
    - Obvious and no other agent mentioned: send it to that agent directly
+   - A message with attachments (since 0.8.4) counts as naming the docs agent's files: it goes to docs (`obvious_route`, `app/orchestration/router.py`). If another agent's hints also match, the orchestrator gets it instead, with the same text and context
    - Else: send it to the orchestrator
 5. **Stream routing event**: an SSE `agent` event with the router's choice
 
@@ -158,6 +165,7 @@ This file describes `main` plus the 0.4.0 remote agents (section 10) and the 0.5
    - The checkpointer saves the thread
    - Saved activity: `events()` (`routes_chat.py`) keeps the streamed events except `usage`, `done` and `conversation`. Each run of consecutive `token` events from one agent is kept as one empty `token` marker, so a reload can tell a relabel from a second agent, and `tool_result` content is cut to `TOOL_RESULT_PREVIEW` (4000 characters). The stream counts the user messages before the run (`n_before`) and again in its `finally`, after the usage is saved (`n_after`); both counts and `GET .../messages` read a paused team turn's messages from the team subgraph (`thread_messages`), so each answered question reloads with its reply and the resumed run's rows go under its reply's message. If a user message was added, the rows go under `n_after`; a resumed paused team turn (no new message) goes under `n_before`; any other run without a new user message (such as `no_model`) saves nothing. Failed and cut-off replies are saved too. Rows are indexed on (`conversation_id`, `turn`) and cascade-delete with their chat and account. The save is best effort: a failure is logged and the reply is unaffected
    - `GET /api/conversations/{id}/messages` returns each user message with `activity`: that turn's saved events, concatenated in row order, or `null` for chats from before this table. The React UI replays them for its badges, steps and Activity popup; the text and charts still come from the messages. Nothing reads the saved rows for a prompt
+   - Since 0.8.4, a user message also returns `attachments: [{id, filename, deleted}]` and its `content` without the `Attached:` line; `deleted` is true when the file no longer exists for this user (one query per conversation)
 10. **Background: fact extraction** (after the response is sent)
     - After every finished turn with an answer, whichever agent wrote it; paused turns are skipped
     - One model call extracts facts and agent notes from the question + answer
@@ -317,6 +325,15 @@ Answers from the user's uploaded PDF, DOCX and image files using RAG (Retrieval-
 
 **Limit:** the image model is used only when the server returns an error for images (OpenRouter returns 404 for a model without image input). A server that silently drops the image (some Ollama or llama.cpp setups) is not detected, and that model's reading is made up. "Always read images with the image model" in Settings avoids this.
 
+### Stored Images (since 0.8.4)
+
+- Table `document_images` (`app/core/db.py`, `app/features/documents/stored_images.py`): `document_id` (PK, FK `documents.id`, cascade), `user_id` (FK, cascade, indexed), `image` (the ≤ 1600 px JPEG the model read), `thumb` (JPEG, longest side 256 px), `created_at`. Created by `init_db` with the other tables
+- Written only for an image file (PNG, JPG, JPEG, WEBP) whose reading succeeded, in `asyncio.to_thread`. PDF and DOCX store nothing, and so does a failed file. An image under 100 px, or one Pillow can't open, has no copy ("no preview")
+- Cost: about 150–300 KB per image file in Postgres (500 photos ≈ 100 MB). No new model calls
+- Route `GET /api/documents/{id}/image?size=thumb|full` (default `full`): `image/jpeg` for the caller's own file, `Cache-Control: private, max-age=86400`; 404 when the file is not theirs, does not exist, or has no stored image
+- `GET /api/documents` adds `has_image` per file. `DELETE /api/documents/{id}` and account deletion remove the row through the cascade
+- Not in `READER_TABLES`: `agent_reader` has no grant, so agent servers never read it
+
 ### Search
 
 - `search_documents(query, entity)` searches the user's chunks by similarity
@@ -326,6 +343,8 @@ Answers from the user's uploaded PDF, DOCX and image files using RAG (Retrieval-
 - Falls back to all files if the scoped search finds nothing
 - Prefetch search (since 0.8.3, replacing 0.8.2's `search_first`): the docs agent's first search runs in code before its first model call, in one-to-one chats as well as team mode (`prefetch_search` middleware, `app/agents/docs/agent.py`), with the user's message as the query. The search is put in the history as the model's own `search_documents` call, so it always shows as a tool event. A failed search becomes an error tool result, not a crash. Research is not forced
 - Whole-image retrieval (since 0.8.3): a hit on any part of an image returns that image's whole reading, in order, capped at 6,000 characters per search (`whole_images`, `app/agents/docs/tools.py`). At most one extra embedding call per search, and only when an image is hit
+- Attached files (since 0.8.4): when the message attached files, `AgentContext.attached_documents` holds their ids and `search_with_graph` (`app/agents/docs/tools.py`) searches exactly those ids first (`search_user_chunks(..., document_ids=...)`, filtered by `user_id`). The name, entity and card scopes run only when that finds nothing. Names alone are not enough: two uploads can share a name, and short names never match. The prefetch search follows the same rule
+- The ids reach the docs agent however it runs: directly, through the orchestrator's ask or handoff, in team mode, and on a remote agent server (`RemoteAgent` sends `asdict(context)`). `tests/test_remote.py` checks that the ids reach the server's request; the server's rebuild of the context is not checked by that test
 
 ### Citations
 

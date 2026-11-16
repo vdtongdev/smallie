@@ -371,3 +371,23 @@ Versions are `major.minor.patch`: the major version stays 0 for now, each minor 
   - Reading cost: about +$0.0001 per image on Gemini 2.5 Flash ($0.00125 against $0.00114)
   - Limit: with a reading stored before 0.8.3 (flat text, no table), the model condenses the timings table, e.g. "tRAS: 50, 52" instead of one value per profile, and may skip fields. Uploading the image again gives the new table format; for older files run the re-chunk step below
   - Operator notes: redeploy the docs agent service (its prompts and middleware changed) and the orchestrator's app (the router). Run `uv run python -m scripts.rechunk_images` once after deploying, with the app stopped: it rebuilds stored image chunks in the labelled form and re-embeds them, with no model calls (`DEPLOYING.md`, section 3)
+
+## 0.8.4 - Images in chat and Documents pop-up
+- **Attach images in the chat** (`frontend/src/features/chat/Composer.tsx`): a paperclip button, paste, or drop adds PNG, JPG, JPEG or WEBP files to your message, up to 5
+  - Each attachment is uploaded as a normal Documents file and read the same way; its chip shows "reading…", and Send waits until every attachment is ready
+  - The docs agent searches the attached files first, so two files with the same name are not mixed up
+  - The message gets an `Attached: <names>` line, so the agents know which file you mean; a later message can still ask about the file by name
+  - An attachment that could not be read (failed, or "not read: set an image model in Settings") is not sent; a team question waiting for your answer refuses attachments
+- **Image previews in messages** (`app/features/documents/stored_images.py`, `app/api/routes_conversations.py`): your message shows the attached images as thumbnails, also after a reload; click one to open it full size
+  - For each uploaded image file, a shrunk copy (up to 1600 px) and a 256 px thumbnail are kept in a new table, `document_images`, deleted with the file
+  - About 150–300 KB per image file, so 500 photos take about 100 MB of the database
+  - Only the owner can load them (`GET /api/documents/{id}/image?size=thumb|full`); the agent servers' database role cannot read them
+  - A deleted file shows "image deleted" in its old messages
+- **Documents pop-up** (`frontend/src/features/documents/`): the upload strip above the chat is replaced by a folder button showing the file count
+  - Left: every file with its status, chunks and images; right: a drop zone and an Upload files button
+  - File sizes are not shown
+- **Limits**
+  - Image files uploaded before 0.8.4 were never kept, so their messages show "no preview"; their readings still work
+  - Images inside PDF and DOCX files, and scanned PDF pages, are not shown in chat; only uploaded image files get a preview
+  - No new model calls: each image is read once at upload, as in 0.8.1–0.8.3
+  - Operator notes: a new table is created at startup; redeploy all four agent services (`DEPLOYING.md`, section 3)

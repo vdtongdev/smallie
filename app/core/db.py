@@ -14,6 +14,7 @@ from sqlalchemy import (
     Identity,
     Index,
     Integer,
+    LargeBinary,
     MetaData,
     String,
     Table,
@@ -101,6 +102,18 @@ documents = Table(
     Column("images_unread", Integer, nullable=False, server_default="0"),  # images found but not read
     Column("summary", Text),  # "<doc type>: <one line>" from the document card (app/features/documents/card.py)
     Column("card_embedding", Vector(get_settings().embed_dim)),  # of "<filename>: <summary>", ranks files for a search
+    Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
+)
+
+# The shrunk copy of an image file and its thumbnail (app/features/documents/stored_images.py),
+# served to the owner only. Not in READER_TABLES: agent servers never read it.
+document_images = Table(
+    "document_images",
+    metadata,
+    Column("document_id", String(36), ForeignKey("documents.id", ondelete="CASCADE"), primary_key=True),
+    Column("user_id", String(64), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False),
+    Column("image", LargeBinary, nullable=False),  # the JPEG of at most 1600 px that the model read
+    Column("thumb", LargeBinary, nullable=False),  # JPEG, longest side 256 px
     Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
 )
 

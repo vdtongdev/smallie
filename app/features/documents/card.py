@@ -12,9 +12,10 @@ from pydantic import BaseModel, Field
 from app.core.graph import save_card
 from app.core.llm import ask_structured, get_chat_model
 from app.core.usage import UsageCounter, add_usage
-from app.features.documents.images import images_in, read_images
+from app.features.documents.images import IMAGE_SUFFIXES, images_in, read_images
 from app.features.documents.ingest import image_chunks, index_document, ingest_document
 from app.features.documents.prompts import CARD_PROMPT
+from app.features.documents.stored_images import save_image
 
 log = logging.getLogger(__name__)
 
@@ -56,7 +57,13 @@ async def index_file(document_id: str, user_id: str, path: Path, filename: str, 
             readings = [None] * len(found)
     chunks = image_chunks(readings, [page for page, _ in found], filename)
     read = sum(1 for r in readings if r and r.strip())
-    return await asyncio.to_thread(index_document, document_id, user_id, text_chunks, chunks, read, len(found) - read)
+    indexed = await asyncio.to_thread(index_document, document_id, user_id, text_chunks, chunks, read, len(found) - read)
+    if indexed and found and path.suffix.lower() in IMAGE_SUFFIXES:  # ready: keep the picture for the chat and the pop-up
+        try:
+            await asyncio.to_thread(save_image, document_id, user_id, found[0][1])
+        except Exception:  # noqa: BLE001 - a missing preview must not fail an indexed file
+            log.exception("Storing the image of %s failed", filename)
+    return indexed
 
 
 async def process_document(store: BaseStore, document_id: str, user_id: str, path: Path, filename: str) -> None:

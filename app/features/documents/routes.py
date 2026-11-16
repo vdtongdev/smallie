@@ -1,19 +1,21 @@
 import shutil
 import uuid
 from pathlib import Path
+from typing import Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, UploadFile
-from sqlalchemy import delete, select
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, UploadFile
+from sqlalchemy import delete, exists, select
 
 from app.core.auth import get_current_user
 from app.core.config import get_settings
-from app.core.db import documents, get_engine
+from app.core.db import document_images, documents, get_engine
 from app.core.graph import drop_orphans
 from app.core.model_settings import load_settings
 from app.core.snapshot import clear_snapshots
 from app.features.documents.card import process_document
 from app.features.documents.ingest import SUPPORTED_SUFFIXES, delete_document_chunks
 from app.features.documents.images import IMAGE_SUFFIXES
+from app.features.documents.stored_images import load_image
 
 router = APIRouter(tags=["documents"])
 
@@ -61,9 +63,18 @@ def upload(files: list[UploadFile], background: BackgroundTasks, request: Reques
 def list_documents(user_id: str = Depends(get_current_user)):
     with get_engine().connect() as conn:
         rows = conn.execute(
-            select(*_PUBLIC_COLUMNS).where(documents.c.user_id == user_id).order_by(documents.c.created_at.desc())
+            select(*_PUBLIC_COLUMNS, exists().where(document_images.c.document_id == documents.c.id).label("has_image"))
+            .where(documents.c.user_id == user_id).order_by(documents.c.created_at.desc())
         ).mappings().all()
     return [dict(r) for r in rows]
+
+
+@router.get("/documents/{document_id}/image")
+def image(document_id: str, size: Literal["thumb", "full"] = "full", user_id: str = Depends(get_current_user)):
+    data = load_image(user_id, document_id, size)
+    if data is None:
+        raise HTTPException(404, "Image not found")
+    return Response(data, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
 
 
 @router.delete("/documents/{document_id}", status_code=204)

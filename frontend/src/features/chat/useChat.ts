@@ -5,7 +5,7 @@ import { api, ApiError, postJson, unauthorized } from '@/lib/api'
 import { turnsFromHistory, type HistoryMessage } from '@/lib/history'
 import { readEvents } from '@/lib/stream'
 import { endTurn, newTurn, reduceTurn, type Turn } from '@/lib/turn'
-import type { Conversation, Usage } from '@/lib/types'
+import type { Attachment, Conversation, Usage } from '@/lib/types'
 import { localGet, localSet } from '@/lib/storage'
 
 export type Chat = ReturnType<typeof useChat>
@@ -110,9 +110,9 @@ export function useChat() {
   }, [uid])
 
   const send = useCallback(
-    async (text: string) => {
+    async (text: string, attachments: Attachment[] = []) => {
       const message = text.trim()
-      if (busyRef.current || !message) return
+      if (busyRef.current || (!message && attachments.length === 0)) return
       busyRef.current = true
       setBusy(true)
       const run = epoch.current
@@ -127,7 +127,7 @@ export function useChat() {
         if (epoch.current === run) setTurns((prev) => [...prev.slice(0, -1), next])
       }
       try {
-        const res = await postJson(`/chat/${kind}`, { message, conversation_id: currentRef.current })
+        const res = await postJson(`/chat/${kind}`, { message, conversation_id: currentRef.current, attachments: attachments.map((a) => a.id) })
         if (res.status === 401) {
           unauthorized()
           return

@@ -51,7 +51,7 @@ test('send streams tokens into one turn and remembers the conversation', async (
   expect(result.current.usage?.chat.output_tokens).toBe(2)
   expect(result.current.busy).toBe(false)
   const post = calls.find((c) => c.method === 'POST')!
-  expect(JSON.parse(post.init!.body as string)).toEqual({ message: 'hi', conversation_id: null })
+  expect(JSON.parse(post.init!.body as string)).toEqual({ message: 'hi', conversation_id: null, attachments: [] })
 })
 
 test('blank text is not sent', async () => {
@@ -238,4 +238,15 @@ test('open does nothing while a reply streams', async () => {
   expect(result.current.currentId).toBe(null)
   g.release()
   await act(() => first)
+})
+
+test('send posts the attachment ids, and an image alone may have no text', async () => {
+  const calls = installFetch({ 'POST /api/chat/auto': () => sseResponse([{ type: 'conversation', id: 'c1' }, { type: 'done' }]) })
+  const { result } = await setup()
+  await act(() => result.current.send('', [{ id: 'd1', filename: 'a.png', preview: 'p' }]))
+  const post = calls.find((c) => c.method === 'POST')!
+  expect(JSON.parse(post.init!.body as string)).toEqual({ message: '', conversation_id: null, attachments: ['d1'] })
+  await act(() => result.current.send('next'))
+  const last = calls.filter((c) => c.method === 'POST').at(-1)!
+  expect(JSON.parse(last.init!.body as string).attachments).toEqual([])
 })

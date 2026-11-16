@@ -91,6 +91,7 @@ test('a reloaded paused team chat shows the question as pending and the reply go
   expect(JSON.parse(calls.find((c) => c.method === 'POST')!.init!.body as string)).toEqual({
     message: '30',
     conversation_id: 't',
+    attachments: [],
   })
   expect(screen.queryByText(en.waitingForYou)).toBeNull()
   expect(screen.getByPlaceholderText(en.placeholder)).toBeInTheDocument()
